@@ -1,14 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { Users, Plus, Trash2, Mail, Phone, Tag, Check, PackagePlus, BookOpen } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Users, Plus, Trash2, Mail, Phone, Tag, Check, PackagePlus, BookOpen, GitMerge } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
+import { useToast } from '../toast/ToastContext';
+import { normalizePartyName } from '../utils/aging';
 
 export default function CustomerManager({ currencySymbol = 'Rs.' }) {
+  const toast = useToast();
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerRates, setCustomerRates] = useState([]);
   const [ledger, setLedger] = useState(null);
+  const [partyFilter, setPartyFilter] = useState('all');
 
   // Form State for new customer
   const [name, setName] = useState('');
@@ -16,10 +20,17 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [taxId, setTaxId] = useState('');
+  const [partyType, setPartyType] = useState('customer');
   const [payeeBankName, setPayeeBankName] = useState('');
   const [payeeAccountTitle, setPayeeAccountTitle] = useState('');
   const [payeeAccountNumber, setPayeeAccountNumber] = useState('');
   const [payeePaymentNotes, setPayeePaymentNotes] = useState('');
+
+  // Merge tool
+  const [mergePrimary, setMergePrimary] = useState('');
+  const [mergeDupes, setMergeDupes] = useState([]);
+  const [mergeConfirm, setMergeConfirm] = useState('');
+  const [merging, setMerging] = useState(false);
 
   // Form State for existing catalog custom rate
   const [rateProductId, setRateProductId] = useState('');
@@ -98,6 +109,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
           phone,
           address,
           tax_id: taxId,
+          party_type: partyType,
           payee_bank_name: payeeBankName,
           payee_account_title: payeeAccountTitle,
           payee_account_number: payeeAccountNumber,
@@ -110,26 +122,87 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
         setPhone('');
         setAddress('');
         setTaxId('');
+        setPartyType('customer');
         setPayeeBankName('');
         setPayeeAccountTitle('');
         setPayeeAccountNumber('');
         setPayeePaymentNotes('');
+        toast.success('Client profile saved');
         apiFetchCustomers();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || 'Could not save client');
       }
     } catch (err) {
-      alert('Error adding customer: ' + err.message);
+      toast.error('Error adding customer: ' + err.message);
     }
   };
 
   const handleDeleteCustomer = async (id) => {
+    if (!window.confirm('Delete this client profile?')) return;
     try {
       const res = await apiFetch(`/api/customers/${id}`, { method: 'DELETE' });
       if (res.ok) {
         if (selectedCustomer?.id === id) setSelectedCustomer(null);
+        toast.success('Client deleted');
         apiFetchCustomers();
       }
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
+    }
+  };
+
+  const filteredCustomers = useMemo(() => {
+    if (partyFilter === 'all') return customers;
+    return customers.filter((c) => (c.party_type === 'supplier' ? 'supplier' : 'customer') === partyFilter);
+  }, [customers, partyFilter]);
+
+  const mergeSuggestions = useMemo(() => {
+    const map = new Map();
+    for (const c of customers) {
+      const key = normalizePartyName(c.name);
+      if (!key) continue;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(c);
+    }
+    return [...map.values()].filter((g) => g.length > 1);
+  }, [customers]);
+
+  const toggleMergeDupe = (id) => {
+    setMergeDupes((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const handleMerge = async () => {
+    if (!mergePrimary || !mergeDupes.length) {
+      toast.error('Pick a primary and at least one duplicate');
+      return;
+    }
+    if (mergeConfirm.trim() !== 'MERGE') {
+      toast.error('Type MERGE to confirm');
+      return;
+    }
+    setMerging(true);
+    try {
+      const res = await apiFetch('/api/customers/merge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          primaryId: Number(mergePrimary),
+          duplicateIds: mergeDupes.map(Number),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      toast.success(`Merged ${data.merged || mergeDupes.length} duplicate(s)`);
+      setMergePrimary('');
+      setMergeDupes([]);
+      setMergeConfirm('');
+      setSelectedCustomer(null);
+      apiFetchCustomers();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setMerging(false);
     }
   };
 
@@ -160,7 +233,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
         setTimeout(() => setRateMsg(''), 3000);
       }
     } catch (err) {
-      alert('Error saving rate: ' + err.message);
+      toast.error('Error saving rate: ' + err.message);
     }
   };
 
@@ -210,7 +283,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
         apiFetchCustomerRates(selectedCustomer.id);
       }
     } catch (err) {
-      alert('Error creating product for client: ' + err.message);
+      toast.error('Error creating product for client: ' + err.message);
     }
   };
 
@@ -223,7 +296,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
         apiFetchCustomerRates(selectedCustomer.id);
       }
     } catch (err) {
-      alert('Error deleting rate: ' + err.message);
+      toast.error('Error deleting rate: ' + err.message);
     }
   };
 
@@ -239,6 +312,14 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
           <div className="form-group">
             <label className="form-label">Client / Company Name *</label>
             <input className="form-input" type="text" placeholder="e.g. Peshawar Retail Client" value={name} onChange={(e) => setName(e.target.value)} required />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Party type</label>
+            <select className="form-select" value={partyType} onChange={(e) => setPartyType(e.target.value)}>
+              <option value="customer">Customer (sale / retail)</option>
+              <option value="supplier">Supplier (Saudia / buying)</option>
+            </select>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -284,15 +365,31 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
           </button>
         </form>
 
-        {/* Customer Directory */}
         <div className="glass-panel" style={{ padding: '1.5rem' }}>
-          <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '1rem' }}>Saved Client Directory</h3>
-          {customers.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)' }}>No clients saved yet.</p>
+          <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '0.75rem' }}>Saved Client Directory</h3>
+          <div className="party-filter-row">
+            {[
+              ['all', 'All'],
+              ['customer', 'Customers'],
+              ['supplier', 'Suppliers'],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={`party-filter-chip ${partyFilter === key ? 'active' : ''}`}
+                onClick={() => setPartyFilter(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {filteredCustomers.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)' }}>No clients in this filter.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '420px', overflowY: 'auto' }}>
-              {customers.map((c) => {
+              {filteredCustomers.map((c) => {
                 const isSelected = selectedCustomer?.id === c.id;
+                const pt = c.party_type === 'supplier' ? 'supplier' : 'customer';
                 return (
                   <div
                     key={c.id}
@@ -311,8 +408,9 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
                     }}
                   >
                     <div>
-                      <h4 style={{ fontWeight: 800, fontSize: '0.95rem', color: isSelected ? 'var(--accent-teal)' : 'var(--text-primary)' }}>
+                      <h4 style={{ fontWeight: 800, fontSize: '0.95rem', color: isSelected ? 'var(--accent-teal)' : 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                         {c.name}
+                        <span className={`type-badge ${pt}`}>{pt === 'supplier' ? 'Supplier' : 'Customer'}</span>
                       </h4>
                       {c.phone && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}><Phone size={12} /> {c.phone}</div>}
                       {c.email && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}><Mail size={12} /> {c.email}</div>}
@@ -343,6 +441,55 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="glass-panel" style={{ padding: '1.5rem' }}>
+        <h3 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.55rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <GitMerge size={18} /> Merge duplicate clients
+        </h3>
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+          Reassign bills, rates, and advances to the primary profile, then delete duplicates. Type MERGE to confirm.
+        </p>
+        {mergeSuggestions.length > 0 && (
+          <div style={{ marginBottom: '0.75rem', fontSize: '0.8rem', color: 'var(--warning)' }}>
+            Suggested pairs: {mergeSuggestions.map((g) => g.map((c) => c.name).join(' / ')).join(' · ')}
+          </div>
+        )}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
+          <div className="form-group">
+            <label className="form-label">Primary (keep)</label>
+            <select className="form-select" value={mergePrimary} onChange={(e) => setMergePrimary(e.target.value)}>
+              <option value="">— Select —</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Duplicates (remove)</label>
+            <div style={{ maxHeight: 140, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              {customers
+                .filter((c) => String(c.id) !== String(mergePrimary))
+                .map((c) => (
+                  <label key={c.id} style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', fontSize: '0.85rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={mergeDupes.includes(c.id)}
+                      onChange={() => toggleMergeDupe(c.id)}
+                    />
+                    {c.name}
+                  </label>
+                ))}
+            </div>
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Type MERGE</label>
+          <input className="form-input" value={mergeConfirm} onChange={(e) => setMergeConfirm(e.target.value)} placeholder="MERGE" autoComplete="off" />
+        </div>
+        <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={merging} onClick={handleMerge}>
+          <GitMerge size={16} /> Merge now
+        </button>
       </div>
 
       {/* Client Product & Negotiated Rates Manager */}
