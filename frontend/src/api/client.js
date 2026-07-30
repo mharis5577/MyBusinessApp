@@ -16,15 +16,18 @@ export function useLocalData() {
   return isNativeCapacitor();
 }
 
-function makeResponse(status, data, asText = false) {
-  const bodyText = asText
-    ? typeof data === 'string'
-      ? data
-      : JSON.stringify(data, null, 2)
-    : JSON.stringify(data);
+function makeResponse(status, data) {
+  const bodyText = typeof data === 'string' ? data : JSON.stringify(data);
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: {
+      get(name) {
+        const key = String(name || '').toLowerCase();
+        if (key === 'content-type') return 'application/json';
+        return null;
+      },
+    },
     async json() {
       if (typeof data === 'string') {
         try {

@@ -223,10 +223,10 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   };
 
   const parseJsonSafe = async (res) => {
-    const contentType = res.headers.get('content-type') || '';
+    const contentType = res?.headers?.get?.('content-type') || '';
     const text = await res.text();
     if (!text) return null;
-    if (contentType.includes('application/json')) {
+    if (contentType.includes('application/json') || text.trim().startsWith('{') || text.trim().startsWith('[')) {
       try {
         return JSON.parse(text);
       } catch {

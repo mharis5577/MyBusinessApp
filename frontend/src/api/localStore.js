@@ -134,6 +134,15 @@ function parsePath(url) {
  * Handle a local API request. Returns { status, data }.
  */
 export async function handleLocalRequest(url, options = {}) {
+  try {
+    return await handleLocalRequestInner(url, options);
+  } catch (err) {
+    console.error('Local store error:', err);
+    return jsonErr(err?.message || 'Local storage error', 500);
+  }
+}
+
+async function handleLocalRequestInner(url, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   let body = options.body;
   if (typeof body === 'string') {
@@ -150,6 +159,7 @@ export async function handleLocalRequest(url, options = {}) {
   // Expect /api/...
   if (parts[0] !== 'api') return jsonErr('Not found', 404);
   const db = await ensureSeeded();
+  if (!db) return jsonErr('Could not open on-device database', 500);
 
   // SETTINGS
   if (parts[1] === 'settings' && parts.length === 2) {
