@@ -6,7 +6,11 @@ import { openDB } from 'idb';
 import { pakistanToday } from '../utils/pakistan';
 
 const DB_NAME = 'elite-chocolate-pos';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+
+function normalizePartyType(value) {
+  return value === 'supplier' ? 'supplier' : 'customer';
+}
 
 const DEFAULT_SETTINGS = {
   id: 1,
@@ -62,12 +66,22 @@ async function getDb() {
   });
 }
 
+async function ensurePartyTypes(db) {
+  const customers = await db.getAll('customers');
+  for (const c of customers) {
+    if (c.party_type !== 'customer' && c.party_type !== 'supplier') {
+      await db.put('customers', { ...c, party_type: 'customer' });
+    }
+  }
+}
+
 async function ensureSeeded() {
   const db = await getDb();
   const existing = await db.get('settings', 1);
   if (!existing) {
     await db.put('settings', { ...DEFAULT_SETTINGS });
   }
+  await ensurePartyTypes(db);
   return db;
 }
 
@@ -314,10 +328,81 @@ async function handleLocalRequestInner(url, options = {}) {
 
   // CUSTOMERS
   if (parts[1] === 'customers') {
+    // Merge duplicates: POST /api/customers/merge
+    if (parts.length === 3 && parts[2] === 'merge' && method === 'POST') {
+      const primaryId = Number(body.primaryId);
+      const duplicateIds = Array.isArray(body.duplicateIds)
+        ? body.duplicateIds.map(Number).filter((id) => id && id !== primaryId)
+        : [];
+      if (!primaryId) return jsonErr('primaryId is required');
+      if (!duplicateIds.length) return jsonErr('duplicateIds required');
+      const primary = await db.get('customers', primaryId);
+      if (!primary) return jsonErr('Primary customer not found', 404);
+
+      let merged = { ...primary };
+      for (const dupId of duplicateIds) {
+        const dup = await db.get('customers', dupId);
+        if (!dup) continue;
+        merged = {
+          ...merged,
+          email: (merged.email || '').trim() || dup.email || '',
+          phone: (merged.phone || '').trim() || dup.phone || '',
+          address: (merged.address || '').trim() || dup.address || '',
+          tax_id: (merged.tax_id || '').trim() || dup.tax_id || '',
+          payee_bank_name: (merged.payee_bank_name || '').trim() || dup.payee_bank_name || '',
+          payee_account_title: (merged.payee_account_title || '').trim() || dup.payee_account_title || '',
+          payee_account_number: (merged.payee_account_number || '').trim() || dup.payee_account_number || '',
+          payee_payment_notes: (merged.payee_payment_notes || '').trim() || dup.payee_payment_notes || '',
+          party_type:
+            normalizePartyType(merged.party_type) === 'supplier' ||
+            normalizePartyType(dup.party_type) === 'supplier'
+              ? 'supplier'
+              : 'customer',
+        };
+        await db.put('customers', merged);
+
+        const bills = await db.getAll('bills');
+        for (const b of bills) {
+          if (String(b.customer_name || '').trim().toLowerCase() === String(dup.name || '').trim().toLowerCase()) {
+            await db.put('bills', { ...b, customer_name: merged.name });
+          }
+        }
+        const advances = await db.getAll('advances');
+        for (const a of advances) {
+          if (String(a.client_name || '').trim().toLowerCase() === String(dup.name || '').trim().toLowerCase()) {
+            await db.put('advances', { ...a, client_name: merged.name });
+          }
+        }
+        const rates = await db.getAll('rates');
+        for (const r of rates) {
+          if (r.customer_id !== dupId) continue;
+          const existing = rates.find(
+            (x) => x.customer_id === primaryId && x.product_id === r.product_id
+          );
+          if (!existing) {
+            const id = await nextId(db, 'rates');
+            await db.put('rates', {
+              id,
+              customer_id: primaryId,
+              product_id: r.product_id,
+              custom_price: r.custom_price || 0,
+            });
+          }
+          await db.delete('rates', r.id);
+        }
+        await db.delete('customers', dupId);
+      }
+      const customer = await db.get('customers', primaryId);
+      return jsonOk({ success: true, customer, merged: duplicateIds.length });
+    }
+
     if (parts.length === 2 && method === 'GET') {
-      const customers = (await db.getAll('customers')).sort((a, b) =>
-        String(a.name).localeCompare(String(b.name))
-      );
+      const type = String(search.get('type') || '').trim();
+      let customers = await db.getAll('customers');
+      if (type === 'customer' || type === 'supplier') {
+        customers = customers.filter((c) => normalizePartyType(c.party_type) === type);
+      }
+      customers.sort((a, b) => String(a.name).localeCompare(String(b.name)));
       return jsonOk(customers);
     }
     if (parts.length === 2 && method === 'POST') {
@@ -330,6 +415,7 @@ async function handleLocalRequestInner(url, options = {}) {
         phone: body.phone || '',
         address: body.address || '',
         tax_id: body.tax_id || '',
+        party_type: normalizePartyType(body.party_type),
         payee_bank_name: body.payee_bank_name || '',
         payee_account_title: body.payee_account_title || '',
         payee_account_number: body.payee_account_number || '',
@@ -350,6 +436,10 @@ async function handleLocalRequestInner(url, options = {}) {
         phone: body.phone ?? existing.phone ?? '',
         address: body.address ?? existing.address ?? '',
         tax_id: body.tax_id ?? existing.tax_id ?? '',
+        party_type:
+          body.party_type !== undefined
+            ? normalizePartyType(body.party_type)
+            : normalizePartyType(existing.party_type),
         payee_bank_name: body.payee_bank_name ?? existing.payee_bank_name ?? '',
         payee_account_title: body.payee_account_title ?? existing.payee_account_title ?? '',
         payee_account_number: body.payee_account_number ?? existing.payee_account_number ?? '',
@@ -610,20 +700,17 @@ async function handleLocalRequestInner(url, options = {}) {
           phone: body.customer_phone || '',
           address: body.customer_address || '',
           tax_id: '',
+          party_type: bType,
           payee_bank_name: body.payee_bank_name || '',
           payee_account_title: body.payee_account_title || '',
           payee_account_number: body.payee_account_number || '',
           payee_payment_notes: body.payee_payment_notes || '',
           created_at: new Date().toISOString(),
         });
-      } else if (
-        body.payee_bank_name ||
-        body.payee_account_title ||
-        body.payee_account_number ||
-        body.payee_payment_notes
-      ) {
+      } else {
         await db.put('customers', {
           ...existingCust,
+          party_type: bType,
           payee_bank_name: body.payee_bank_name || existingCust.payee_bank_name || '',
           payee_account_title: body.payee_account_title || existingCust.payee_account_title || '',
           payee_account_number: body.payee_account_number || existingCust.payee_account_number || '',
@@ -885,6 +972,56 @@ async function handleLocalRequestInner(url, options = {}) {
     });
   }
 
+  // AGING REPORT
+  if (parts[1] === 'reports' && parts[2] === 'aging' && method === 'GET') {
+    const today = pakistanToday();
+    const bills = await db.getAll('bills');
+    const buckets = { current: [], d30: [], d60: [], d90: [] };
+    const totals = { current: 0, d30: 0, d60: 0, d90: 0, all: 0 };
+    const rows = [];
+    const dayDiff = (from, to) => {
+      const [y1, m1, d1] = String(from).split('-').map(Number);
+      const [y2, m2, d2] = String(to).split('-').map(Number);
+      if (!y1 || !y2) return 0;
+      return Math.floor((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000);
+    };
+    for (const raw of bills) {
+      if ((raw.bill_type || 'customer') === 'supplier') continue;
+      if (raw.status === 'paid') continue;
+      const bill = enrichBill({ ...raw });
+      const balance = Number(bill.balance_due) || 0;
+      if (balance <= 0) continue;
+      const anchor = bill.due_date || bill.bill_date || today;
+      const days_overdue = Math.max(0, dayDiff(anchor, today));
+      let aging_bucket = 'current';
+      if (days_overdue >= 90) aging_bucket = 'd90';
+      else if (days_overdue >= 60) aging_bucket = 'd60';
+      else if (days_overdue >= 30) aging_bucket = 'd30';
+      const row = {
+        id: bill.id,
+        invoice_number: bill.invoice_number,
+        customer_name: bill.customer_name,
+        customer_phone: bill.customer_phone || '',
+        bill_date: bill.bill_date,
+        due_date: bill.due_date,
+        total_amount: bill.total_amount,
+        amount_paid: bill.amount_paid,
+        balance_due: balance,
+        status: bill.status,
+        days_overdue,
+        aging_bucket,
+        bill_type: bill.bill_type || 'customer',
+      };
+      rows.push(row);
+      buckets[aging_bucket].push(row);
+      totals[aging_bucket] += balance;
+      totals.all += balance;
+    }
+    rows.sort((a, b) => b.days_overdue - a.days_overdue);
+    for (const k of Object.keys(totals)) totals[k] = Math.round(totals[k] * 100) / 100;
+    return jsonOk({ today, rows, buckets, totals, count: rows.length });
+  }
+
   // BACKUP
   if (parts[1] === 'backup' && method === 'GET') {
     const payload = {
@@ -918,7 +1055,12 @@ async function handleLocalRequestInner(url, options = {}) {
     ]) {
       await db.clear(store);
     }
-    for (const c of data.customers || []) await db.put('customers', c);
+    for (const c of data.customers || []) {
+      await db.put('customers', {
+        ...c,
+        party_type: c.party_type === 'supplier' ? 'supplier' : 'customer',
+      });
+    }
     for (const p of data.products || []) await db.put('products', p);
     for (const b of data.bills || []) await db.put('bills', b);
     for (const i of data.bill_items || []) await db.put('bill_items', i);
@@ -932,14 +1074,60 @@ async function handleLocalRequestInner(url, options = {}) {
     return jsonOk({ success: true, message: 'Backup restored successfully' });
   }
 
-  // CASHFLOW (optional stub for compatibility)
+  // CASHFLOW (live from bills + advances — mirrors Express)
   if (parts[1] === 'cashflow' && method === 'GET') {
+    const bills = await db.getAll('bills');
+    const advances = (await db.getAll('advances')).sort(
+      (a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)
+    );
+    const sales = bills.filter((b) => b.bill_type !== 'supplier');
+    const buying = bills.filter((b) => b.bill_type === 'supplier');
+    const total_sales = sales.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const buying_cost = buying.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const paid_sales = sales
+      .filter((b) => b.status === 'paid')
+      .reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const pending_sales = sales
+      .filter((b) => b.status === 'pending')
+      .reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const total_advance = advances.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+    const net_profit = total_sales - buying_cost;
+    const net_balance = net_profit - total_advance;
+
+    const recent = [...bills].sort((a, b) => {
+      const d = String(b.bill_date || '').localeCompare(String(a.bill_date || ''));
+      if (d !== 0) return d;
+      return (Number(b.id) || 0) - (Number(a.id) || 0);
+    }).slice(0, 80);
+
+    const money_flow = recent.map((b) => {
+      const isSupplier = b.bill_type === 'supplier';
+      const amount = Number(b.total_amount) || 0;
+      return {
+        id: b.id,
+        date: b.bill_date,
+        invoice_number: b.invoice_number,
+        selling: isSupplier ? 0 : amount,
+        buying: isSupplier ? amount : 0,
+        expenditure: 0,
+        profit: isSupplier ? -amount : amount,
+        comment: `${isSupplier ? 'Buying' : 'Sale'} · ${b.customer_name}${b.notes ? ` · ${b.notes}` : ''} (${b.status})`,
+        bill_type: b.bill_type || 'customer',
+        status: b.status,
+      };
+    });
+
     return jsonOk({
-      total_sales: 0,
-      buying_cost: 0,
-      net_profit: 0,
-      advances: [],
-      money_flow: [],
+      total_sales,
+      buying_cost,
+      expenditure: 0,
+      net_profit,
+      total_advance,
+      net_balance,
+      paid_sales,
+      pending_sales,
+      advances,
+      money_flow,
     });
   }
 

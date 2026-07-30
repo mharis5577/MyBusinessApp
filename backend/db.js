@@ -101,6 +101,23 @@ function initTables() {
     db.run(`ALTER TABLE customers ADD COLUMN payee_account_title TEXT DEFAULT ''`, () => {});
     db.run(`ALTER TABLE customers ADD COLUMN payee_account_number TEXT DEFAULT ''`, () => {});
     db.run(`ALTER TABLE customers ADD COLUMN payee_payment_notes TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE customers ADD COLUMN party_type TEXT DEFAULT 'customer'`, () => {
+      // One-time backfill: parties that only appear on supplier bills → supplier
+      db.run(
+        `UPDATE customers SET party_type = 'supplier'
+         WHERE COALESCE(NULLIF(TRIM(party_type), ''), 'customer') = 'customer'
+           AND EXISTS (
+             SELECT 1 FROM bills b
+             WHERE LOWER(TRIM(b.customer_name)) = LOWER(TRIM(customers.name))
+               AND b.bill_type = 'supplier'
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM bills b2
+             WHERE LOWER(TRIM(b2.customer_name)) = LOWER(TRIM(customers.name))
+               AND COALESCE(b2.bill_type, 'customer') != 'supplier'
+           )`
+      );
+    });
 
     // Products / Services Catalog Table
     db.run(`

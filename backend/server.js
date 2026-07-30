@@ -142,9 +142,24 @@ app.put('/api/settings', async (req, res) => {
 // -------------------------------------------------------------
 // CUSTOMERS ENDPOINTS
 // -------------------------------------------------------------
+function normalizePartyType(value) {
+  return value === 'supplier' ? 'supplier' : 'customer';
+}
+
 app.get('/api/customers', async (req, res) => {
   try {
-    const customers = await dbAll('SELECT * FROM customers ORDER BY name ASC');
+    const type = String(req.query.type || '').trim();
+    let customers;
+    if (type === 'customer' || type === 'supplier') {
+      customers = await dbAll(
+        `SELECT * FROM customers
+         WHERE COALESCE(NULLIF(TRIM(party_type), ''), 'customer') = ?
+         ORDER BY name ASC`,
+        [type]
+      );
+    } else {
+      customers = await dbAll('SELECT * FROM customers ORDER BY name ASC');
+    }
     res.json(customers);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -159,6 +174,7 @@ app.post('/api/customers', async (req, res) => {
       phone,
       address,
       tax_id,
+      party_type,
       payee_bank_name,
       payee_account_title,
       payee_account_number,
@@ -166,17 +182,19 @@ app.post('/api/customers', async (req, res) => {
     } = req.body;
     if (!name) return res.status(400).json({ error: 'Customer name is required' });
 
+    const partyType = normalizePartyType(party_type);
     const result = await dbRun(
       `INSERT INTO customers (
-        name, email, phone, address, tax_id,
+        name, email, phone, address, tax_id, party_type,
         payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         email || '',
         phone || '',
         address || '',
         tax_id || '',
+        partyType,
         payee_bank_name || '',
         payee_account_title || '',
         payee_account_number || '',
@@ -203,15 +221,21 @@ app.put('/api/customers/:id', async (req, res) => {
       phone,
       address,
       tax_id,
+      party_type,
       payee_bank_name,
       payee_account_title,
       payee_account_number,
       payee_payment_notes,
     } = req.body;
 
+    const partyType =
+      party_type !== undefined
+        ? normalizePartyType(party_type)
+        : normalizePartyType(existing.party_type);
+
     await dbRun(
       `UPDATE customers SET
-        name = ?, email = ?, phone = ?, address = ?, tax_id = ?,
+        name = ?, email = ?, phone = ?, address = ?, tax_id = ?, party_type = ?,
         payee_bank_name = ?, payee_account_title = ?, payee_account_number = ?, payee_payment_notes = ?
        WHERE id = ?`,
       [
@@ -220,6 +244,7 @@ app.put('/api/customers/:id', async (req, res) => {
         phone ?? existing.phone ?? '',
         address ?? existing.address ?? '',
         tax_id ?? existing.tax_id ?? '',
+        partyType,
         payee_bank_name ?? existing.payee_bank_name ?? '',
         payee_account_title ?? existing.payee_account_title ?? '',
         payee_account_number ?? existing.payee_account_number ?? '',
@@ -796,34 +821,32 @@ app.post('/api/bills', async (req, res) => {
       if (!existing) {
         await dbRun(
           `INSERT INTO customers (
-            name, email, phone, address,
+            name, email, phone, address, party_type,
             payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             customer_name.trim(),
             customer_email || '',
             customer_phone || '',
             customer_address || '',
+            bType,
             payee_bank_name || '',
             payee_account_title || '',
             payee_account_number || '',
             payee_payment_notes || '',
           ]
         );
-      } else if (
-        payee_bank_name ||
-        payee_account_title ||
-        payee_account_number ||
-        payee_payment_notes
-      ) {
+      } else {
         await dbRun(
           `UPDATE customers SET
+            party_type = ?,
             payee_bank_name = COALESCE(NULLIF(?, ''), payee_bank_name),
             payee_account_title = COALESCE(NULLIF(?, ''), payee_account_title),
             payee_account_number = COALESCE(NULLIF(?, ''), payee_account_number),
             payee_payment_notes = COALESCE(NULLIF(?, ''), payee_payment_notes)
            WHERE id = ?`,
           [
+            bType,
             payee_bank_name || '',
             payee_account_title || '',
             payee_account_number || '',
@@ -1215,9 +1238,9 @@ app.post('/api/restore', async (req, res) => {
       for (const c of data.customers || []) {
         await dbRun(
           `INSERT INTO customers (
-            id, name, email, phone, address, tax_id,
+            id, name, email, phone, address, tax_id, party_type,
             payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             c.id,
             c.name,
@@ -1225,6 +1248,7 @@ app.post('/api/restore', async (req, res) => {
             c.phone || '',
             c.address || '',
             c.tax_id || '',
+            c.party_type === 'supplier' ? 'supplier' : 'customer',
             c.payee_bank_name || '',
             c.payee_account_title || '',
             c.payee_account_number || '',
@@ -1325,6 +1349,174 @@ app.post('/api/restore', async (req, res) => {
     }
 
     res.json({ success: true, message: 'Backup restored successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// AGING REPORT (collections)
+// -------------------------------------------------------------
+app.get('/api/reports/aging', async (req, res) => {
+  try {
+    const today = pakistanToday();
+    const bills = await dbAll(
+      `SELECT * FROM bills
+       WHERE COALESCE(bill_type, 'customer') != 'supplier'
+         AND status != 'paid'
+       ORDER BY due_date ASC, id ASC`
+    );
+
+    const buckets = { current: [], d30: [], d60: [], d90: [] };
+    const totals = { current: 0, d30: 0, d60: 0, d90: 0, all: 0 };
+    const rows = [];
+
+    const dayDiff = (from, to) => {
+      const [y1, m1, d1] = String(from).split('-').map(Number);
+      const [y2, m2, d2] = String(to).split('-').map(Number);
+      if (!y1 || !y2) return 0;
+      return Math.floor((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000);
+    };
+
+    for (const bill of bills) {
+      enrichBill(bill);
+      const balance = Number(bill.balance_due) || 0;
+      if (balance <= 0) continue;
+      const anchor = bill.due_date || bill.bill_date || today;
+      const days_overdue = Math.max(0, dayDiff(anchor, today));
+      let aging_bucket = 'current';
+      if (days_overdue >= 90) aging_bucket = 'd90';
+      else if (days_overdue >= 60) aging_bucket = 'd60';
+      else if (days_overdue >= 30) aging_bucket = 'd30';
+
+      const row = {
+        id: bill.id,
+        invoice_number: bill.invoice_number,
+        customer_name: bill.customer_name,
+        customer_phone: bill.customer_phone || '',
+        bill_date: bill.bill_date,
+        due_date: bill.due_date,
+        total_amount: bill.total_amount,
+        amount_paid: bill.amount_paid,
+        balance_due: balance,
+        status: bill.status,
+        days_overdue,
+        aging_bucket,
+        bill_type: bill.bill_type || 'customer',
+      };
+      rows.push(row);
+      buckets[aging_bucket].push(row);
+      totals[aging_bucket] += balance;
+      totals.all += balance;
+    }
+
+    rows.sort((a, b) => b.days_overdue - a.days_overdue);
+    for (const k of Object.keys(totals)) {
+      totals[k] = Math.round(totals[k] * 100) / 100;
+    }
+
+    res.json({ today, rows, buckets, totals, count: rows.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// CUSTOMER MERGE
+// -------------------------------------------------------------
+app.post('/api/customers/merge', async (req, res) => {
+  try {
+    const primaryId = Number(req.body.primaryId);
+    const duplicateIds = Array.isArray(req.body.duplicateIds)
+      ? req.body.duplicateIds.map(Number).filter((id) => id && id !== primaryId)
+      : [];
+    if (!primaryId) return res.status(400).json({ error: 'primaryId is required' });
+    if (!duplicateIds.length) return res.status(400).json({ error: 'duplicateIds required' });
+
+    const primary = await dbGet('SELECT * FROM customers WHERE id = ?', [primaryId]);
+    if (!primary) return res.status(404).json({ error: 'Primary customer not found' });
+
+    await dbRun('BEGIN IMMEDIATE');
+    try {
+      for (const dupId of duplicateIds) {
+        const dup = await dbGet('SELECT * FROM customers WHERE id = ?', [dupId]);
+        if (!dup) continue;
+
+        // Fill blank primary fields from duplicate
+        await dbRun(
+          `UPDATE customers SET
+            email = COALESCE(NULLIF(TRIM(email), ''), ?),
+            phone = COALESCE(NULLIF(TRIM(phone), ''), ?),
+            address = COALESCE(NULLIF(TRIM(address), ''), ?),
+            tax_id = COALESCE(NULLIF(TRIM(tax_id), ''), ?),
+            payee_bank_name = COALESCE(NULLIF(TRIM(payee_bank_name), ''), ?),
+            payee_account_title = COALESCE(NULLIF(TRIM(payee_account_title), ''), ?),
+            payee_account_number = COALESCE(NULLIF(TRIM(payee_account_number), ''), ?),
+            payee_payment_notes = COALESCE(NULLIF(TRIM(payee_payment_notes), ''), ?),
+            party_type = CASE
+              WHEN COALESCE(NULLIF(TRIM(party_type), ''), 'customer') = 'supplier'
+                OR ? = 'supplier' THEN 'supplier'
+              ELSE COALESCE(NULLIF(TRIM(party_type), ''), 'customer')
+            END
+           WHERE id = ?`,
+          [
+            dup.email || '',
+            dup.phone || '',
+            dup.address || '',
+            dup.tax_id || '',
+            dup.payee_bank_name || '',
+            dup.payee_account_title || '',
+            dup.payee_account_number || '',
+            dup.payee_payment_notes || '',
+            dup.party_type || 'customer',
+            primaryId,
+          ]
+        );
+
+        // Reassign bills by customer name match
+        await dbRun(
+          `UPDATE bills SET customer_name = ?
+           WHERE LOWER(TRIM(customer_name)) = LOWER(TRIM(?))`,
+          [primary.name, dup.name]
+        );
+
+        // Reassign advances
+        await dbRun(
+          `UPDATE advance_payments SET client_name = ?
+           WHERE LOWER(TRIM(client_name)) = LOWER(TRIM(?))`,
+          [primary.name, dup.name]
+        );
+
+        // Merge rates: keep primary rate if conflict
+        const dupRates = await dbAll(
+          'SELECT * FROM customer_product_rates WHERE customer_id = ?',
+          [dupId]
+        );
+        for (const r of dupRates) {
+          const existing = await dbGet(
+            'SELECT * FROM customer_product_rates WHERE customer_id = ? AND product_id = ?',
+            [primaryId, r.product_id]
+          );
+          if (!existing) {
+            await dbRun(
+              `INSERT INTO customer_product_rates (customer_id, product_id, custom_price)
+               VALUES (?, ?, ?)`,
+              [primaryId, r.product_id, r.custom_price || 0]
+            );
+          }
+          await dbRun('DELETE FROM customer_product_rates WHERE id = ?', [r.id]);
+        }
+
+        await dbRun('DELETE FROM customers WHERE id = ?', [dupId]);
+      }
+      await dbRun('COMMIT');
+    } catch (e) {
+      await dbRun('ROLLBACK');
+      throw e;
+    }
+
+    const updated = await dbGet('SELECT * FROM customers WHERE id = ?', [primaryId]);
+    res.json({ success: true, customer: updated, merged: duplicateIds.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
