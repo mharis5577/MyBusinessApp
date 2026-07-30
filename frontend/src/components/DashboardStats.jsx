@@ -64,7 +64,7 @@ export default function DashboardStats({ onNavigate, currencySymbol = 'Rs.' }) {
     <div className="dashboard-page">
       <div className="glass-panel panel-hero dashboard-hero">
         <div>
-          <h2 className="dashboard-hero-title">ELITE CHOCOLATE</h2>
+          <h2 className="dashboard-hero-title">Dashboard</h2>
           <p className="dashboard-hero-sub">Create bills, track payments, and manage stock.</p>
         </div>
         <div className="hero-actions">

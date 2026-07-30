@@ -244,23 +244,23 @@ export default function App() {
 
       <nav className="mobile-bottom-nav no-print">
         <button className={`mobile-nav-item ${currentTab === 'dashboard' ? 'active' : ''}`} onClick={() => setCurrentTab('dashboard')}>
-          <LayoutDashboard size={20} />
+          <LayoutDashboard size={22} strokeWidth={2.25} />
           <span>Home</span>
         </button>
         <button className={`mobile-nav-item ${currentTab === 'create' ? 'active' : ''}`} onClick={() => setCurrentTab('create')}>
-          <PlusCircle size={20} />
+          <PlusCircle size={22} strokeWidth={2.25} />
           <span>New</span>
         </button>
         <button className={`mobile-nav-item ${currentTab === 'database' ? 'active' : ''}`} onClick={() => setCurrentTab('database')}>
-          <Database size={20} />
+          <Database size={22} strokeWidth={2.25} />
           <span>Bills</span>
         </button>
         <button className={`mobile-nav-item ${currentTab === 'catalog' ? 'active' : ''}`} onClick={() => setCurrentTab('catalog')}>
-          <Package size={20} />
+          <Package size={22} strokeWidth={2.25} />
           <span>Items</span>
         </button>
         <button className={`mobile-nav-item ${currentTab === 'customers' ? 'active' : ''}`} onClick={() => setCurrentTab('customers')}>
-          <Users size={20} />
+          <Users size={22} strokeWidth={2.25} />
           <span>Clients</span>
         </button>
       </nav>
