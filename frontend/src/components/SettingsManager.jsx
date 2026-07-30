@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Settings, Save, Trash2, Check, AlertTriangle, Download, Upload, FileBarChart2 } from 'lucide-react';
 import { formatCurrency, pakistanToday } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
+import { downloadBlob } from '../utils/downloadFile';
 
 export default function SettingsManager({ onSettingsUpdated }) {
   const [settings, setSettings] = useState({
@@ -90,14 +91,9 @@ export default function SettingsManager({ onSettingsUpdated }) {
       const res = await apiFetch('/api/backup');
       const text = await res.text();
       const blob = new Blob([text], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `elite-chocolate-backup-${pakistanToday()}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      await downloadBlob(blob, `elite-chocolate-backup-${pakistanToday()}.json`, 'application/json');
     } catch (err) {
-      alert('Backup failed: ' + err.message);
+      if (err?.name !== 'AbortError') alert('Backup failed: ' + err.message);
     }
   };
 
@@ -139,7 +135,7 @@ export default function SettingsManager({ onSettingsUpdated }) {
     }
   };
 
-  const exportReportCsv = () => {
+  const exportReportCsv = async () => {
     if (!report?.bills?.length) return;
     const headers = ['Type', 'Invoice', 'Party', 'Date', 'Total', 'Paid', 'Status'];
     const rows = report.bills.map((b) => [
@@ -153,12 +149,11 @@ export default function SettingsManager({ onSettingsUpdated }) {
     ]);
     const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `monthly-report-${report.period}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      await downloadBlob(blob, `monthly-report-${report.period}.csv`, 'text/csv');
+    } catch (err) {
+      if (err?.name !== 'AbortError') alert('Export failed: ' + err.message);
+    }
   };
 
   return (

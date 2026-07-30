@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Printer, Download, ArrowLeft, MessageSquare, Mail, ToggleLeft, Image as ImageIcon, Loader2, Copy, Banknote } from 'lucide-react';
-import html2pdf from 'html2pdf.js';
-import html2canvas from 'html2canvas';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
+import { downloadBlob, saveOrShareBlob } from '../utils/downloadFile';
+import { elementToJpegBlob, elementToPdfBlob } from '../utils/invoiceExport';
 
 function sanitizeFilename(name) {
   return String(name || 'Invoice').replace(/[^\w.-]+/g, '_');
@@ -16,17 +16,6 @@ function normalizeWhatsAppPhone(phone) {
   if (digits.startsWith('0') && digits.length === 11) return `92${digits.slice(1)}`;
   if (digits.length === 10) return `92${digits}`;
   return digits;
-}
-
-function triggerDownload(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymbol = 'Rs.', urduLabels = false }) {
@@ -68,57 +57,27 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
 
   const getInvoiceElement = () => {
     const el = document.getElementById('printable-invoice');
-    if (!el) throw new Error('Invoice preview not ready');
+    if (!el) throw new Error('Invoice preview not ready — open a bill first');
     return el;
   };
 
   const buildPdfBlob = async () => {
     const element = getInvoiceElement();
-    const opt = {
-      margin: 0.3,
-      filename: `${baseName}_Invoice.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-      jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
-    };
-    return html2pdf().set(opt).from(element).outputPdf('blob');
+    return elementToPdfBlob(element, { filename: `${baseName}_Invoice.pdf` });
   };
 
-  const buildImageBlob = async () => {
-    const element = getInvoiceElement();
-    const canvas = await html2canvas(element, {
-      scale: 2,
-      useCORS: true,
-      allowTaint: true,
-      backgroundColor: '#ffffff',
-      logging: false,
-    });
-    return new Promise((resolve, reject) => {
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error('Could not create image'))),
-        'image/jpeg',
-        0.92
-      );
-    });
-  };
-
-  const shareOrDownloadFile = async (file, { title, text }) => {
-    const payload = { files: [file], title, text };
-    if (navigator.canShare && navigator.canShare(payload)) {
-      await navigator.share(payload);
-      return 'shared';
-    }
-    triggerDownload(file, file.name);
-    return 'downloaded';
-  };
+  const buildImageBlob = async () => elementToJpegBlob(getInvoiceElement());
 
   const handleDownloadPDF = async () => {
     setSharing('pdf');
     try {
       const blob = await buildPdfBlob();
-      triggerDownload(blob, `${baseName}_Invoice.pdf`);
+      const result = await downloadBlob(blob, `${baseName}_Invoice.pdf`, 'application/pdf');
+      if (result === 'shared') {
+        /* native share sheet opened — user can Save to Files / Drive */
+      }
     } catch (err) {
-      alert('Could not create PDF: ' + err.message);
+      if (err?.name !== 'AbortError') alert('Could not create PDF: ' + (err.message || err));
     } finally {
       setSharing(null);
     }
@@ -128,9 +87,9 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
     setSharing('image');
     try {
       const blob = await buildImageBlob();
-      triggerDownload(blob, `${baseName}_Invoice.jpg`);
+      await downloadBlob(blob, `${baseName}_Invoice.jpg`, 'image/jpeg');
     } catch (err) {
-      alert('Could not create image: ' + err.message);
+      if (err?.name !== 'AbortError') alert('Could not create image: ' + (err.message || err));
     } finally {
       setSharing(null);
     }
@@ -140,13 +99,15 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
     setSharing('whatsapp');
     try {
       const blob = await buildImageBlob();
-      const file = new File([blob], `${baseName}_Invoice.jpg`, { type: 'image/jpeg' });
       const caption = `Invoice ${liveBill.invoice_number} — ${companyName}\nAmount: ${formatCurrency(currencySymbol, liveBill.total_amount)}\nClient: ${liveBill.customer_name}`;
-      const result = await shareOrDownloadFile(file, { title: `Invoice ${liveBill.invoice_number}`, text: caption });
+      const result = await saveOrShareBlob(blob, `${baseName}_Invoice.jpg`, 'image/jpeg', {
+        title: `Invoice ${liveBill.invoice_number}`,
+        text: caption,
+      });
       if (result === 'downloaded') {
         const phone = normalizeWhatsAppPhone(liveBill.customer_phone);
         const waBase = phone ? `https://wa.me/${phone}` : 'https://wa.me/';
-        alert('Invoice image saved. WhatsApp will open — attach the downloaded JPG.');
+        alert('Invoice image downloaded. WhatsApp will open — attach the JPG if needed.');
         window.open(`${waBase}?text=${encodeURIComponent(caption)}`, '_blank');
       }
     } catch (err) {
@@ -160,12 +121,14 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
     setSharing('email');
     try {
       const blob = await buildPdfBlob();
-      const file = new File([blob], `${baseName}_Invoice.pdf`, { type: 'application/pdf' });
       const subject = `Invoice ${liveBill.invoice_number} from ${companyName}`;
       const body = `Dear ${liveBill.customer_name},\n\nPlease find invoice ${liveBill.invoice_number}.\nTotal: ${formatCurrency(currencySymbol, liveBill.total_amount)}\n\nRegards,\n${companyName}`;
-      const result = await shareOrDownloadFile(file, { title: subject, text: body });
+      const result = await saveOrShareBlob(blob, `${baseName}_Invoice.pdf`, 'application/pdf', {
+        title: subject,
+        text: body,
+      });
       if (result === 'downloaded') {
-        window.location.href = `mailto:${encodeURIComponent(liveBill.customer_email || '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        window.location.href = `mailto:${encodeURIComponent(liveBill.customer_email || '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body + '\n\n(Attach the downloaded PDF)')}`;
       }
     } catch (err) {
       if (err?.name !== 'AbortError') alert('Could not share invoice PDF: ' + (err.message || err));
@@ -261,7 +224,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
       )}
 
       <p className="no-print" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '-0.5rem 0 0' }}>
-        Use <b>Thermal Receipt</b> for 58/80mm printers. WhatsApp sends an <b>image</b>; email uses a <b>PDF</b>.
+        Use <b>Thermal Receipt</b> for 58/80mm printers. On phone, PDF opens a <b>Share / Save</b> sheet. WhatsApp sends an image; email uses a PDF.
       </p>
 
       {posMode ? (
@@ -355,6 +318,18 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
                 <span>{label('Subtotal', 'ذیلی کل')}</span>
                 <span style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, liveBill.subtotal)}</span>
               </div>
+              {Number(liveBill.tax_amount) > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0', color: '#64748b' }}>
+                  <span>{label('Tax', 'ٹیکس')} ({liveBill.tax_rate || 0}%)</span>
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, liveBill.tax_amount)}</span>
+                </div>
+              )}
+              {Number(liveBill.discount_amount) > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0', color: '#15803d' }}>
+                  <span>{label('Discount', 'رعایت')} ({liveBill.discount_rate || 0}%)</span>
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>-{formatCurrency(currencySymbol, liveBill.discount_amount)}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.6rem 0 0', marginTop: '0.5rem', borderTop: '2px solid #0f172a', fontSize: '1.15rem', fontWeight: 900 }}>
                 <span>{label('Total', 'کل')}</span>
                 <span style={{ color: '#0d4a4a', fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, liveBill.total_amount)}</span>
@@ -368,12 +343,14 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
             </div>
           </div>
 
-          {(settings.bank_name || settings.mobile_wallet) && (
+          {(settings.bank_name || settings.mobile_wallet || settings.payment_instructions || settings.account_title) && (
             <div style={{ marginTop: '1.5rem', background: '#f8fafc', padding: '1rem', borderRadius: 10, fontSize: '0.85rem', color: '#334155' }}>
               <strong>{label('Payment Details', 'ادائیگی تفصیلات')}</strong>
               {settings.bank_name && <div>Bank: {settings.bank_name}</div>}
+              {settings.account_title && <div>Title: {settings.account_title}</div>}
               {settings.account_number && <div>A/C: {settings.account_number}</div>}
               {settings.mobile_wallet && <div>Raast / JazzCash / EasyPaisa: {settings.mobile_wallet}</div>}
+              {settings.payment_instructions && <div style={{ marginTop: '0.35rem' }}>{settings.payment_instructions}</div>}
             </div>
           )}
 

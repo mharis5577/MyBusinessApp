@@ -168,6 +168,17 @@ app.post('/api/customers', async (req, res) => {
   }
 });
 
+app.delete('/api/customers/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    await dbRun('DELETE FROM customer_product_rates WHERE customer_id = ?', [id]);
+    await dbRun('DELETE FROM customers WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // -------------------------------------------------------------
 // CUSTOMER PRODUCT RATES ENDPOINTS (Custom Prices per Client)
 // -------------------------------------------------------------
@@ -209,6 +220,18 @@ app.post('/api/customers/:id/rates', async (req, res) => {
       [customerId]
     );
     res.json(rates);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/customers/:id/rates/:productId', async (req, res) => {
+  try {
+    await dbRun(
+      'DELETE FROM customer_product_rates WHERE customer_id = ? AND product_id = ?',
+      [req.params.id, req.params.productId]
+    );
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

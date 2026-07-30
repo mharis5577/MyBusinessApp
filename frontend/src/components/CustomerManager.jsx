@@ -132,7 +132,10 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
 
       if (res.ok) {
         const updatedRates = await res.json();
-        setCustomerRates(updatedRates);
+        setCustomerRates(Array.isArray(updatedRates) ? updatedRates : await (async () => {
+          const r = await apiFetch(`/api/customers/${selectedCustomer.id}/rates`);
+          return (await r.json()) || [];
+        })());
         setRateProductId('');
         setRateCustomPrice('');
         setRateMsg('Custom rate saved!');

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Eye, Trash2, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote } from 'lucide-react';
 import { pakistanToday, formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
+import { downloadBlob } from '../utils/downloadFile';
 
 export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySymbol = 'Rs.' }) {
   const [bills, setBills] = useState([]);
@@ -217,7 +218,7 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
   };
 
   // Export database to CSV
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     if (bills.length === 0) return;
     const headers = ['Category', 'Invoice #', 'Party / City Name', 'Date', 'Subtotal', 'Total Amount', 'Paid', 'Balance', 'Status'];
     const rows = bills.map((b) => [
@@ -232,14 +233,13 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
       b.status,
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Bills_Master_${pakistanToday()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    try {
+      await downloadBlob(blob, `Bills_Master_${pakistanToday()}.csv`, 'text/csv');
+    } catch (err) {
+      if (err?.name !== 'AbortError') alert('Export failed: ' + err.message);
+    }
   };
 
   return (

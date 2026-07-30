@@ -257,18 +257,29 @@ async function handleLocalRequestInner(url, options = {}) {
         if (existing) {
           const updated = { ...existing, custom_price };
           await db.put('rates', updated);
-          return jsonOk(updated);
+        } else {
+          const id = await nextId(db, 'rates');
+          const row = {
+            id,
+            customer_id: customerId,
+            product_id,
+            custom_price,
+            created_at: new Date().toISOString(),
+          };
+          await db.put('rates', row);
         }
-        const id = await nextId(db, 'rates');
-        const row = {
-          id,
-          customer_id: customerId,
-          product_id,
-          custom_price,
-          created_at: new Date().toISOString(),
-        };
-        await db.put('rates', row);
-        return jsonOk(row, 201);
+        const products = await db.getAll('products');
+        const rates = (await db.getAll('rates'))
+          .filter((r) => r.customer_id === customerId)
+          .map((r) => {
+            const p = products.find((x) => x.id === r.product_id);
+            return {
+              ...r,
+              product_name: p?.name || 'Item',
+              standard_price: p?.price || 0,
+            };
+          });
+        return jsonOk(rates, existing ? 200 : 201);
       }
       if (parts.length === 5 && method === 'DELETE') {
         const productId = Number(parts[4]);
