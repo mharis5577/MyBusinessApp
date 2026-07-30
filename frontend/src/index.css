@@ -30,6 +30,7 @@
   --shadow-sm: 0 2px 8px rgba(7, 41, 41, 0.06);
   --font-main: 'Sora', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-urdu: 'Noto Nastaliq Urdu', 'Noto Naskh Arabic', 'Segoe UI', Tahoma, sans-serif;
   --navbar-bg: rgba(235, 234, 225, 0.88);
   --mobile-nav-bg: rgba(255, 255, 255, 0.96);
   --input-bg: #ffffff;
@@ -1166,5 +1167,44 @@ body {
   .hero-actions .btn-secondary {
     width: auto;
   }
+}
+
+/* Bilingual invoice labels (English + Urdu on separate lines) */
+.bi-label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: inherit;
+  gap: 0.1rem;
+  line-height: 1.25;
+}
+
+.bi-label .bi-en {
+  font-family: var(--font-main);
+}
+
+.bi-label .bi-ur,
+.bi-ur,
+.payment-urdu-block,
+.thermal-urdu-footer {
+  font-family: var(--font-urdu);
+  font-size: 0.92em;
+  font-weight: 600;
+}
+
+.invoice-bilingual .bi-ur {
+  color: #475569;
+}
+
+.payment-urdu-block {
+  margin-top: 0.5rem;
+  padding-top: 0.45rem;
+  border-top: 1px dashed #cbd5e1;
+  font-size: 0.9rem;
+}
+
+.thermal-urdu-footer {
+  text-align: center;
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
 }
 

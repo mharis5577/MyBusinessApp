@@ -1,10 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Eye, Trash2, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote } from 'lucide-react';
+import { Search, Eye, Trash2, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus } from 'lucide-react';
 import { pakistanToday, formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { downloadBlob } from '../utils/downloadFile';
+import { compressImageToDataUrl } from '../utils/imageCompress';
+import {
+  buildPaymentReminderText,
+  openWhatsAppReminder,
+  openSmsReminder,
+} from '../utils/paymentReminder';
 
-export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySymbol = 'Rs.' }) {
+export default function BillsDatabase({
+  onViewBill,
+  onDuplicateBill,
+  currencySymbol = 'Rs.',
+  urduLabels = false,
+  settings: settingsProp = {},
+}) {
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [billTypeFilter, setBillTypeFilter] = useState('all'); // 'all', 'customer', 'supplier'
@@ -29,8 +41,26 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState('Cash');
   const [payNotes, setPayNotes] = useState('');
-  const [paySaving, setPaySaving] = useState(false);
   const [payTendered, setPayTendered] = useState('');
+  const [paySaving, setPaySaving] = useState(false);
+  const [payScreenshot, setPayScreenshot] = useState('');
+  const [payScreenshotName, setPayScreenshotName] = useState('');
+  const [settings, setSettings] = useState(settingsProp || {});
+  const [advanceWallet, setAdvanceWallet] = useState(0);
+
+  useEffect(() => {
+    setSettings(settingsProp || {});
+  }, [settingsProp]);
+
+  useEffect(() => {
+    if (settingsProp?.company_name) return;
+    apiFetch('/api/settings')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data) setSettings((prev) => ({ ...prev, ...data }));
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
@@ -164,13 +194,83 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
     }
   };
 
-  const openPayModal = (bill) => {
+  const openPayModal = async (bill) => {
     setPayBill(bill);
     const due = Number(bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0)));
     setPayAmount(due > 0 ? String(due) : '');
     setPayMethod(bill.payment_method || 'Cash');
     setPayNotes('');
     setPayTendered('');
+    setPayScreenshot('');
+    setPayScreenshotName('');
+    setAdvanceWallet(0);
+    try {
+      const res = await apiFetch(`/api/advances?client=${encodeURIComponent(bill.customer_name || '')}`);
+      const data = await res.json();
+      if (res.ok) setAdvanceWallet(Number(data.available_advance) || 0);
+    } catch (_) {
+      /* ignore */
+    }
+  };
+
+  const handleRemind = (bill, channel) => {
+    const due = Number(
+      bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0))
+    );
+    if (due <= 0) {
+      alert('No balance due on this bill.');
+      return;
+    }
+    const text = buildPaymentReminderText({
+      bill: { ...bill, balance_due: due },
+      settings,
+      currencySymbol,
+      urdu: urduLabels,
+    });
+    if (channel === 'sms') openSmsReminder(bill.customer_phone, text);
+    else openWhatsAppReminder(bill.customer_phone, text);
+  };
+
+  const handleScreenshotPick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const dataUrl = await compressImageToDataUrl(file);
+      setPayScreenshot(dataUrl);
+      setPayScreenshotName(file.name || 'screenshot.jpg');
+    } catch (err) {
+      alert(err.message || 'Could not attach image');
+    }
+  };
+
+  const handleApplyAdvanceFromPay = async () => {
+    if (!payBill || advanceWallet <= 0) return;
+    const due = Number(
+      payBill.balance_due ?? Math.max(0, (payBill.total_amount || 0) - (payBill.amount_paid || 0))
+    );
+    const amt = Math.min(due, advanceWallet, parseFloat(payAmount) || due);
+    if (!amt || amt <= 0) return;
+    setPaySaving(true);
+    try {
+      const res = await apiFetch('/api/advances/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bill_id: payBill.id,
+          client_name: payBill.customer_name,
+          amount: amt,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setPayBill(null);
+      apiFetchBills();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setPaySaving(false);
+    }
   };
 
   const payAmountNum = parseFloat(payAmount) || 0;
@@ -204,6 +304,7 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
           method: payMethod,
           payment_date: pakistanToday(),
           notes,
+          screenshot_data: payScreenshot || '',
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -389,6 +490,27 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
                         <button className="btn-secondary" style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto' }} onClick={() => openPayModal(bill)} title="Record payment">
                           <Banknote size={14} /> Pay
                         </button>
+                        {(Number(bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0))) > 0) &&
+                          bill.bill_type !== 'supplier' && (
+                          <>
+                            <button
+                              className="btn-secondary"
+                              style={{ padding: '0.35rem 0.55rem', width: 'auto', color: '#25D366' }}
+                              onClick={() => handleRemind(bill, 'whatsapp')}
+                              title="WhatsApp reminder"
+                            >
+                              <MessageSquare size={14} />
+                            </button>
+                            <button
+                              className="btn-secondary"
+                              style={{ padding: '0.35rem 0.55rem', width: 'auto' }}
+                              onClick={() => handleRemind(bill, 'sms')}
+                              title="SMS reminder"
+                            >
+                              <Smartphone size={14} />
+                            </button>
+                          </>
+                        )}
                         <button className="btn-secondary" style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto' }} onClick={() => handleOpenEditModal(bill)}>
                           <Edit3 size={14} /> Edit
                         </button>
@@ -440,6 +562,26 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
                   <button className="btn-secondary" onClick={() => openPayModal(bill)}>
                     <Banknote size={14} /> Pay
                   </button>
+                  {(Number(bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0))) > 0) &&
+                    bill.bill_type !== 'supplier' && (
+                    <>
+                      <button
+                        className="btn-secondary"
+                        style={{ color: '#25D366' }}
+                        onClick={() => handleRemind(bill, 'whatsapp')}
+                        title="WhatsApp payment reminder"
+                      >
+                        <MessageSquare size={14} />
+                      </button>
+                      <button
+                        className="btn-secondary"
+                        onClick={() => handleRemind(bill, 'sms')}
+                        title="SMS payment reminder"
+                      >
+                        <Smartphone size={14} />
+                      </button>
+                    </>
+                  )}
                   <button className="btn-secondary" onClick={() => handleOpenEditModal(bill)}>
                     <Edit3 size={14} /> Edit
                   </button>
@@ -641,6 +783,33 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
               <label className="form-label">Notes</label>
               <input type="text" className="form-input" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} placeholder="Optional" />
             </div>
+            <div className="form-group">
+              <label className="form-label">Payment screenshot</label>
+              <label className="btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', width: 'auto' }}>
+                <ImagePlus size={16} />
+                {payScreenshotName || 'Attach image'}
+                <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleScreenshotPick} />
+              </label>
+              {payScreenshot && (
+                <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <img src={payScreenshot} alt="Payment proof" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border-color)' }} />
+                  <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.6rem' }} onClick={() => { setPayScreenshot(''); setPayScreenshotName(''); }}>
+                    Remove
+                  </button>
+                </div>
+              )}
+            </div>
+            {advanceWallet > 0 && (
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ width: '100%', marginBottom: '0.65rem' }}
+                disabled={paySaving}
+                onClick={handleApplyAdvanceFromPay}
+              >
+                Apply advance ({formatCurrency(currencySymbol, advanceWallet)} available)
+              </button>
+            )}
             <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', marginTop: '0.75rem' }}>
               <button type="button" className="btn-secondary" onClick={() => setPayBill(null)}>Cancel</button>
               <button type="submit" className="btn-primary" disabled={paySaving}>

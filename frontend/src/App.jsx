@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, PlusCircle, Database, Users, Package, Settings, Moon, Sun, Sparkles, Download, Lock } from 'lucide-react';
+import { LayoutDashboard, PlusCircle, Database, Users, Package, Settings, Moon, Sun, Sparkles, Download, Lock, Wallet } from 'lucide-react';
 import DashboardStats from './components/DashboardStats';
 import SmartBillForm from './components/SmartBillForm';
 import InvoicePreview from './components/InvoicePreview';
@@ -7,6 +7,7 @@ import BillsDatabase from './components/BillsDatabase';
 import CustomerManager from './components/CustomerManager';
 import ProductCatalog from './components/ProductCatalog';
 import SettingsManager from './components/SettingsManager';
+import AdvancesManager from './components/AdvancesManager';
 import { apiFetch } from './api/client';
 
 const THEME_KEY = 'elite-chocolate-theme';
@@ -173,6 +174,9 @@ export default function App() {
           <button className={`nav-btn ${currentTab === 'customers' ? 'active' : ''}`} onClick={() => setCurrentTab('customers')}>
             <Users size={17} /> Clients
           </button>
+          <button className={`nav-btn ${currentTab === 'advances' ? 'active' : ''}`} onClick={() => setCurrentTab('advances')}>
+            <Wallet size={17} /> Advances
+          </button>
           <button className={`nav-btn ${currentTab === 'settings' ? 'active' : ''}`} onClick={() => setCurrentTab('settings')}>
             <Settings size={17} /> Settings
           </button>
@@ -226,6 +230,8 @@ export default function App() {
             onViewBill={handleViewBill}
             onDuplicateBill={handleDuplicateBill}
             currencySymbol={settings.currency_symbol || 'Rs.'}
+            urduLabels={Boolean(settings.urdu_labels)}
+            settings={settings}
           />
         )}
 
@@ -235,6 +241,10 @@ export default function App() {
 
         {currentTab === 'customers' && (
           <CustomerManager currencySymbol={settings.currency_symbol || 'Rs.'} />
+        )}
+
+        {currentTab === 'advances' && (
+          <AdvancesManager currencySymbol={settings.currency_symbol || 'Rs.'} />
         )}
 
         {currentTab === 'settings' && (

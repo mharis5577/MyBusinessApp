@@ -163,22 +163,30 @@ function initTables() {
         method TEXT DEFAULT 'Cash',
         payment_date TEXT NOT NULL,
         notes TEXT,
+        screenshot_data TEXT DEFAULT '',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE
       )
     `);
+    db.run(`ALTER TABLE bill_payments ADD COLUMN screenshot_data TEXT DEFAULT ''`, () => {});
 
     // Advance Payments Table
     db.run(`
       CREATE TABLE IF NOT EXISTS advance_payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         amount REAL NOT NULL DEFAULT 0.0,
+        remaining REAL,
         payment_date TEXT NOT NULL,
         client_name TEXT,
         notes TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    db.run(`ALTER TABLE advance_payments ADD COLUMN remaining REAL`, () => {
+      db.run(
+        `UPDATE advance_payments SET remaining = amount WHERE remaining IS NULL`
+      );
+    });
 
     // Customer Product Rates Table
     db.run(`

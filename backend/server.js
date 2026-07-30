@@ -242,11 +242,28 @@ app.delete('/api/customers/:id/rates/:productId', async (req, res) => {
 // -------------------------------------------------------------
 app.get('/api/advances', async (req, res) => {
   try {
-    const advances = await dbAll('SELECT * FROM advance_payments ORDER BY id DESC');
+    const client = String(req.query.client || '').trim();
+    let advances;
+    if (client) {
+      advances = await dbAll(
+        'SELECT * FROM advance_payments WHERE client_name = ? ORDER BY id DESC',
+        [client]
+      );
+    } else {
+      advances = await dbAll('SELECT * FROM advance_payments ORDER BY id DESC');
+    }
+    advances = advances.map((a) => ({
+      ...a,
+      remaining: a.remaining == null ? Number(a.amount) || 0 : Number(a.remaining) || 0,
+    }));
     const totalSumRow = await dbGet('SELECT SUM(amount) as total FROM advance_payments');
+    const remainingRow = await dbGet(
+      'SELECT SUM(COALESCE(remaining, amount)) as total FROM advance_payments'
+    );
     res.json({
       advances,
       total_advance: totalSumRow.total || 0,
+      available_advance: remainingRow.total || 0,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -259,19 +276,101 @@ app.post('/api/advances', async (req, res) => {
     if (!amount || parseFloat(amount) <= 0) {
       return res.status(400).json({ error: 'Valid advance amount is required' });
     }
+    if (!client_name || !String(client_name).trim()) {
+      return res.status(400).json({ error: 'Client name is required' });
+    }
 
+    const amt = parseFloat(amount);
     const dateStr = payment_date || pakistanToday();
     const result = await dbRun(
-      'INSERT INTO advance_payments (amount, payment_date, client_name, notes) VALUES (?, ?, ?, ?)',
-      [parseFloat(amount), dateStr, client_name || 'General Client', notes || '']
+      'INSERT INTO advance_payments (amount, remaining, payment_date, client_name, notes) VALUES (?, ?, ?, ?, ?)',
+      [amt, amt, dateStr, String(client_name).trim(), notes || '']
     );
 
     const created = await dbGet('SELECT * FROM advance_payments WHERE id = ?', [result.lastID]);
     const totalSumRow = await dbGet('SELECT SUM(amount) as total FROM advance_payments');
+    const remainingRow = await dbGet(
+      'SELECT SUM(COALESCE(remaining, amount)) as total FROM advance_payments'
+    );
 
     res.status(201).json({
-      created,
+      created: { ...created, remaining: created.remaining ?? created.amount },
       total_advance: totalSumRow.total || 0,
+      available_advance: remainingRow.total || 0,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Apply client advance wallet to a bill (FIFO). */
+app.post('/api/advances/apply', async (req, res) => {
+  try {
+    const billId = Number(req.body.bill_id);
+    const clientName = String(req.body.client_name || '').trim();
+    let amount = Number(req.body.amount);
+    if (!billId) return res.status(400).json({ error: 'bill_id is required' });
+    if (!clientName) return res.status(400).json({ error: 'client_name is required' });
+
+    const bill = await dbGet('SELECT * FROM bills WHERE id = ?', [billId]);
+    if (!bill) return res.status(404).json({ error: 'Bill not found' });
+
+    enrichBill(bill);
+    const due = Number(bill.balance_due) || 0;
+    if (due <= 0) return res.status(400).json({ error: 'Bill has no balance due' });
+
+    const pool = await dbAll(
+      `SELECT * FROM advance_payments
+       WHERE client_name = ? AND COALESCE(remaining, amount) > 0
+       ORDER BY id ASC`,
+      [clientName]
+    );
+    const available = pool.reduce(
+      (s, a) => s + (a.remaining == null ? Number(a.amount) || 0 : Number(a.remaining) || 0),
+      0
+    );
+    if (available <= 0) {
+      return res.status(400).json({ error: 'No available advance for this client' });
+    }
+
+    if (!amount || amount <= 0) amount = Math.min(due, available);
+    amount = Math.min(amount, due, available);
+    amount = Math.round(amount * 100) / 100;
+
+    let left = amount;
+    for (const adv of pool) {
+      if (left <= 0) break;
+      const rem = adv.remaining == null ? Number(adv.amount) || 0 : Number(adv.remaining) || 0;
+      const take = Math.min(rem, left);
+      if (take <= 0) continue;
+      await dbRun('UPDATE advance_payments SET remaining = ? WHERE id = ?', [
+        Math.round((rem - take) * 100) / 100,
+        adv.id,
+      ]);
+      left = Math.round((left - take) * 100) / 100;
+    }
+
+    await dbRun(
+      'INSERT INTO bill_payments (bill_id, amount, method, payment_date, notes) VALUES (?, ?, ?, ?, ?)',
+      [billId, amount, 'Advance', pakistanToday(), `Applied from advance (${clientName})`]
+    );
+
+    const updated = await refreshBillPaidStatus(billId);
+    updated.items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [billId]);
+    updated.payments = await dbAll(
+      'SELECT * FROM bill_payments WHERE bill_id = ? ORDER BY id DESC',
+      [billId]
+    );
+
+    const remainingRow = await dbGet(
+      `SELECT SUM(COALESCE(remaining, amount)) as total FROM advance_payments WHERE client_name = ?`,
+      [clientName]
+    );
+
+    res.status(201).json({
+      bill: updated,
+      applied: amount,
+      available_advance: remainingRow.total || 0,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -282,7 +381,14 @@ app.delete('/api/advances/:id', async (req, res) => {
   try {
     await dbRun('DELETE FROM advance_payments WHERE id = ?', [req.params.id]);
     const totalSumRow = await dbGet('SELECT SUM(amount) as total FROM advance_payments');
-    res.json({ success: true, total_advance: totalSumRow.total || 0 });
+    const remainingRow = await dbGet(
+      'SELECT SUM(COALESCE(remaining, amount)) as total FROM advance_payments'
+    );
+    res.json({
+      success: true,
+      total_advance: totalSumRow.total || 0,
+      available_advance: remainingRow.total || 0,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -775,8 +881,8 @@ app.post('/api/bills/:id/payments', async (req, res) => {
     if (!bill) return res.status(404).json({ error: 'Bill not found' });
 
     await dbRun(
-      'INSERT INTO bill_payments (bill_id, amount, method, payment_date, notes) VALUES (?, ?, ?, ?, ?)',
-      [bill.id, amount, method, payment_date, notes]
+      'INSERT INTO bill_payments (bill_id, amount, method, payment_date, notes, screenshot_data) VALUES (?, ?, ?, ?, ?, ?)',
+      [bill.id, amount, method, payment_date, notes, req.body.screenshot_data || '']
     );
     const updated = await refreshBillPaidStatus(bill.id);
     updated.items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [bill.id]);
@@ -876,16 +982,24 @@ app.get('/api/ledger', async (req, res) => {
     const totalBilled = bills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
     const totalPaid = bills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
     const totalAdvance = advances.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+    const availableAdvance = advances.reduce((s, b) => {
+      const rem = b.remaining == null ? Number(b.amount) || 0 : Number(b.remaining) || 0;
+      return s + rem;
+    }, 0);
     const outstanding = Math.max(0, totalBilled - totalPaid);
 
     res.json({
       customer_name: name,
       bills,
-      advances,
+      advances: advances.map((a) => ({
+        ...a,
+        remaining: a.remaining == null ? Number(a.amount) || 0 : Number(a.remaining) || 0,
+      })),
       totals: {
         billed: totalBilled,
         paid: totalPaid,
         advances: totalAdvance,
+        available_advance: availableAdvance,
         outstanding,
         bill_count: bills.length,
       },
@@ -1018,14 +1132,25 @@ app.post('/api/restore', async (req, res) => {
       }
       for (const p of data.bill_payments || []) {
         await dbRun(
-          'INSERT INTO bill_payments (id, bill_id, amount, method, payment_date, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [p.id, p.bill_id, p.amount || 0, p.method || 'Cash', p.payment_date, p.notes || '', p.created_at || null]
+          'INSERT INTO bill_payments (id, bill_id, amount, method, payment_date, notes, screenshot_data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [
+            p.id,
+            p.bill_id,
+            p.amount || 0,
+            p.method || 'Cash',
+            p.payment_date,
+            p.notes || '',
+            p.screenshot_data || '',
+            p.created_at || null,
+          ]
         );
       }
       for (const a of data.advances || []) {
+        const amt = Number(a.amount) || 0;
+        const rem = a.remaining == null ? amt : Number(a.remaining) || 0;
         await dbRun(
-          'INSERT INTO advance_payments (id, amount, payment_date, client_name, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-          [a.id, a.amount || 0, a.payment_date, a.client_name || '', a.notes || '', a.created_at || null]
+          'INSERT INTO advance_payments (id, amount, remaining, payment_date, client_name, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [a.id, amt, rem, a.payment_date, a.client_name || '', a.notes || '', a.created_at || null]
         );
       }
       for (const r of data.customer_product_rates || []) {

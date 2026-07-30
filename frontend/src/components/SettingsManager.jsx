@@ -226,7 +226,7 @@ export default function SettingsManager({ onSettingsUpdated }) {
             checked={Boolean(Number(settings.urdu_labels))}
             onChange={(e) => handleChange('urdu_labels', e.target.checked ? 1 : 0)}
           />
-          Show Urdu labels on invoices / receipts
+          Show bilingual English + Urdu labels on invoices / receipts (Noto Nastaliq)
         </label>
 
         <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>

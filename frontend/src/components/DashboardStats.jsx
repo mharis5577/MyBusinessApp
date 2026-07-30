@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { DollarSign, Clock, AlertTriangle, FileText, PlusCircle, TrendingUp, RefreshCw, Package } from 'lucide-react';
+import { DollarSign, Clock, AlertTriangle, FileText, PlusCircle, TrendingUp, RefreshCw, Package, Wallet } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 
@@ -73,6 +73,9 @@ export default function DashboardStats({ onNavigate, currencySymbol = 'Rs.' }) {
           </button>
           <button className="btn-secondary" onClick={() => onNavigate('database')}>
             <FileText size={18} /> View Bills
+          </button>
+          <button className="btn-secondary" onClick={() => onNavigate('advances')}>
+            <Wallet size={18} /> Advances
           </button>
         </div>
       </div>

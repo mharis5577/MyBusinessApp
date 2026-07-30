@@ -199,6 +199,119 @@ async function handleLocalRequestInner(url, options = {}) {
     return jsonOk({ success: true, message: 'All database tables wiped successfully.' });
   }
 
+  // ADVANCES
+  if (parts[1] === 'advances') {
+    const normalizeAdv = (a) => ({
+      ...a,
+      remaining: a.remaining == null ? Number(a.amount) || 0 : Number(a.remaining) || 0,
+    });
+    const nameMatch = (a, name) =>
+      String(a.client_name || '').trim().toLowerCase() === String(name || '').trim().toLowerCase();
+
+    if (parts.length === 2 && method === 'GET') {
+      const client = (search.get('client') || '').trim();
+      let advances = await db.getAll('advances');
+      if (client) advances = advances.filter((a) => nameMatch(a, client));
+      advances = advances.map(normalizeAdv).sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+      const total_advance = advances.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+      const available_advance = advances.reduce((s, a) => s + (Number(a.remaining) || 0), 0);
+      return jsonOk({ advances, total_advance, available_advance });
+    }
+
+    if (parts.length === 2 && method === 'POST') {
+      const amount = Number(body.amount);
+      if (!amount || amount <= 0) return jsonErr('Valid advance amount is required');
+      const client_name = String(body.client_name || '').trim();
+      if (!client_name) return jsonErr('Client name is required');
+      const id = await nextId(db, 'advances');
+      const created = {
+        id,
+        amount,
+        remaining: amount,
+        payment_date: body.payment_date || pakistanToday(),
+        client_name,
+        notes: body.notes || '',
+        created_at: new Date().toISOString(),
+      };
+      await db.put('advances', created);
+      const all = (await db.getAll('advances')).map(normalizeAdv);
+      return jsonOk(
+        {
+          created,
+          total_advance: all.reduce((s, a) => s + (Number(a.amount) || 0), 0),
+          available_advance: all.reduce((s, a) => s + (Number(a.remaining) || 0), 0),
+        },
+        201
+      );
+    }
+
+    if (parts[2] === 'apply' && method === 'POST') {
+      const billId = Number(body.bill_id);
+      const clientName = String(body.client_name || '').trim();
+      let amount = Number(body.amount);
+      if (!billId) return jsonErr('bill_id is required');
+      if (!clientName) return jsonErr('client_name is required');
+      const bill = await db.get('bills', billId);
+      if (!bill) return jsonErr('Bill not found', 404);
+      const enriched = enrichBill(bill);
+      const due = Number(enriched.balance_due) || 0;
+      if (due <= 0) return jsonErr('Bill has no balance due');
+
+      const pool = (await db.getAll('advances'))
+        .filter((a) => nameMatch(a, clientName))
+        .map(normalizeAdv)
+        .filter((a) => (Number(a.remaining) || 0) > 0)
+        .sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+
+      const available = pool.reduce((s, a) => s + (Number(a.remaining) || 0), 0);
+      if (available <= 0) return jsonErr('No available advance for this client');
+      if (!amount || amount <= 0) amount = Math.min(due, available);
+      amount = Math.round(Math.min(amount, due, available) * 100) / 100;
+
+      let left = amount;
+      for (const adv of pool) {
+        if (left <= 0) break;
+        const rem = Number(adv.remaining) || 0;
+        const take = Math.min(rem, left);
+        if (take <= 0) continue;
+        await db.put('advances', {
+          ...adv,
+          remaining: Math.round((rem - take) * 100) / 100,
+        });
+        left = Math.round((left - take) * 100) / 100;
+      }
+
+      const payId = await nextId(db, 'bill_payments');
+      await db.put('bill_payments', {
+        id: payId,
+        bill_id: billId,
+        amount,
+        method: 'Advance',
+        payment_date: pakistanToday(),
+        notes: `Applied from advance (${clientName})`,
+        screenshot_data: '',
+        created_at: new Date().toISOString(),
+      });
+
+      const updated = await refreshBillPaidStatus(db, billId);
+      const avail = (await db.getAll('advances'))
+        .filter((a) => nameMatch(a, clientName))
+        .map(normalizeAdv)
+        .reduce((s, a) => s + (Number(a.remaining) || 0), 0);
+      return jsonOk({ bill: updated, applied: amount, available_advance: avail }, 201);
+    }
+
+    if (parts.length === 3 && method === 'DELETE') {
+      await db.delete('advances', Number(parts[2]));
+      const all = (await db.getAll('advances')).map(normalizeAdv);
+      return jsonOk({
+        success: true,
+        total_advance: all.reduce((s, a) => s + (Number(a.amount) || 0), 0),
+        available_advance: all.reduce((s, a) => s + (Number(a.remaining) || 0), 0),
+      });
+    }
+  }
+
   // CUSTOMERS
   if (parts[1] === 'customers') {
     if (parts.length === 2 && method === 'GET') {
@@ -571,6 +684,7 @@ async function handleLocalRequestInner(url, options = {}) {
             method: bill.payment_method || 'Cash',
             payment_date: pakistanToday(),
             notes: 'Marked paid (full balance)',
+            screenshot_data: '',
             created_at: new Date().toISOString(),
           });
         }
@@ -595,6 +709,7 @@ async function handleLocalRequestInner(url, options = {}) {
         method: body.method || 'Cash',
         payment_date: body.payment_date || pakistanToday(),
         notes: body.notes || '',
+        screenshot_data: body.screenshot_data || '',
         created_at: new Date().toISOString(),
       });
       return jsonOk(await refreshBillPaidStatus(db, id), 201);
@@ -643,11 +758,20 @@ async function handleLocalRequestInner(url, options = {}) {
     const bills = (await db.getAll('bills'))
       .filter((b) => b.customer_name === name)
       .sort((a, b) => String(b.bill_date).localeCompare(String(a.bill_date)));
-    const advances = (await db.getAll('advances')).filter((a) => a.client_name === name);
+    const advances = (await db.getAll('advances'))
+      .filter(
+        (a) =>
+          String(a.client_name || '').trim().toLowerCase() === name.toLowerCase()
+      )
+      .map((a) => ({
+        ...a,
+        remaining: a.remaining == null ? Number(a.amount) || 0 : Number(a.remaining) || 0,
+      }));
     const enriched = bills.map(enrichBill);
     const totalBilled = enriched.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
     const totalPaid = enriched.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
     const totalAdvance = advances.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+    const availableAdvance = advances.reduce((s, b) => s + (Number(b.remaining) || 0), 0);
     return jsonOk({
       customer_name: name,
       bills: enriched,
@@ -656,6 +780,7 @@ async function handleLocalRequestInner(url, options = {}) {
         billed: totalBilled,
         paid: totalPaid,
         advances: totalAdvance,
+        available_advance: availableAdvance,
         outstanding: Math.max(0, totalBilled - totalPaid),
         bill_count: bills.length,
       },
