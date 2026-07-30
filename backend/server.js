@@ -246,7 +246,7 @@ app.get('/api/advances', async (req, res) => {
     let advances;
     if (client) {
       advances = await dbAll(
-        'SELECT * FROM advance_payments WHERE client_name = ? ORDER BY id DESC',
+        'SELECT * FROM advance_payments WHERE LOWER(TRIM(client_name)) = LOWER(?) ORDER BY id DESC',
         [client]
       );
     } else {
@@ -321,7 +321,7 @@ app.post('/api/advances/apply', async (req, res) => {
 
     const pool = await dbAll(
       `SELECT * FROM advance_payments
-       WHERE client_name = ? AND COALESCE(remaining, amount) > 0
+       WHERE LOWER(TRIM(client_name)) = LOWER(?) AND COALESCE(remaining, amount) > 0
        ORDER BY id ASC`,
       [clientName]
     );
@@ -363,7 +363,7 @@ app.post('/api/advances/apply', async (req, res) => {
     );
 
     const remainingRow = await dbGet(
-      `SELECT SUM(COALESCE(remaining, amount)) as total FROM advance_payments WHERE client_name = ?`,
+      `SELECT SUM(COALESCE(remaining, amount)) as total FROM advance_payments WHERE LOWER(TRIM(client_name)) = LOWER(?)`,
       [clientName]
     );
 
@@ -975,7 +975,7 @@ app.get('/api/ledger', async (req, res) => {
     bills.forEach(enrichBill);
 
     const advances = await dbAll(
-      `SELECT * FROM advance_payments WHERE client_name = ? ORDER BY payment_date DESC, id DESC`,
+      `SELECT * FROM advance_payments WHERE LOWER(TRIM(client_name)) = LOWER(?) ORDER BY payment_date DESC, id DESC`,
       [name]
     );
 
