@@ -97,6 +97,12 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
   const paid = Number(liveBill.amount_paid) || 0;
   const balance = Number(liveBill.balance_due ?? Math.max(0, (liveBill.total_amount || 0) - paid));
   const urdu = Boolean(urduLabels);
+  const isSupplier = liveBill.bill_type === 'supplier';
+  const hasPayeeBank =
+    Boolean(liveBill.payee_bank_name) ||
+    Boolean(liveBill.payee_account_title) ||
+    Boolean(liveBill.payee_account_number) ||
+    Boolean(liveBill.payee_payment_notes);
 
   const getInvoiceElement = () => {
     const el = document.getElementById('printable-invoice');
@@ -139,9 +145,11 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
     setSharing('whatsapp');
     try {
       const blob = await buildImageBlob();
-      const caption = `Invoice ${liveBill.invoice_number} — ${companyName}\nAmount: ${formatCurrency(currencySymbol, liveBill.total_amount)}\nClient: ${liveBill.customer_name}`;
+      const caption = isSupplier
+        ? `Payment for purchase ${liveBill.invoice_number} to ${liveBill.customer_name}\nAmount to pay: ${formatCurrency(currencySymbol, liveBill.total_amount)}\nFrom: ${companyName}`
+        : `Invoice ${liveBill.invoice_number} — ${companyName}\nAmount: ${formatCurrency(currencySymbol, liveBill.total_amount)}\nClient: ${liveBill.customer_name}`;
       const result = await saveOrShareBlob(blob, `${baseName}_Invoice.jpg`, 'image/jpeg', {
-        title: `Invoice ${liveBill.invoice_number}`,
+        title: isSupplier ? `Payment ${liveBill.invoice_number}` : `Invoice ${liveBill.invoice_number}`,
         text: caption,
       });
       if (result === 'downloaded') {
@@ -152,7 +160,11 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
           urdu,
         });
         openWhatsAppReminder(liveBill.customer_phone, text || caption);
-        alert('Invoice image downloaded. WhatsApp will open — attach the JPG if needed.');
+        alert(
+          isSupplier
+            ? 'Payment advice image downloaded. WhatsApp will open — attach the JPG if needed.'
+            : 'Invoice image downloaded. WhatsApp will open — attach the JPG if needed.'
+        );
       }
     } catch (err) {
       if (err?.name !== 'AbortError') alert('Could not share invoice image: ' + (err.message || err));
@@ -180,8 +192,12 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
     setSharing('email');
     try {
       const blob = await buildPdfBlob();
-      const subject = `Invoice ${liveBill.invoice_number} from ${companyName}`;
-      const body = `Dear ${liveBill.customer_name},\n\nPlease find invoice ${liveBill.invoice_number}.\nTotal: ${formatCurrency(currencySymbol, liveBill.total_amount)}\n\nRegards,\n${companyName}`;
+      const subject = isSupplier
+        ? `Payment advice ${liveBill.invoice_number} from ${companyName}`
+        : `Invoice ${liveBill.invoice_number} from ${companyName}`;
+      const body = isSupplier
+        ? `Assalam o Alaikum ${liveBill.customer_name},\n\nPlease find payment advice ${liveBill.invoice_number} for our purchase.\nAmount to pay: ${formatCurrency(currencySymbol, liveBill.total_amount)}\n\nRegards,\n${companyName}`
+        : `Dear ${liveBill.customer_name},\n\nPlease find invoice ${liveBill.invoice_number}.\nTotal: ${formatCurrency(currencySymbol, liveBill.total_amount)}\n\nRegards,\n${companyName}`;
       const result = await saveOrShareBlob(blob, `${baseName}_Invoice.pdf`, 'application/pdf', {
         title: subject,
         text: body,
@@ -315,7 +331,8 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
           <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div style={{ flex: 1, minWidth: 120 }}>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 4 }}>
-                Balance due: <strong style={{ color: 'var(--text-primary)' }}>{formatCurrency(currencySymbol, balance)}</strong>
+                {isSupplier ? 'Remaining to pay' : 'Balance due'}:{' '}
+                <strong style={{ color: 'var(--text-primary)' }}>{formatCurrency(currencySymbol, balance)}</strong>
                 {paid > 0 ? ` · Paid ${formatCurrency(currencySymbol, paid)}` : ''}
               </div>
               <input className="form-input" type="number" step="0.01" min="0.01" placeholder="Payment amount" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
@@ -383,11 +400,18 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
             <h3 style={{ fontSize: '1.05rem', margin: 0, fontWeight: 800 }}>{companyName}</h3>
             <p style={{ margin: '0.2rem 0', fontSize: '0.72rem' }}>{settings.company_phone}</p>
             <p style={{ margin: 0, fontSize: '0.72rem' }}>{settings.company_address}</p>
+            {isSupplier && (
+              <p style={{ margin: '0.35rem 0 0', fontSize: '0.72rem', fontWeight: 700 }}>
+                <BiLabel en="Purchase Payment Advice" ur="خریداری ادائیگی" urdu={urdu} />
+              </p>
+            )}
           </div>
           <div style={{ marginBottom: '0.5rem', fontSize: '0.78rem' }}>
-            <div><BiLabel en="Receipt #" ur="رسید" urdu={urdu} />: {liveBill.invoice_number}</div>
+            <div><BiLabel en={isSupplier ? 'Advice #' : 'Receipt #'} ur={isSupplier ? 'مشورہ' : 'رسید'} urdu={urdu} />: {liveBill.invoice_number}</div>
             <div><BiLabel en="Date" ur="تاریخ" urdu={urdu} />: {liveBill.bill_date}</div>
-            <div><BiLabel en="Client" ur="گاہک" urdu={urdu} />: {liveBill.customer_name}</div>
+            <div>
+              <BiLabel en={isSupplier ? 'Pay To' : 'Client'} ur={isSupplier ? 'ادائیگی برائے' : 'گاہک'} urdu={urdu} />: {liveBill.customer_name}
+            </div>
           </div>
           <div style={{ borderBottom: '1px dashed #000', borderTop: '1px dashed #000', padding: '0.5rem 0', margin: '0.5rem 0' }}>
             {liveBill.items?.map((item, idx) => (
@@ -398,22 +422,35 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
             ))}
           </div>
           <div style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '1rem', marginTop: '0.5rem' }}>
-            <BiLabel en="TOTAL" ur="کل" urdu={urdu} />: {formatCurrency(currencySymbol, liveBill.total_amount)}
+            <BiLabel en={isSupplier ? 'AMOUNT TO PAY' : 'TOTAL'} ur={isSupplier ? 'ادا کی جانے والی رقم' : 'کل'} urdu={urdu} />: {formatCurrency(currencySymbol, liveBill.total_amount)}
           </div>
           {paid > 0 && (
             <div style={{ textAlign: 'right', fontSize: '0.8rem', marginTop: '0.25rem' }}>
-              <BiLabel en="Paid" ur="ادا" urdu={urdu} />: {formatCurrency(currencySymbol, paid)} · <BiLabel en="Due" ur="باقی" urdu={urdu} />: {formatCurrency(currencySymbol, balance)}
+              <BiLabel en={isSupplier ? 'Paid' : 'Paid'} ur="ادا" urdu={urdu} />: {formatCurrency(currencySymbol, paid)} · <BiLabel en="Remaining" ur="باقی" urdu={urdu} />: {formatCurrency(currencySymbol, balance)}
+            </div>
+          )}
+          {isSupplier && hasPayeeBank && (
+            <div style={{ marginTop: '0.65rem', fontSize: '0.72rem', borderTop: '1px dashed #000', paddingTop: '0.45rem' }}>
+              <div style={{ fontWeight: 700 }}><BiLabel en="Pay To Bank" ur="بینک ادائیگی" urdu={urdu} /></div>
+              {liveBill.payee_bank_name && <div>Bank: {liveBill.payee_bank_name}</div>}
+              {liveBill.payee_account_title && <div>Title: {liveBill.payee_account_title}</div>}
+              {liveBill.payee_account_number && <div>IBAN/A/C: {liveBill.payee_account_number}</div>}
+              {liveBill.payee_payment_notes && <div>{liveBill.payee_payment_notes}</div>}
             </div>
           )}
           {urdu && (
-            <p className="bi-ur thermal-urdu-footer" dir="rtl" lang="ur">شکریہ — بروقت ادائیگی کا شکریہ</p>
-          )}
-          <div style={{ textAlign: 'center', marginTop: '1rem' }}>
-            <img src={qrCodeUrl} alt="Scan to Pay" style={{ width: '80px', height: '80px' }} />
-            <p style={{ fontSize: '0.7rem', marginTop: '0.2rem' }}>
-              <BiLabel en="Scan to Pay" ur="ادائیگی کے لیے اسکین کریں" urdu={urdu} />
+            <p className="bi-ur thermal-urdu-footer" dir="rtl" lang="ur">
+              {isSupplier ? 'ادائیگی کی تصدیق محفوظ رکھیں' : 'شکریہ — بروقت ادائیگی کا شکریہ'}
             </p>
-          </div>
+          )}
+          {!isSupplier && (
+            <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+              <img src={qrCodeUrl} alt="Scan to Pay" style={{ width: '80px', height: '80px' }} />
+              <p style={{ fontSize: '0.7rem', marginTop: '0.2rem' }}>
+                <BiLabel en="Scan to Pay" ur="ادائیگی کے لیے اسکین کریں" urdu={urdu} />
+              </p>
+            </div>
+          )}
           <p style={{ textAlign: 'center', fontSize: '0.68rem', marginTop: '0.75rem' }}>Thank you{urdu ? ' / شکریہ' : ''}</p>
         </div>
       ) : (
@@ -421,14 +458,19 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #e2e8f0', paddingBottom: '1.5rem', marginBottom: '1.5rem', gap: '1rem', flexWrap: 'wrap' }}>
             <div>
               <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#0d4a4a', margin: 0 }}>{companyName}</h1>
+              {isSupplier && (
+                <p style={{ color: '#64748b', fontSize: '0.75rem', margin: '0.15rem 0 0', fontWeight: 700, textTransform: 'uppercase' }}>
+                  <BiLabel en="From / Payer" ur="ادا کنندہ" urdu={urdu} />
+                </p>
+              )}
               <p style={{ color: '#64748b', fontSize: '0.85rem', margin: '0.2rem 0', whiteSpace: 'pre-line' }}>{settings.company_address}</p>
               <p style={{ color: '#64748b', fontSize: '0.85rem', margin: 0 }}>{settings.company_email} | {settings.company_phone}</p>
               {settings.company_tax_id && <p style={{ color: '#64748b', fontSize: '0.8rem', margin: '0.2rem 0' }}>Tax ID: {settings.company_tax_id}</p>}
             </div>
             <div style={{ textAlign: 'right' }}>
               <h2 style={{ fontSize: '1.25rem', fontWeight: 900, color: '#0f172a', margin: 0, textTransform: 'uppercase' }}>
-                {liveBill.bill_type === 'supplier' ? (
-                  <BiLabel en="SAUDIA BUYING BILL" ur="خریداری بل" urdu={urdu} />
+                {isSupplier ? (
+                  <BiLabel en="Purchase Payment Advice" ur="خریداری ادائیگی" urdu={urdu} />
                 ) : (
                   <BiLabel en="SALES INVOICE" ur="سیلز انوائس" urdu={urdu} />
                 )}
@@ -441,10 +483,11 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '1.5rem' }}>
             <div>
               <h4 style={{ fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, marginBottom: '0.4rem' }}>
-                <BiLabel en="Billed To" ur="بل برائے" urdu={urdu} />
+                <BiLabel en={isSupplier ? 'Pay To' : 'Billed To'} ur={isSupplier ? 'ادائیگی برائے' : 'بل برائے'} urdu={urdu} />
               </h4>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>{liveBill.customer_name}</h3>
               {liveBill.customer_phone && <p style={{ color: '#475569', fontSize: '0.85rem', margin: '0.2rem 0' }}>{liveBill.customer_phone}</p>}
+              {liveBill.customer_address && <p style={{ color: '#475569', fontSize: '0.8rem', margin: '0.15rem 0' }}>{liveBill.customer_address}</p>}
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ marginBottom: '0.4rem' }}>
@@ -498,32 +541,49 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.6rem 0 0', marginTop: '0.5rem', borderTop: '2px solid #0f172a', fontSize: '1.15rem', fontWeight: 900 }}>
-                <BiLabel en="Total" ur="کل رقم" urdu={urdu} />
+                <BiLabel en={isSupplier ? 'Amount to Pay' : 'Total'} ur={isSupplier ? 'ادا کی جانے والی رقم' : 'کل رقم'} urdu={urdu} />
                 <span style={{ color: '#0d4a4a', fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, liveBill.total_amount)}</span>
               </div>
               {paid > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', color: '#b45309', fontWeight: 700 }}>
-                  <BiLabel en="Balance Due" ur="باقی رقم" urdu={urdu} />
+                  <BiLabel en={isSupplier ? 'Remaining' : 'Balance Due'} ur="باقی رقم" urdu={urdu} />
                   <span style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, balance)}</span>
                 </div>
               )}
             </div>
           </div>
 
-          {(settings.bank_name || settings.mobile_wallet || settings.payment_instructions || settings.account_title) && (
-            <div style={{ marginTop: '1.5rem', background: '#f8fafc', padding: '1rem', borderRadius: 10, fontSize: '0.85rem', color: '#334155' }}>
-              <strong><BiLabel en="Payment Details" ur="ادائیگی تفصیلات" urdu={urdu} /></strong>
-              {settings.bank_name && <div>Bank: {settings.bank_name}</div>}
-              {settings.account_title && <div>Title: {settings.account_title}</div>}
-              {settings.account_number && <div>A/C: {settings.account_number}</div>}
-              {settings.mobile_wallet && <div>Raast / JazzCash / EasyPaisa: {settings.mobile_wallet}</div>}
-              {settings.payment_instructions && <div style={{ marginTop: '0.35rem' }}>{settings.payment_instructions}</div>}
-              {urdu && (
-                <div className="bi-ur payment-urdu-block" dir="rtl" lang="ur">
-                  برائے مہربانی ادائیگی کی تصدیق واٹس ایپ پر بھیجیں
-                </div>
-              )}
-            </div>
+          {isSupplier ? (
+            hasPayeeBank && (
+              <div style={{ marginTop: '1.5rem', background: '#f8fafc', padding: '1rem', borderRadius: 10, fontSize: '0.85rem', color: '#334155' }}>
+                <strong><BiLabel en="Pay To — Supplier Bank Details" ur="ادائیگی — سپلائر بینک تفصیلات" urdu={urdu} /></strong>
+                {liveBill.payee_bank_name && <div>Bank: {liveBill.payee_bank_name}</div>}
+                {liveBill.payee_account_title && <div>Title: {liveBill.payee_account_title}</div>}
+                {liveBill.payee_account_number && <div>IBAN / A/C: {liveBill.payee_account_number}</div>}
+                {liveBill.payee_payment_notes && <div style={{ marginTop: '0.35rem' }}>{liveBill.payee_payment_notes}</div>}
+                {urdu && (
+                  <div className="bi-ur payment-urdu-block" dir="rtl" lang="ur">
+                    براہ کرم مندرجہ بالا اکاؤنٹ پر ادائیگی بھیجیں
+                  </div>
+                )}
+              </div>
+            )
+          ) : (
+            (settings.bank_name || settings.mobile_wallet || settings.payment_instructions || settings.account_title) && (
+              <div style={{ marginTop: '1.5rem', background: '#f8fafc', padding: '1rem', borderRadius: 10, fontSize: '0.85rem', color: '#334155' }}>
+                <strong><BiLabel en="Payment Details" ur="ادائیگی تفصیلات" urdu={urdu} /></strong>
+                {settings.bank_name && <div>Bank: {settings.bank_name}</div>}
+                {settings.account_title && <div>Title: {settings.account_title}</div>}
+                {settings.account_number && <div>A/C: {settings.account_number}</div>}
+                {settings.mobile_wallet && <div>Raast / JazzCash / EasyPaisa: {settings.mobile_wallet}</div>}
+                {settings.payment_instructions && <div style={{ marginTop: '0.35rem' }}>{settings.payment_instructions}</div>}
+                {urdu && (
+                  <div className="bi-ur payment-urdu-block" dir="rtl" lang="ur">
+                    برائے مہربانی ادائیگی کی تصدیق واٹس ایپ پر بھیجیں
+                  </div>
+                )}
+              </div>
+            )
           )}
 
           {liveBill.notes && (

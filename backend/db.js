@@ -90,9 +90,17 @@ function initTables() {
         phone TEXT,
         address TEXT,
         tax_id TEXT,
+        payee_bank_name TEXT DEFAULT '',
+        payee_account_title TEXT DEFAULT '',
+        payee_account_number TEXT DEFAULT '',
+        payee_payment_notes TEXT DEFAULT '',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    db.run(`ALTER TABLE customers ADD COLUMN payee_bank_name TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE customers ADD COLUMN payee_account_title TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE customers ADD COLUMN payee_account_number TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE customers ADD COLUMN payee_payment_notes TEXT DEFAULT ''`, () => {});
 
     // Products / Services Catalog Table
     db.run(`
@@ -132,6 +140,10 @@ function initTables() {
         notes TEXT,
         payment_method TEXT DEFAULT 'Bank Transfer / Raast / Cash',
         bank_details TEXT,
+        payee_bank_name TEXT DEFAULT '',
+        payee_account_title TEXT DEFAULT '',
+        payee_account_number TEXT DEFAULT '',
+        payee_payment_notes TEXT DEFAULT '',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -139,6 +151,10 @@ function initTables() {
     // Migration helpers
     db.run(`ALTER TABLE bills ADD COLUMN bill_type TEXT DEFAULT 'customer'`, () => {});
     db.run(`ALTER TABLE bills ADD COLUMN amount_paid REAL DEFAULT 0.0`, () => {});
+    db.run(`ALTER TABLE bills ADD COLUMN payee_bank_name TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE bills ADD COLUMN payee_account_title TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE bills ADD COLUMN payee_account_number TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE bills ADD COLUMN payee_payment_notes TEXT DEFAULT ''`, () => {});
 
     // Bill Items Table
     db.run(`

@@ -28,6 +28,10 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const [paymentMethod, setPaymentMethod] = useState('Bank Transfer / Raast');
   const [cashTendered, setCashTendered] = useState('');
   const [notes, setNotes] = useState('Thank you for your order!');
+  const [payeeBankName, setPayeeBankName] = useState('');
+  const [payeeAccountTitle, setPayeeAccountTitle] = useState('');
+  const [payeeAccountNumber, setPayeeAccountNumber] = useState('');
+  const [payeePaymentNotes, setPayeePaymentNotes] = useState('');
 
   // Items State
   const [items, setItems] = useState([
@@ -57,8 +61,12 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     setDueDate(addDaysToDateString(pakistanToday(), 14));
     setTaxRate(b.tax_rate ?? defaultTaxRate);
     setDiscountRate(b.discount_rate ?? 0);
-    setPaymentMethod(b.payment_method || 'Bank Transfer / Raast');
-    setNotes(b.notes || 'Thank you for your order!');
+    setPaymentMethod(b.payment_method || (b.bill_type === 'supplier' ? 'Bank Transfer / Remittance' : 'Bank Transfer / Raast'));
+    setNotes(b.notes || (b.bill_type === 'supplier' ? 'Purchase remittance / payment advice' : 'Thank you for your order!'));
+    setPayeeBankName(b.payee_bank_name || '');
+    setPayeeAccountTitle(b.payee_account_title || '');
+    setPayeeAccountNumber(b.payee_account_number || '');
+    setPayeePaymentNotes(b.payee_payment_notes || '');
     if (b.items && b.items.length) {
       setItems(
         b.items.map((it) => ({
@@ -128,6 +136,10 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
       setCustomerEmail(found.email || '');
       setCustomerPhone(found.phone || '');
       setCustomerAddress(found.address || '');
+      setPayeeBankName(found.payee_bank_name || '');
+      setPayeeAccountTitle(found.payee_account_title || '');
+      setPayeeAccountNumber(found.payee_account_number || '');
+      setPayeePaymentNotes(found.payee_payment_notes || '');
       fetchCustomerRates(found.id);
     }
   };
@@ -262,13 +274,17 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     setCustomerEmail('');
     setCustomerPhone('');
     setCustomerAddress('');
+    setPayeeBankName('');
+    setPayeeAccountTitle('');
+    setPayeeAccountNumber('');
+    setPayeePaymentNotes('');
     setBillDate(pakistanToday());
     setDueDate(addDaysToDateString(pakistanToday(), 14));
     setTaxRate(defaultTaxRate);
     setDiscountRate(0);
-    setPaymentMethod('Bank Transfer / Raast');
+    setPaymentMethod(billType === 'supplier' ? 'Bank Transfer / Remittance' : 'Bank Transfer / Raast');
     setCashTendered('');
-    setNotes('Thank you for your order!');
+    setNotes(billType === 'supplier' ? 'Purchase remittance / payment advice' : 'Thank you for your order!');
     setItems([{ product_id: null, description: '', quantity: 1, unit_price: 0 }]);
     setSkuQuery('');
     await fetchNextInvoiceNumber(billType);
@@ -315,7 +331,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!customerName.trim()) {
-      alert('Please enter or select a customer name.');
+      alert(billType === 'supplier' ? 'Please enter or select a supplier / pay-to name.' : 'Please enter or select a customer name.');
       return;
     }
     if (items.length === 0 || items.some((i) => !i.description.trim())) {
@@ -355,6 +371,10 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
             ? `${notes}${notes?.trim() ? '\n' : ''}Cash tendered: ${currencySymbol}${tenderedNum.toFixed(2)} · Change: ${currencySymbol}${Math.max(0, changeDue).toFixed(2)}${changeDue < 0 ? ' (short)' : ''}`
             : notes,
         payment_method: paymentMethod,
+        payee_bank_name: billType === 'supplier' ? payeeBankName : '',
+        payee_account_title: billType === 'supplier' ? payeeAccountTitle : '',
+        payee_account_number: billType === 'supplier' ? payeeAccountNumber : '',
+        payee_payment_notes: billType === 'supplier' ? payeePaymentNotes : '',
         items,
       };
 
@@ -416,6 +436,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
             onClick={() => {
               setBillType('customer');
               if (customerName === 'Saudia Arabia Supplier') setCustomerName('');
+              setPaymentMethod((pm) => (pm === 'Bank Transfer / Remittance' ? 'Bank Transfer / Raast' : pm));
             }}
             style={{
               padding: '1.2rem',
@@ -444,7 +465,13 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
           <div
             onClick={() => {
               setBillType('supplier');
-              setCustomerName('Saudia Arabia Supplier');
+              const blankOrDefault =
+                !customerName.trim() || customerName.trim() === 'Saudia Arabia Supplier';
+              if (blankOrDefault) setCustomerName('Saudia Arabia Supplier');
+              setPaymentMethod('Bank Transfer / Remittance');
+              if (!notes || notes === 'Thank you for your order!') {
+                setNotes('Purchase remittance / payment advice');
+              }
             }}
             style={{
               padding: '1.2rem',
@@ -533,13 +560,13 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
           </div>
         </div>
 
-        {/* Customer & Date Section */}
+        {/* Customer / Supplier & Date Section */}
         <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
           <div>
-            <label className="form-label">Customer Name *</label>
+            <label className="form-label">{billType === 'supplier' ? 'Supplier / Pay To *' : 'Customer Name *'}</label>
             {customers.length > 0 && (
               <select className="form-select" style={{ marginBottom: '0.5rem' }} onChange={handleSelectCustomer} defaultValue="">
-                <option value="">-- Load Saved Client --</option>
+                <option value="">{billType === 'supplier' ? '-- Load Saved Supplier --' : '-- Load Saved Client --'}</option>
                 {customers.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
@@ -548,7 +575,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
             <input
               type="text"
               className="form-input"
-              placeholder="e.g. Acme Corporation"
+              placeholder={billType === 'supplier' ? 'e.g. Jeddah Trading Co.' : 'e.g. Acme Corporation'}
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               required
@@ -556,21 +583,21 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
 
             <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem' }}>
               <div>
-                <label className="form-label">Customer Email</label>
+                <label className="form-label">{billType === 'supplier' ? 'Supplier Email' : 'Customer Email'}</label>
                 <input
                   type="email"
                   className="form-input"
-                  placeholder="billing@acme.com"
+                  placeholder={billType === 'supplier' ? 'supplier@example.com' : 'billing@acme.com'}
                   value={customerEmail}
                   onChange={(e) => setCustomerEmail(e.target.value)}
                 />
               </div>
               <div>
-                <label className="form-label">Phone Number</label>
+                <label className="form-label">{billType === 'supplier' ? 'Supplier Phone' : 'Phone Number'}</label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="03XX-XXXXXXX / +92..."
+                  placeholder="03XX-XXXXXXX / +966…"
                   value={customerPhone}
                   onChange={(e) => setCustomerPhone(e.target.value)}
                 />
@@ -578,21 +605,69 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
             </div>
 
             <div style={{ marginTop: '0.75rem' }}>
-              <label className="form-label">Billing Address</label>
+              <label className="form-label">{billType === 'supplier' ? 'Supplier Address' : 'Billing Address'}</label>
               <textarea
                 className="form-textarea"
                 rows={2}
-                placeholder="Street, City (e.g. Peshawar, Lahore, Islamabad)"
+                placeholder={billType === 'supplier' ? 'City, Kingdom of Saudi Arabia' : 'Street, City (e.g. Peshawar, Lahore, Islamabad)'}
                 value={customerAddress}
                 onChange={(e) => setCustomerAddress(e.target.value)}
               />
             </div>
+
+            {billType === 'supplier' && (
+              <div style={{ marginTop: '0.9rem', padding: '0.85rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', background: 'var(--surface-inset)' }}>
+                <p style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.65rem', color: 'var(--text-secondary)' }}>
+                  Supplier Pay To bank (shown on payment advice)
+                </p>
+                <div className="form-group">
+                  <label className="form-label">Bank Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Al Rajhi Bank"
+                    value={payeeBankName}
+                    onChange={(e) => setPayeeBankName(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Account Title</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Payee account title"
+                    value={payeeAccountTitle}
+                    onChange={(e) => setPayeeAccountTitle(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">IBAN / Account Number</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="SA…"
+                    value={payeeAccountNumber}
+                    onChange={(e) => setPayeeAccountNumber(e.target.value)}
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Payment Notes (SWIFT, etc.)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="SWIFT / remittance reference"
+                    value={payeePaymentNotes}
+                    onChange={(e) => setPayeePaymentNotes(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
             <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <div className="form-group">
-                <label className="form-label">Invoice Date</label>
+                <label className="form-label">{billType === 'supplier' ? 'Bill Date' : 'Invoice Date'}</label>
                 <input
                   type="date"
                   className="form-input"
@@ -621,10 +696,20 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                   if (!String(e.target.value).toLowerCase().includes('cash')) setCashTendered('');
                 }}
               >
-                <option value="Bank Transfer / Raast">Bank Transfer / Raast</option>
-                <option value="JazzCash / EasyPaisa">JazzCash / EasyPaisa</option>
-                <option value="Cash Counter Sale">Cash Counter Sale</option>
-                <option value="Credit / Debit Card">Credit / Debit Card</option>
+                {billType === 'supplier' ? (
+                  <>
+                    <option value="Bank Transfer / Remittance">Bank Transfer / Remittance</option>
+                    <option value="Bank Transfer / Raast">Bank Transfer / Raast</option>
+                    <option value="Cash">Cash</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="Bank Transfer / Raast">Bank Transfer / Raast</option>
+                    <option value="JazzCash / EasyPaisa">JazzCash / EasyPaisa</option>
+                    <option value="Cash Counter Sale">Cash Counter Sale</option>
+                    <option value="Credit / Debit Card">Credit / Debit Card</option>
+                  </>
+                )}
               </select>
             </div>
 

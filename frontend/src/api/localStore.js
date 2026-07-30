@@ -330,10 +330,33 @@ async function handleLocalRequestInner(url, options = {}) {
         phone: body.phone || '',
         address: body.address || '',
         tax_id: body.tax_id || '',
+        payee_bank_name: body.payee_bank_name || '',
+        payee_account_title: body.payee_account_title || '',
+        payee_account_number: body.payee_account_number || '',
+        payee_payment_notes: body.payee_payment_notes || '',
         created_at: new Date().toISOString(),
       };
       await db.put('customers', customer);
       return jsonOk(customer, 201);
+    }
+    if (parts.length === 3 && method === 'PUT') {
+      const id = Number(parts[2]);
+      const existing = await db.get('customers', id);
+      if (!existing) return jsonErr('Customer not found', 404);
+      const customer = {
+        ...existing,
+        name: body.name ?? existing.name,
+        email: body.email ?? existing.email ?? '',
+        phone: body.phone ?? existing.phone ?? '',
+        address: body.address ?? existing.address ?? '',
+        tax_id: body.tax_id ?? existing.tax_id ?? '',
+        payee_bank_name: body.payee_bank_name ?? existing.payee_bank_name ?? '',
+        payee_account_title: body.payee_account_title ?? existing.payee_account_title ?? '',
+        payee_account_number: body.payee_account_number ?? existing.payee_account_number ?? '',
+        payee_payment_notes: body.payee_payment_notes ?? existing.payee_payment_notes ?? '',
+      };
+      await db.put('customers', customer);
+      return jsonOk(customer);
     }
     if (parts.length === 3 && method === 'DELETE') {
       const id = Number(parts[2]);
@@ -567,9 +590,46 @@ async function handleLocalRequestInner(url, options = {}) {
         status: body.status || 'pending',
         notes: body.notes || '',
         payment_method: body.payment_method || 'Bank Transfer / Raast / Cash',
+        payee_bank_name: body.payee_bank_name || '',
+        payee_account_title: body.payee_account_title || '',
+        payee_account_number: body.payee_account_number || '',
+        payee_payment_notes: body.payee_payment_notes || '',
         created_at: new Date().toISOString(),
       };
       await db.put('bills', bill);
+
+      const custName = String(body.customer_name).trim().toLowerCase();
+      const allCustomers = await db.getAll('customers');
+      const existingCust = allCustomers.find((c) => String(c.name || '').toLowerCase() === custName);
+      if (!existingCust) {
+        const cid = await nextId(db, 'customers');
+        await db.put('customers', {
+          id: cid,
+          name: String(body.customer_name).trim(),
+          email: body.customer_email || '',
+          phone: body.customer_phone || '',
+          address: body.customer_address || '',
+          tax_id: '',
+          payee_bank_name: body.payee_bank_name || '',
+          payee_account_title: body.payee_account_title || '',
+          payee_account_number: body.payee_account_number || '',
+          payee_payment_notes: body.payee_payment_notes || '',
+          created_at: new Date().toISOString(),
+        });
+      } else if (
+        body.payee_bank_name ||
+        body.payee_account_title ||
+        body.payee_account_number ||
+        body.payee_payment_notes
+      ) {
+        await db.put('customers', {
+          ...existingCust,
+          payee_bank_name: body.payee_bank_name || existingCust.payee_bank_name || '',
+          payee_account_title: body.payee_account_title || existingCust.payee_account_title || '',
+          payee_account_number: body.payee_account_number || existingCust.payee_account_number || '',
+          payee_payment_notes: body.payee_payment_notes || existingCust.payee_payment_notes || '',
+        });
+      }
 
       for (const item of body.items) {
         const qty = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
@@ -618,15 +678,24 @@ async function handleLocalRequestInner(url, options = {}) {
         bill_type: body.bill_type === 'supplier' ? 'supplier' : body.bill_type || existing.bill_type,
         invoice_number: body.invoice_number ?? existing.invoice_number,
         customer_name: body.customer_name ?? existing.customer_name,
+        customer_email: body.customer_email ?? existing.customer_email ?? '',
+        customer_phone: body.customer_phone ?? existing.customer_phone ?? '',
+        customer_address: body.customer_address ?? existing.customer_address ?? '',
         bill_date: body.bill_date ?? existing.bill_date,
+        due_date: body.due_date ?? existing.due_date,
         status: body.status ?? existing.status,
         notes: body.notes ?? existing.notes,
+        payment_method: body.payment_method ?? existing.payment_method,
         subtotal: body.subtotal ?? existing.subtotal,
         tax_rate: body.tax_rate ?? existing.tax_rate,
         tax_amount: body.tax_amount ?? existing.tax_amount,
         discount_rate: body.discount_rate ?? existing.discount_rate,
         discount_amount: body.discount_amount ?? existing.discount_amount,
         total_amount: body.total_amount ?? existing.total_amount,
+        payee_bank_name: body.payee_bank_name ?? existing.payee_bank_name ?? '',
+        payee_account_title: body.payee_account_title ?? existing.payee_account_title ?? '',
+        payee_account_number: body.payee_account_number ?? existing.payee_account_number ?? '',
+        payee_payment_notes: body.payee_payment_notes ?? existing.payee_payment_notes ?? '',
       };
       await db.put('bills', updated);
 

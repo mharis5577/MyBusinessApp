@@ -11,6 +11,7 @@ export function normalizeWhatsAppPhone(phone) {
 
 /**
  * Build a payment reminder message (EN or bilingual).
+ * Supplier bills use remittance / payment-sent wording (you pay them).
  */
 export function buildPaymentReminderText({
   bill,
@@ -24,6 +25,50 @@ export function buildPaymentReminderText({
     bill.balance_due ?? Math.max(0, (Number(bill.total_amount) || 0) - paid)
   );
   const company = settings.company_name || 'ELITE CHOCOLATE';
+  const isSupplier = bill.bill_type === 'supplier';
+
+  if (isSupplier) {
+    const en = [
+      `Assalam o Alaikum ${bill.customer_name || 'Supplier'},`,
+      '',
+      `Payment for purchase ${bill.invoice_number} from ${company}.`,
+      `Amount to pay: ${formatCurrency(currencySymbol, bill.total_amount)}`,
+      balance > 0 && paid > 0
+        ? `Paid so far: ${formatCurrency(currencySymbol, paid)} · Remaining: ${formatCurrency(currencySymbol, balance)}`
+        : null,
+      bill.due_date ? `Due / remittance date: ${bill.due_date}` : null,
+      '',
+      bill.payee_bank_name ? `Pay To bank: ${bill.payee_bank_name}` : null,
+      bill.payee_account_title ? `Account title: ${bill.payee_account_title}` : null,
+      bill.payee_account_number ? `IBAN / A/C: ${bill.payee_account_number}` : null,
+      bill.payee_payment_notes || null,
+      '',
+      `— ${company}`,
+    ]
+      .filter((line) => line !== null)
+      .join('\n');
+
+    if (!urdu) return en;
+
+    const ur = [
+      `السلام علیکم ${bill.customer_name || 'سپلائر'}،`,
+      '',
+      `خریداری ادائیگی ${bill.invoice_number} — ${company}`,
+      `ادا کی جانے والی رقم: ${formatCurrency(currencySymbol, bill.total_amount)}`,
+      bill.payee_account_number ? `اکاؤنٹ / IBAN: ${bill.payee_account_number}` : null,
+      '',
+      `— ${company}`,
+      '',
+      '---',
+      '',
+      en,
+    ]
+      .filter((line) => line !== null)
+      .join('\n');
+
+    return ur;
+  }
+
   const wallet = settings.mobile_wallet || settings.account_number || '';
   const instructions = settings.payment_instructions || '';
 

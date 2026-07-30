@@ -2,7 +2,7 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
 /**
- * Capture invoice DOM → multi-page PDF blob (more reliable than html2pdf.js alone).
+ * Capture invoice DOM → single A4 PDF blob (scaled to fit width AND height).
  */
 export async function elementToPdfBlob(element, { filename = 'Invoice.pdf' } = {}) {
   if (!element) throw new Error('Invoice preview not ready');
@@ -50,22 +50,17 @@ export async function elementToPdfBlob(element, { filename = 'Invoice.pdf' } = {
   const usableWidth = pageWidth - margin * 2;
   const usableHeight = pageHeight - margin * 2;
 
-  const imgWidth = usableWidth;
-  const imgHeight = (canvas.height * imgWidth) / canvas.width;
+  // Scale to fit BOTH width and height on one page (no addPage for normal bills)
+  const widthScale = usableWidth / canvas.width;
+  const heightScale = usableHeight / canvas.height;
+  const scale = Math.min(widthScale, heightScale);
+  const imgWidth = canvas.width * scale;
+  const imgHeight = canvas.height * scale;
+  const x = margin + (usableWidth - imgWidth) / 2;
+  const y = margin + (usableHeight - imgHeight) / 2;
+
   const imgData = canvas.toDataURL('image/jpeg', 0.92);
-
-  let heightLeft = imgHeight;
-  let position = margin;
-
-  pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight, undefined, 'FAST');
-  heightLeft -= usableHeight;
-
-  while (heightLeft > 2) {
-    position = margin - (imgHeight - heightLeft);
-    pdf.addPage();
-    pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight, undefined, 'FAST');
-    heightLeft -= usableHeight;
-  }
+  pdf.addImage(imgData, 'JPEG', x, y, imgWidth, imgHeight, undefined, 'FAST');
 
   // filename is unused by blob output but kept for callers
   void filename;

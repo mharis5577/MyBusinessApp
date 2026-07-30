@@ -153,16 +153,83 @@ app.get('/api/customers', async (req, res) => {
 
 app.post('/api/customers', async (req, res) => {
   try {
-    const { name, email, phone, address, tax_id } = req.body;
+    const {
+      name,
+      email,
+      phone,
+      address,
+      tax_id,
+      payee_bank_name,
+      payee_account_title,
+      payee_account_number,
+      payee_payment_notes,
+    } = req.body;
     if (!name) return res.status(400).json({ error: 'Customer name is required' });
 
     const result = await dbRun(
-      'INSERT INTO customers (name, email, phone, address, tax_id) VALUES (?, ?, ?, ?, ?)',
-      [name, email || '', phone || '', address || '', tax_id || '']
+      `INSERT INTO customers (
+        name, email, phone, address, tax_id,
+        payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        name,
+        email || '',
+        phone || '',
+        address || '',
+        tax_id || '',
+        payee_bank_name || '',
+        payee_account_title || '',
+        payee_account_number || '',
+        payee_payment_notes || '',
+      ]
     );
 
     const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
     res.status(201).json(customer);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/customers/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Customer not found' });
+
+    const {
+      name,
+      email,
+      phone,
+      address,
+      tax_id,
+      payee_bank_name,
+      payee_account_title,
+      payee_account_number,
+      payee_payment_notes,
+    } = req.body;
+
+    await dbRun(
+      `UPDATE customers SET
+        name = ?, email = ?, phone = ?, address = ?, tax_id = ?,
+        payee_bank_name = ?, payee_account_title = ?, payee_account_number = ?, payee_payment_notes = ?
+       WHERE id = ?`,
+      [
+        name ?? existing.name,
+        email ?? existing.email ?? '',
+        phone ?? existing.phone ?? '',
+        address ?? existing.address ?? '',
+        tax_id ?? existing.tax_id ?? '',
+        payee_bank_name ?? existing.payee_bank_name ?? '',
+        payee_account_title ?? existing.payee_account_title ?? '',
+        payee_account_number ?? existing.payee_account_number ?? '',
+        payee_payment_notes ?? existing.payee_payment_notes ?? '',
+        id,
+      ]
+    );
+
+    const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [id]);
+    res.json(customer);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -627,6 +694,10 @@ app.post('/api/bills', async (req, res) => {
       status,
       notes,
       payment_method,
+      payee_bank_name,
+      payee_account_title,
+      payee_account_number,
+      payee_payment_notes,
       items,
     } = req.body;
 
@@ -659,8 +730,9 @@ app.post('/api/bills', async (req, res) => {
           `INSERT INTO bills (
             bill_type, invoice_number, customer_name, customer_email, customer_phone, customer_address,
             bill_date, due_date, subtotal, tax_rate, tax_amount, discount_rate, discount_amount,
-            total_amount, status, notes, payment_method
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            total_amount, status, notes, payment_method,
+            payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             bType,
             number,
@@ -679,6 +751,10 @@ app.post('/api/bills', async (req, res) => {
             status || 'pending',
             notes || '',
             payment_method || 'Bank Transfer / Raast / Cash',
+            payee_bank_name || '',
+            payee_account_title || '',
+            payee_account_number || '',
+            payee_payment_notes || '',
           ]
         );
 
@@ -714,16 +790,47 @@ app.post('/api/bills', async (req, res) => {
         }
       }
 
-      const existing = await dbGet('SELECT id FROM customers WHERE LOWER(name) = LOWER(?)', [
+      const existing = await dbGet('SELECT * FROM customers WHERE LOWER(name) = LOWER(?)', [
         customer_name.trim(),
       ]);
       if (!existing) {
-        await dbRun('INSERT INTO customers (name, email, phone, address) VALUES (?, ?, ?, ?)', [
-          customer_name.trim(),
-          customer_email || '',
-          customer_phone || '',
-          customer_address || '',
-        ]);
+        await dbRun(
+          `INSERT INTO customers (
+            name, email, phone, address,
+            payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            customer_name.trim(),
+            customer_email || '',
+            customer_phone || '',
+            customer_address || '',
+            payee_bank_name || '',
+            payee_account_title || '',
+            payee_account_number || '',
+            payee_payment_notes || '',
+          ]
+        );
+      } else if (
+        payee_bank_name ||
+        payee_account_title ||
+        payee_account_number ||
+        payee_payment_notes
+      ) {
+        await dbRun(
+          `UPDATE customers SET
+            payee_bank_name = COALESCE(NULLIF(?, ''), payee_bank_name),
+            payee_account_title = COALESCE(NULLIF(?, ''), payee_account_title),
+            payee_account_number = COALESCE(NULLIF(?, ''), payee_account_number),
+            payee_payment_notes = COALESCE(NULLIF(?, ''), payee_payment_notes)
+           WHERE id = ?`,
+          [
+            payee_bank_name || '',
+            payee_account_title || '',
+            payee_account_number || '',
+            payee_payment_notes || '',
+            existing.id,
+          ]
+        );
       }
 
       await dbRun('COMMIT');
@@ -776,6 +883,10 @@ app.put('/api/bills/:id', async (req, res) => {
       status,
       notes,
       payment_method,
+      payee_bank_name,
+      payee_account_title,
+      payee_account_number,
+      payee_payment_notes,
       items,
     } = req.body;
 
@@ -787,15 +898,16 @@ app.put('/api/bills/:id', async (req, res) => {
         bill_type = ?, invoice_number = ?, customer_name = ?, customer_email = ?,
         customer_phone = ?, customer_address = ?, bill_date = ?, due_date = ?,
         subtotal = ?, tax_rate = ?, tax_amount = ?, discount_rate = ?, discount_amount = ?,
-        total_amount = ?, status = ?, notes = ?, payment_method = ?
+        total_amount = ?, status = ?, notes = ?, payment_method = ?,
+        payee_bank_name = ?, payee_account_title = ?, payee_account_number = ?, payee_payment_notes = ?
        WHERE id = ?`,
       [
         bill_type || existingBill.bill_type || 'customer',
         invoice_number || existingBill.invoice_number,
         customer_name || existingBill.customer_name,
-        customer_email || '',
-        customer_phone || '',
-        customer_address || '',
+        customer_email ?? existingBill.customer_email ?? '',
+        customer_phone ?? existingBill.customer_phone ?? '',
+        customer_address ?? existingBill.customer_address ?? '',
         bill_date || existingBill.bill_date,
         due_date || existingBill.due_date,
         subtotal ?? existingBill.subtotal,
@@ -805,8 +917,12 @@ app.put('/api/bills/:id', async (req, res) => {
         discount_amount ?? existingBill.discount_amount,
         total_amount ?? existingBill.total_amount,
         status || existingBill.status,
-        notes || '',
-        payment_method || 'Bank Transfer / Raast / Cash',
+        notes ?? existingBill.notes ?? '',
+        payment_method || existingBill.payment_method || 'Bank Transfer / Raast / Cash',
+        payee_bank_name ?? existingBill.payee_bank_name ?? '',
+        payee_account_title ?? existingBill.payee_account_title ?? '',
+        payee_account_number ?? existingBill.payee_account_number ?? '',
+        payee_payment_notes ?? existingBill.payee_payment_notes ?? '',
         id,
       ]
     );
@@ -1098,8 +1214,23 @@ app.post('/api/restore', async (req, res) => {
 
       for (const c of data.customers || []) {
         await dbRun(
-          'INSERT INTO customers (id, name, email, phone, address, tax_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [c.id, c.name, c.email || '', c.phone || '', c.address || '', c.tax_id || '', c.created_at || null]
+          `INSERT INTO customers (
+            id, name, email, phone, address, tax_id,
+            payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            c.id,
+            c.name,
+            c.email || '',
+            c.phone || '',
+            c.address || '',
+            c.tax_id || '',
+            c.payee_bank_name || '',
+            c.payee_account_title || '',
+            c.payee_account_number || '',
+            c.payee_payment_notes || '',
+            c.created_at || null,
+          ]
         );
       }
       for (const p of data.products || []) {
@@ -1113,14 +1244,17 @@ app.post('/api/restore', async (req, res) => {
           `INSERT INTO bills (
             id, bill_type, invoice_number, customer_name, customer_email, customer_phone, customer_address,
             bill_date, due_date, subtotal, tax_rate, tax_amount, discount_rate, discount_amount,
-            total_amount, amount_paid, status, notes, payment_method, bank_details, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            total_amount, amount_paid, status, notes, payment_method, bank_details,
+            payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             b.id, b.bill_type || 'customer', b.invoice_number, b.customer_name, b.customer_email || '',
             b.customer_phone || '', b.customer_address || '', b.bill_date, b.due_date,
             b.subtotal || 0, b.tax_rate || 0, b.tax_amount || 0, b.discount_rate || 0, b.discount_amount || 0,
             b.total_amount || 0, b.amount_paid || 0, b.status || 'pending', b.notes || '',
-            b.payment_method || '', b.bank_details || '', b.created_at || null,
+            b.payment_method || '', b.bank_details || '',
+            b.payee_bank_name || '', b.payee_account_title || '', b.payee_account_number || '',
+            b.payee_payment_notes || '', b.created_at || null,
           ]
         );
       }

@@ -619,7 +619,7 @@ export default function BillsDatabase({
                 <label className="form-label">Bill Category *</label>
                 <select className="form-select" value={editType} onChange={(e) => setEditType(e.target.value)}>
                   <option value="customer">🛒 Customer Sale Invoice</option>
-                  <option value="supplier">🇸🇦 Saudia Arabia Buying Cost Bill</option>
+                  <option value="supplier">🇸🇦 Saudia Purchase / Payment Advice</option>
                 </select>
               </div>
 
@@ -637,7 +637,9 @@ export default function BillsDatabase({
               </div>
 
               <div className="form-group">
-                <label className="form-label">Party / City / Country Name *</label>
+                <label className="form-label">
+                  {editType === 'supplier' ? 'Supplier / Pay To *' : 'Customer / Party Name *'}
+                </label>
                 <input type="text" className="form-input" value={editCustomerName} onChange={(e) => setEditCustomerName(e.target.value)} required />
               </div>
 

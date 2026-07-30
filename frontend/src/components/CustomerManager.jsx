@@ -16,6 +16,10 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [taxId, setTaxId] = useState('');
+  const [payeeBankName, setPayeeBankName] = useState('');
+  const [payeeAccountTitle, setPayeeAccountTitle] = useState('');
+  const [payeeAccountNumber, setPayeeAccountNumber] = useState('');
+  const [payeePaymentNotes, setPayeePaymentNotes] = useState('');
 
   // Form State for existing catalog custom rate
   const [rateProductId, setRateProductId] = useState('');
@@ -88,7 +92,17 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
       const res = await apiFetch('/api/customers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, phone, address, tax_id: taxId }),
+        body: JSON.stringify({
+          name,
+          email,
+          phone,
+          address,
+          tax_id: taxId,
+          payee_bank_name: payeeBankName,
+          payee_account_title: payeeAccountTitle,
+          payee_account_number: payeeAccountNumber,
+          payee_payment_notes: payeePaymentNotes,
+        }),
       });
       if (res.ok) {
         setName('');
@@ -96,6 +110,10 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
         setPhone('');
         setAddress('');
         setTaxId('');
+        setPayeeBankName('');
+        setPayeeAccountTitle('');
+        setPayeeAccountNumber('');
+        setPayeePaymentNotes('');
         apiFetchCustomers();
       }
     } catch (err) {
@@ -239,6 +257,28 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
             <textarea className="form-textarea" rows={2} placeholder="City, Location" value={address} onChange={(e) => setAddress(e.target.value)} />
           </div>
 
+          <div style={{ marginTop: '0.25rem', marginBottom: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)' }}>
+            <p style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.65rem' }}>
+              Supplier Pay To bank (optional — for Saudia / buying bills)
+            </p>
+            <div className="form-group">
+              <label className="form-label">Payee Bank Name</label>
+              <input className="form-input" type="text" placeholder="e.g. Al Rajhi Bank" value={payeeBankName} onChange={(e) => setPayeeBankName(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Payee Account Title</label>
+              <input className="form-input" type="text" placeholder="Account holder name" value={payeeAccountTitle} onChange={(e) => setPayeeAccountTitle(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">IBAN / Account Number</label>
+              <input className="form-input" type="text" placeholder="SA…" value={payeeAccountNumber} onChange={(e) => setPayeeAccountNumber(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Payment Notes (SWIFT, etc.)</label>
+              <input className="form-input" type="text" placeholder="SWIFT / remittance notes" value={payeePaymentNotes} onChange={(e) => setPayeePaymentNotes(e.target.value)} />
+            </div>
+          </div>
+
           <button type="submit" className="btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>
             <Plus size={16} /> Save Client Profile
           </button>
@@ -276,6 +316,11 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
                       </h4>
                       {c.phone && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}><Phone size={12} /> {c.phone}</div>}
                       {c.email && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}><Mail size={12} /> {c.email}</div>}
+                      {c.payee_account_number && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                          Pay To: {c.payee_bank_name || 'Bank'} · {c.payee_account_number}
+                        </div>
+                      )}
                     </div>
 
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
