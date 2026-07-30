@@ -367,6 +367,52 @@ body {
   background: var(--surface-muted);
 }
 
+.cash-change-box {
+  padding: 0.75rem;
+  border-radius: 12px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border-color);
+}
+
+.cash-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+}
+
+.cash-chip {
+  border: 1px solid var(--border-color);
+  background: var(--surface);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  cursor: pointer;
+  min-height: 34px;
+}
+
+.cash-chip:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.cash-change-result {
+  margin-top: 0.65rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+}
+
+.cash-change-result.is-ok {
+  color: var(--success);
+}
+
+.cash-change-result.is-short {
+  color: var(--danger);
+}
+
 .btn-danger {
   display: inline-flex;
   align-items: center;

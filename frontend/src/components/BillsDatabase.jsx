@@ -29,6 +29,7 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
   const [payMethod, setPayMethod] = useState('Cash');
   const [payNotes, setPayNotes] = useState('');
   const [paySaving, setPaySaving] = useState(false);
+  const [payTendered, setPayTendered] = useState('');
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
@@ -168,7 +169,16 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
     setPayAmount(due > 0 ? String(due) : '');
     setPayMethod(bill.payment_method || 'Cash');
     setPayNotes('');
+    setPayTendered('');
   };
+
+  const payAmountNum = parseFloat(payAmount) || 0;
+  const payTenderedNum = parseFloat(payTendered);
+  const isPayCash = String(payMethod).toLowerCase().includes('cash');
+  const payChangeDue =
+    isPayCash && Number.isFinite(payTenderedNum) && payTenderedNum > 0
+      ? Math.round((payTenderedNum - payAmountNum) * 100) / 100
+      : null;
 
   const handleRecordPayment = async (e) => {
     e.preventDefault();
@@ -180,6 +190,11 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
     }
     setPaySaving(true);
     try {
+      let notes = payNotes;
+      if (isPayCash && payChangeDue != null) {
+        const cashLine = `Cash tendered: ${currencySymbol}${payTenderedNum.toFixed(2)} · Change: ${currencySymbol}${Math.max(0, payChangeDue).toFixed(2)}${payChangeDue < 0 ? ' (short)' : ''}`;
+        notes = notes?.trim() ? `${notes}\n${cashLine}` : cashLine;
+      }
       const res = await apiFetch(`/api/bills/${payBill.id}/payments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -187,7 +202,7 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
           amount,
           method: payMethod,
           payment_date: pakistanToday(),
-          notes: payNotes,
+          notes,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -576,7 +591,14 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
             </div>
             <div className="form-group">
               <label className="form-label">Method</label>
-              <select className="form-select" value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+              <select
+                className="form-select"
+                value={payMethod}
+                onChange={(e) => {
+                  setPayMethod(e.target.value);
+                  if (!String(e.target.value).toLowerCase().includes('cash')) setPayTendered('');
+                }}
+              >
                 <option>Cash</option>
                 <option>Bank Transfer / Raast</option>
                 <option>JazzCash</option>
@@ -584,6 +606,37 @@ export default function BillsDatabase({ onViewBill, onDuplicateBill, currencySym
                 <option>Card</option>
               </select>
             </div>
+            {isPayCash && (
+              <div className="cash-change-box form-group">
+                <label className="form-label">Cash tendered ({currencySymbol})</label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  className="form-input"
+                  placeholder="Customer handed you…"
+                  value={payTendered}
+                  onChange={(e) => setPayTendered(e.target.value)}
+                />
+                <div className="cash-chip-row">
+                  <button type="button" className="cash-chip" onClick={() => setPayTendered(String(Math.ceil(payAmountNum)))}>
+                    Exact
+                  </button>
+                  {[500, 1000, 5000].map((n) => (
+                    <button key={n} type="button" className="cash-chip" onClick={() => setPayTendered(String(n))}>
+                      {currencySymbol}{n}
+                    </button>
+                  ))}
+                </div>
+                {payChangeDue != null && (
+                  <div className={`cash-change-result ${payChangeDue < 0 ? 'is-short' : 'is-ok'}`}>
+                    {payChangeDue < 0
+                      ? `Short by ${currencySymbol}${Math.abs(payChangeDue).toFixed(2)}`
+                      : `Change due: ${currencySymbol}${payChangeDue.toFixed(2)}`}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="form-group">
               <label className="form-label">Notes</label>
               <input type="text" className="form-input" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} placeholder="Optional" />

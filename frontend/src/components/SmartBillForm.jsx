@@ -26,6 +26,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const [taxRate, setTaxRate] = useState(defaultTaxRate);
   const [discountRate, setDiscountRate] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('Bank Transfer / Raast');
+  const [cashTendered, setCashTendered] = useState('');
   const [notes, setNotes] = useState('Thank you for your order!');
 
   // Items State
@@ -245,6 +246,12 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const taxAmount = (subtotal * (parseFloat(taxRate) || 0)) / 100;
   const discountAmount = (subtotal * (parseFloat(discountRate) || 0)) / 100;
   const totalAmount = Math.max(0, subtotal + taxAmount - discountAmount);
+  const isCashSale = String(paymentMethod).toLowerCase().includes('cash');
+  const tenderedNum = parseFloat(cashTendered);
+  const changeDue =
+    isCashSale && Number.isFinite(tenderedNum) && tenderedNum > 0
+      ? Math.round((tenderedNum - totalAmount) * 100) / 100
+      : null;
   const stockWarnings = getStockWarnings();
 
   const resetFormForNew = async () => {
@@ -260,6 +267,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     setTaxRate(defaultTaxRate);
     setDiscountRate(0);
     setPaymentMethod('Bank Transfer / Raast');
+    setCashTendered('');
     setNotes('Thank you for your order!');
     setItems([{ product_id: null, description: '', quantity: 1, unit_price: 0 }]);
     setSkuQuery('');
@@ -342,7 +350,10 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         discount_amount: discountAmount,
         total_amount: totalAmount,
         status: 'pending',
-        notes,
+        notes:
+          isCashSale && changeDue != null
+            ? `${notes}${notes?.trim() ? '\n' : ''}Cash tendered: ${currencySymbol}${tenderedNum.toFixed(2)} · Change: ${currencySymbol}${Math.max(0, changeDue).toFixed(2)}${changeDue < 0 ? ' (short)' : ''}`
+            : notes,
         payment_method: paymentMethod,
         items,
       };
@@ -602,13 +613,59 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
 
             <div className="form-group">
               <label className="form-label">Payment Method</label>
-              <select className="form-select" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+              <select
+                className="form-select"
+                value={paymentMethod}
+                onChange={(e) => {
+                  setPaymentMethod(e.target.value);
+                  if (!String(e.target.value).toLowerCase().includes('cash')) setCashTendered('');
+                }}
+              >
                 <option value="Bank Transfer / Raast">Bank Transfer / Raast</option>
                 <option value="JazzCash / EasyPaisa">JazzCash / EasyPaisa</option>
                 <option value="Cash Counter Sale">Cash Counter Sale</option>
                 <option value="Credit / Debit Card">Credit / Debit Card</option>
               </select>
             </div>
+
+            {isCashSale && (
+              <div className="cash-change-box form-group">
+                <label className="form-label">Cash tendered ({currencySymbol})</label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  className="form-input"
+                  placeholder="Customer handed you…"
+                  value={cashTendered}
+                  onChange={(e) => setCashTendered(e.target.value)}
+                />
+                <div className="cash-chip-row">
+                  <button type="button" className="cash-chip" onClick={() => setCashTendered(String(Math.ceil(totalAmount)))}>
+                    Exact
+                  </button>
+                  {[500, 1000, 5000].map((n) => (
+                    <button key={n} type="button" className="cash-chip" onClick={() => setCashTendered(String(n))}>
+                      {currencySymbol}{n}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="cash-chip"
+                    onClick={() => setCashTendered(String(Math.ceil(totalAmount / 100) * 100 || 100))}
+                  >
+                    Round ↑100
+                  </button>
+                </div>
+                {changeDue != null && (
+                  <div className={`cash-change-result ${changeDue < 0 ? 'is-short' : 'is-ok'}`}>
+                    {changeDue < 0
+                      ? `Short by ${currencySymbol}${Math.abs(changeDue).toFixed(2)}`
+                      : `Change due: ${currencySymbol}${changeDue.toFixed(2)}`}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="form-group">
               <label className="form-label">Notes & Terms</label>
