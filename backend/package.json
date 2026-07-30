@@ -1,0 +1,16 @@
+{
+  "name": "auto-bill-backend",
+  "version": "1.0.0",
+  "description": "Backend API and SQLite database for Auto Bill Generator & Saver",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "sqlite3": "^5.1.7"
+  }
+}

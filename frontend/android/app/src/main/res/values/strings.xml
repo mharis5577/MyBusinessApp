@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ELITE CHOCOLATE</string>
+    <string name="title_activity_main">ELITE CHOCOLATE</string>
+    <string name="package_name">pk.elitechocolate.pos</string>
+    <string name="custom_url_scheme">pk.elitechocolate.pos</string>
+</resources>

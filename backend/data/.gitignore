@@ -1,0 +1,4 @@
+# Keep folder; live shop DB is not committed
+*
+!.gitignore
+!.gitkeep

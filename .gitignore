@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# Build outputs
+frontend/dist/
+frontend/android/app/build/
+frontend/android/build/
+frontend/android/.gradle/
+frontend/android/local.properties
+frontend/android/captures/
+frontend/android/.idea/
+frontend/android/**/build/
+*.apk
+*.aab
+*.ap_
+*.keystore
+*.jks
+
+# Env / OS
+.env
+.env.local
+.env.*.local
+.DS_Store
+Thumbs.db
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Backend live shop DB (created at runtime; not for GitHub)
+backend/data/*.db
+backend/data/*.db-*
+!backend/data/.gitkeep
+
+# Capacitor generated noise
+frontend/android/app/src/main/assets/public/
+frontend/android/app/src/main/assets/capacitor.config.json
+frontend/android/app/src/main/assets/capacitor.plugins.json
