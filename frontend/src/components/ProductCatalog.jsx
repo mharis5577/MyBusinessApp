@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Package, Plus, Trash2, Search, History, Minus, RefreshCw } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
+import { useToast } from '../toast/ToastContext';
 
 export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
+  const toast = useToast();
   const [products, setProducts] = useState([]);
   const [adjustments, setAdjustments] = useState([]);
   const [name, setName] = useState('');
@@ -71,7 +73,7 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
         apiFetchProducts();
       }
     } catch (err) {
-      alert('Error adding product: ' + err.message);
+      toast.error('Error adding product: ' + err.message);
     }
   };
 
@@ -81,7 +83,7 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
       const res = await apiFetch(`/api/products/${id}`, { method: 'DELETE' });
       if (res.ok) apiFetchProducts();
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
@@ -97,7 +99,7 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
       apiFetchProducts();
       apiFetchAdjustments();
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 

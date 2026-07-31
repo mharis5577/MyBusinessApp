@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Wallet, Plus, Trash2, Banknote, RefreshCw } from 'lucide-react';
 import { pakistanToday, formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
+import { useToast } from '../toast/ToastContext';
 
 export default function AdvancesManager({ currencySymbol = 'Rs.' }) {
+  const toast = useToast();
   const [advances, setAdvances] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [totalAdvance, setTotalAdvance] = useState(0);
@@ -97,7 +99,7 @@ export default function AdvancesManager({ currencySymbol = 'Rs.' }) {
     e.preventDefault();
     const amt = parseFloat(amount);
     if (!clientName.trim() || !amt || amt <= 0) {
-      alert('Client and a valid amount are required');
+      toast.error('Client and a valid amount are required');
       return;
     }
     setSaving(true);
@@ -119,7 +121,7 @@ export default function AdvancesManager({ currencySymbol = 'Rs.' }) {
       setPaymentDate(pakistanToday());
       await loadAdvances();
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     } finally {
       setSaving(false);
     }
@@ -135,14 +137,14 @@ export default function AdvancesManager({ currencySymbol = 'Rs.' }) {
       }
       await loadAdvances();
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
   const handleApply = async (e) => {
     e.preventDefault();
     if (!applyClient || !applyBillId) {
-      alert('Select a client and an open bill');
+      toast.error('Select a client and an open bill');
       return;
     }
     setApplying(true);
@@ -158,12 +160,12 @@ export default function AdvancesManager({ currencySymbol = 'Rs.' }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      alert(`Applied ${formatCurrency(currencySymbol, data.applied)} to the bill.`);
+      toast.success(`Applied ${formatCurrency(currencySymbol, data.applied)} to the bill.`);
       setApplyAmount('');
       await loadAdvances();
       setApplyClient(applyClient);
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     } finally {
       setApplying(false);
     }

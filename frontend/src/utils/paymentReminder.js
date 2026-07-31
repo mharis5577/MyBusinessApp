@@ -1,4 +1,5 @@
 import { formatCurrency } from './pakistan';
+import { toast } from './toast';
 
 export function normalizeWhatsAppPhone(phone) {
   const digits = String(phone || '').replace(/\D/g, '');
@@ -132,7 +133,7 @@ export function openWhatsAppReminder(phone, text) {
 export function openSmsReminder(phone, text) {
   const digits = String(phone || '').replace(/\D/g, '');
   if (!digits) {
-    alert('No phone number on this bill. Add a client phone first.');
+    toast.error('No phone number on this bill. Add a client phone first.');
     return;
   }
   // Android prefers ?body=, iOS often uses &body=

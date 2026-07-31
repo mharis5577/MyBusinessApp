@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { DollarSign, Clock, AlertTriangle, FileText, PlusCircle, TrendingUp, RefreshCw, Package, Wallet } from 'lucide-react';
+import { DollarSign, Clock, AlertTriangle, FileText, PlusCircle, TrendingUp, RefreshCw, Package, Wallet, ArrowDownUp } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
+import CashflowPanel from './CashflowPanel';
+import AgingReport from './AgingReport';
 
 function StatCard({ label, value, hint, icon: Icon, accent }) {
   return (
@@ -20,7 +22,7 @@ function StatCard({ label, value, hint, icon: Icon, accent }) {
   );
 }
 
-export default function DashboardStats({ onNavigate, currencySymbol = 'Rs.' }) {
+export default function DashboardStats({ onNavigate, onViewBill, currencySymbol = 'Rs.', settings = {} }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -73,6 +75,9 @@ export default function DashboardStats({ onNavigate, currencySymbol = 'Rs.' }) {
           </button>
           <button className="btn-secondary" onClick={() => onNavigate('database')}>
             <FileText size={18} /> View Bills
+          </button>
+          <button className="btn-secondary" onClick={() => onNavigate('cashflow')}>
+            <ArrowDownUp size={18} /> Cashflow
           </button>
           <button className="btn-secondary" onClick={() => onNavigate('advances')}>
             <Wallet size={18} /> Advances
@@ -135,6 +140,24 @@ export default function DashboardStats({ onNavigate, currencySymbol = 'Rs.' }) {
           accent="var(--accent-primary)"
         />
       </div>
+
+      <CashflowPanel currencySymbol={currencySymbol} compact onNavigate={onNavigate} />
+
+      <AgingReport
+        currencySymbol={currencySymbol}
+        settings={settings}
+        compact
+        onOpenBill={async (row) => {
+          try {
+            const res = await apiFetch(`/api/bills/${row.id}`);
+            const bill = await res.json();
+            if (res.ok && onViewBill) onViewBill(bill);
+            else if (onNavigate) onNavigate('database');
+          } catch {
+            if (onNavigate) onNavigate('database');
+          }
+        }}
+      />
 
       <div className="glass-panel dashboard-recent">
         <div className="dashboard-recent-head">

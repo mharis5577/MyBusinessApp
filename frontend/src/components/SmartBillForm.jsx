@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2 } from 'lucide-react';
 import { parseNaturalBillText } from '../utils/naturalParser';
 import { pakistanToday, addDaysToDateString } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
+import { useToast } from '../toast/ToastContext';
 
 export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.', defaultTaxRate = 0, draftBill = null, onDraftConsumed }) {
+  const toast = useToast();
   const [billType, setBillType] = useState('customer'); // 'customer' or 'supplier'
   const [naturalText, setNaturalText] = useState('');
   const [customers, setCustomers] = useState([]);
@@ -121,6 +123,13 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     }
   };
 
+  const filteredParties = useMemo(() => {
+    return (customers || []).filter((c) => {
+      const pt = c.party_type === 'supplier' ? 'supplier' : 'customer';
+      return pt === billType;
+    });
+  }, [customers, billType]);
+
   // Select Customer from Saved DB list
   const handleSelectCustomer = (e) => {
     const custId = e.target.value;
@@ -159,9 +168,9 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
 
       const stock = Number(found.stock);
       if (billType === 'customer' && !Number.isNaN(stock) && stock <= 0) {
-        alert(`Low stock warning: "${found.name}" has ${stock} in stock.`);
+        toast.info(`Low stock warning: "${found.name}" has ${stock} in stock.`);
       } else if (billType === 'customer' && !Number.isNaN(stock) && stock <= 5) {
-        alert(`Low stock: only ${stock} left for "${found.name}".`);
+        toast.info(`Low stock: only ${stock} left for "${found.name}".`);
       }
 
       const updated = [...items];
@@ -214,7 +223,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const handleNaturalParse = () => {
     const parsed = parseNaturalBillText(naturalText);
     if (!parsed || (!parsed.customerName && (!parsed.items || parsed.items.length === 0))) {
-      alert('Could not parse that text. Try: "2 Ferrero Rocher @ 2450 for Al-Fatah"');
+      toast.error('Could not parse that text. Try: "2 Ferrero Rocher @ 2450 for Al-Fatah"');
       return;
     }
 
@@ -299,7 +308,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         String(p.name || '').toLowerCase().includes(q)
     );
     if (!found) {
-      alert(`No item matched "${skuQuery}"`);
+      toast.error(`No item matched "${skuQuery}"`);
       return;
     }
 
@@ -331,11 +340,11 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!customerName.trim()) {
-      alert(billType === 'supplier' ? 'Please enter or select a supplier / pay-to name.' : 'Please enter or select a customer name.');
+      toast.error(billType === 'supplier' ? 'Please enter or select a supplier / pay-to name.' : 'Please enter or select a customer name.');
       return;
     }
     if (items.length === 0 || items.some((i) => !i.description.trim())) {
-      alert('Please ensure all item descriptions are filled out.');
+      toast.error('Please ensure all item descriptions are filled out.');
       return;
     }
 
@@ -403,7 +412,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
 
       if (mode === 'new') {
         await resetFormForNew();
-        alert(`Saved ${data.invoice_number}. Form cleared for next bill.`);
+        toast.success(`Saved ${data.invoice_number}. Form cleared for next bill.`);
       } else {
         onBillGenerated(data);
       }
@@ -412,7 +421,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         err.message === 'Failed to fetch'
           ? 'Cannot reach the API. Start the backend (port 11000) and keep the Vite proxy running.'
           : err.message;
-      alert('Error saving bill: ' + msg);
+      toast.error('Error saving bill: ' + msg);
     } finally {
       setLoading(false);
       setSaveMode('view');
@@ -435,6 +444,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
           <div
             onClick={() => {
               setBillType('customer');
+              setSelectedCustomerId(null);
               if (customerName === 'Saudia Arabia Supplier') setCustomerName('');
               setPaymentMethod((pm) => (pm === 'Bank Transfer / Remittance' ? 'Bank Transfer / Raast' : pm));
             }}
@@ -465,6 +475,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
           <div
             onClick={() => {
               setBillType('supplier');
+              setSelectedCustomerId(null);
               const blankOrDefault =
                 !customerName.trim() || customerName.trim() === 'Saudia Arabia Supplier';
               if (blankOrDefault) setCustomerName('Saudia Arabia Supplier');
@@ -564,14 +575,24 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
           <div>
             <label className="form-label">{billType === 'supplier' ? 'Supplier / Pay To *' : 'Customer Name *'}</label>
-            {customers.length > 0 && (
-              <select className="form-select" style={{ marginBottom: '0.5rem' }} onChange={handleSelectCustomer} defaultValue="">
+            {filteredParties.length > 0 && (
+              <select
+                className="form-select"
+                style={{ marginBottom: '0.5rem' }}
+                value={selectedCustomerId || ''}
+                onChange={handleSelectCustomer}
+              >
                 <option value="">{billType === 'supplier' ? '-- Load Saved Supplier --' : '-- Load Saved Client --'}</option>
-                {customers.map((c) => (
+                {filteredParties.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
             )}
+            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '0.45rem' }}>
+              {billType === 'supplier'
+                ? 'Showing supplier parties only — or type a new Jeddah supplier name below.'
+                : 'Showing customer parties only — or type a new retail client name below.'}
+            </p>
             <input
               type="text"
               className="form-input"

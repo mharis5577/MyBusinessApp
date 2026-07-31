@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Eye, Trash2, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus } from 'lucide-react';
 import { pakistanToday, formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
+import { useToast } from '../toast/ToastContext';
 import { downloadBlob } from '../utils/downloadFile';
 import { compressImageToDataUrl } from '../utils/imageCompress';
 import {
@@ -17,6 +18,7 @@ export default function BillsDatabase({
   urduLabels = false,
   settings: settingsProp = {},
 }) {
+  const toast = useToast();
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [billTypeFilter, setBillTypeFilter] = useState('all'); // 'all', 'customer', 'supplier'
@@ -156,10 +158,10 @@ export default function BillsDatabase({
         apiFetchBills();
       } else {
         const err = await res.json().catch(() => ({}));
-        alert('Error updating bill: ' + (err.error || `HTTP ${res.status}`));
+        toast.error('Error updating bill: ' + (err.error || `HTTP ${res.status}`));
       }
     } catch (err) {
-      alert('Error updating bill: ' + err.message);
+      toast.error('Error updating bill: ' + err.message);
     }
   };
 
@@ -175,7 +177,7 @@ export default function BillsDatabase({
         apiFetchBills();
       }
     } catch (err) {
-      alert('Error updating status: ' + err.message);
+      toast.error('Error updating status: ' + err.message);
     }
   };
 
@@ -190,7 +192,7 @@ export default function BillsDatabase({
         apiFetchBills();
       }
     } catch (err) {
-      alert('Error deleting bill: ' + err.message);
+      toast.error('Error deleting bill: ' + err.message);
     }
   };
 
@@ -218,7 +220,7 @@ export default function BillsDatabase({
       bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0))
     );
     if (due <= 0) {
-      alert('No balance due on this bill.');
+      toast.error('No balance due on this bill.');
       return;
     }
     const text = buildPaymentReminderText({
@@ -240,7 +242,7 @@ export default function BillsDatabase({
       setPayScreenshot(dataUrl);
       setPayScreenshotName(file.name || 'screenshot.jpg');
     } catch (err) {
-      alert(err.message || 'Could not attach image');
+      toast.error(err.message || 'Could not attach image');
     }
   };
 
@@ -267,7 +269,7 @@ export default function BillsDatabase({
       setPayBill(null);
       apiFetchBills();
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     } finally {
       setPaySaving(false);
     }
@@ -286,7 +288,7 @@ export default function BillsDatabase({
     if (!payBill) return;
     const amount = parseFloat(payAmount);
     if (!amount || amount <= 0) {
-      alert('Enter a valid payment amount');
+      toast.error('Enter a valid payment amount');
       return;
     }
     setPaySaving(true);
@@ -312,7 +314,7 @@ export default function BillsDatabase({
       setPayBill(null);
       apiFetchBills();
     } catch (err) {
-      alert('Payment failed: ' + err.message);
+      toast.error('Payment failed: ' + err.message);
     } finally {
       setPaySaving(false);
     }
@@ -339,7 +341,7 @@ export default function BillsDatabase({
     try {
       await downloadBlob(blob, `Bills_Master_${pakistanToday()}.csv`, 'text/csv');
     } catch (err) {
-      if (err?.name !== 'AbortError') alert('Export failed: ' + err.message);
+      if (err?.name !== 'AbortError') toast.error('Export failed: ' + err.message);
     }
   };
 

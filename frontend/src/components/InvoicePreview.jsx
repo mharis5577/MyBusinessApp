@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
+import { useToast } from '../toast/ToastContext';
 import { downloadBlob, saveOrShareBlob } from '../utils/downloadFile';
 import { elementToJpegBlob, elementToPdfBlob } from '../utils/invoiceExport';
 import { compressImageToDataUrl } from '../utils/imageCompress';
@@ -40,6 +41,7 @@ function BiLabel({ en, ur, urdu, className, style }) {
 }
 
 export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymbol = 'Rs.', urduLabels = false }) {
+  const toast = useToast();
   const [settings, setSettings] = useState({});
   const [posMode, setPosMode] = useState(false);
   const [sharing, setSharing] = useState(null);
@@ -123,7 +125,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
       const blob = await buildPdfBlob();
       await downloadBlob(blob, `${baseName}_Invoice.pdf`, 'application/pdf');
     } catch (err) {
-      if (err?.name !== 'AbortError') alert('Could not create PDF: ' + (err.message || err));
+      if (err?.name !== 'AbortError') toast.error('Could not create PDF: ' + (err.message || err));
     } finally {
       setSharing(null);
     }
@@ -135,7 +137,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
       const blob = await buildImageBlob();
       await downloadBlob(blob, `${baseName}_Invoice.jpg`, 'image/jpeg');
     } catch (err) {
-      if (err?.name !== 'AbortError') alert('Could not create image: ' + (err.message || err));
+      if (err?.name !== 'AbortError') toast.error('Could not create image: ' + (err.message || err));
     } finally {
       setSharing(null);
     }
@@ -160,14 +162,14 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
           urdu,
         });
         openWhatsAppReminder(liveBill.customer_phone, text || caption);
-        alert(
+        toast.error(
           isSupplier
             ? 'Payment advice image downloaded. WhatsApp will open — attach the JPG if needed.'
             : 'Invoice image downloaded. WhatsApp will open — attach the JPG if needed.'
         );
       }
     } catch (err) {
-      if (err?.name !== 'AbortError') alert('Could not share invoice image: ' + (err.message || err));
+      if (err?.name !== 'AbortError') toast.error('Could not share invoice image: ' + (err.message || err));
     } finally {
       setSharing(null);
     }
@@ -175,7 +177,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
 
   const handleRemind = (channel) => {
     if (balance <= 0) {
-      alert('No balance due.');
+      toast.error('No balance due.');
       return;
     }
     const text = buildPaymentReminderText({
@@ -206,7 +208,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
         window.location.href = `mailto:${encodeURIComponent(liveBill.customer_email || '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body + '\n\n(Attach the downloaded PDF)')}`;
       }
     } catch (err) {
-      if (err?.name !== 'AbortError') alert('Could not share invoice PDF: ' + (err.message || err));
+      if (err?.name !== 'AbortError') toast.error('Could not share invoice PDF: ' + (err.message || err));
     } finally {
       setSharing(null);
     }
@@ -219,7 +221,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
     try {
       setPayScreenshot(await compressImageToDataUrl(file));
     } catch (err) {
-      alert(err.message || 'Could not attach image');
+      toast.error(err.message || 'Could not attach image');
     }
   };
 
@@ -244,7 +246,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
       setPayAmount('');
       setPayScreenshot('');
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     } finally {
       setPaying(false);
     }
@@ -268,7 +270,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
       setLiveBill(data.bill);
       setAdvanceWallet(Number(data.available_advance) || 0);
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     } finally {
       setPaying(false);
     }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, PlusCircle, Database, Users, Package, Settings, Moon, Sun, Sparkles, Download, Lock, Wallet } from 'lucide-react';
+import { LayoutDashboard, PlusCircle, Database, Users, Package, Settings, Moon, Sun, Sparkles, Download, Lock, Wallet, ArrowDownUp } from 'lucide-react';
 import DashboardStats from './components/DashboardStats';
 import SmartBillForm from './components/SmartBillForm';
 import InvoicePreview from './components/InvoicePreview';
@@ -8,7 +8,10 @@ import CustomerManager from './components/CustomerManager';
 import ProductCatalog from './components/ProductCatalog';
 import SettingsManager from './components/SettingsManager';
 import AdvancesManager from './components/AdvancesManager';
+import CashflowPanel from './components/CashflowPanel';
 import { apiFetch } from './api/client';
+import { useToast } from './toast/ToastContext';
+import { maybeAutoBackup } from './utils/backupManager';
 
 const THEME_KEY = 'elite-chocolate-theme';
 const PIN_UNLOCK_KEY = 'elite-chocolate-pin-ok';
@@ -24,6 +27,7 @@ function getInitialTheme() {
 }
 
 export default function App() {
+  const toast = useToast();
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [selectedBill, setSelectedBill] = useState(null);
   const [draftBill, setDraftBill] = useState(null);
@@ -51,6 +55,9 @@ export default function App() {
 
   useEffect(() => {
     fetchSettings();
+    maybeAutoBackup({ offerShare: false }).catch((err) => {
+      console.warn('Auto-backup skipped', err);
+    });
   }, []);
 
   useEffect(() => {
@@ -111,7 +118,7 @@ export default function App() {
 
   const handleInstallApp = async () => {
     if (!deferredInstall) {
-      alert('Install is available from your browser menu (Add to Home Screen / Install app).');
+      toast.info('Install is available from your browser menu (Add to Home Screen / Install app).');
       return;
     }
     deferredInstall.prompt();
@@ -177,6 +184,9 @@ export default function App() {
           <button className={`nav-btn ${currentTab === 'advances' ? 'active' : ''}`} onClick={() => setCurrentTab('advances')}>
             <Wallet size={17} /> Advances
           </button>
+          <button className={`nav-btn ${currentTab === 'cashflow' ? 'active' : ''}`} onClick={() => setCurrentTab('cashflow')}>
+            <ArrowDownUp size={17} /> Cashflow
+          </button>
           <button className={`nav-btn ${currentTab === 'settings' ? 'active' : ''}`} onClick={() => setCurrentTab('settings')}>
             <Settings size={17} /> Settings
           </button>
@@ -201,7 +211,12 @@ export default function App() {
         {currentTab === 'dashboard' && (
           <DashboardStats
             onNavigate={(tab) => setCurrentTab(tab)}
+            onViewBill={(bill) => {
+              setSelectedBill(bill);
+              setCurrentTab('preview');
+            }}
             currencySymbol={settings.currency_symbol || 'Rs.'}
+            settings={settings}
           />
         )}
 
@@ -245,6 +260,13 @@ export default function App() {
 
         {currentTab === 'advances' && (
           <AdvancesManager currencySymbol={settings.currency_symbol || 'Rs.'} />
+        )}
+
+        {currentTab === 'cashflow' && (
+          <CashflowPanel
+            currencySymbol={settings.currency_symbol || 'Rs.'}
+            onNavigate={(tab) => setCurrentTab(tab)}
+          />
         )}
 
         {currentTab === 'settings' && (

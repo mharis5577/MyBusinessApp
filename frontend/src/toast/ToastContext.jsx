@@ -1,4 +1,5 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { subscribeToasts } from '../utils/toast';
 
 const ToastContext = createContext(null);
 
@@ -41,6 +42,21 @@ export function ToastProvider({ children }) {
     }),
     [push, dismiss]
   );
+
+  useEffect(() => {
+    const onElite = (e) => {
+      const d = e.detail || {};
+      push(d.message || '', d.type || 'info', d.duration);
+    };
+    window.addEventListener('elite-toast', onElite);
+    const unsub = subscribeToasts((t) => {
+      push(t.message, t.type, t.duration);
+    });
+    return () => {
+      window.removeEventListener('elite-toast', onElite);
+      unsub();
+    };
+  }, [push]);
 
   return (
     <ToastContext.Provider value={api}>
