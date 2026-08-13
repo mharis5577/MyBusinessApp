@@ -358,14 +358,14 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
             Tip: tap <b>Backup to Drive</b>, then choose Google Drive → your folder.
           </p>
         )}
-        <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-          <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={busy} onClick={handleShareBackup}>
+        <div className="action-row" style={{ marginBottom: '1rem' }}>
+          <button type="button" className="btn-primary" disabled={busy} onClick={handleShareBackup}>
             <Share2 size={16} /> Backup to Drive
           </button>
-          <button type="button" className="btn-secondary" style={{ width: 'auto' }} disabled={busy} onClick={handleBackup}>
+          <button type="button" className="btn-secondary" disabled={busy} onClick={handleBackup}>
             <Download size={16} /> App + Phone only
           </button>
-          <button type="button" className="btn-secondary" style={{ width: 'auto' }} disabled={busy} onClick={() => fileRef.current?.click()}>
+          <button type="button" className="btn-secondary" disabled={busy} onClick={() => fileRef.current?.click()}>
             <Upload size={16} /> Restore from file
           </button>
           <input
@@ -462,7 +462,7 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
           )}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem' }}>
+        <div className="settings-form-grid responsive-grid" style={{ display: 'grid', gap: '1rem' }}>
           <div className="form-group">
             <label className="form-label">Store / Company Name</label>
             <input className="form-input" type="text" value={settings.company_name || ''} onChange={(e) => handleChange('company_name', e.target.value)} required />
@@ -575,7 +575,7 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
 
         <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
           <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-teal)', marginBottom: '0.75rem' }}>Bank & Payment Options</h4>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem' }}>
+          <div className="settings-form-grid responsive-grid" style={{ display: 'grid', gap: '1rem' }}>
             <div className="form-group">
               <label className="form-label">Bank Name</label>
               <input className="form-input" type="text" value={settings.bank_name || ''} onChange={(e) => handleChange('bank_name', e.target.value)} />
@@ -615,11 +615,11 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
         <h3 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           <FileBarChart2 size={18} /> Monthly sales report
         </h3>
-        <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem' }}>
-          <input className="form-input" type="month" style={{ width: 'auto' }} value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} />
-          <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={loadMonthlyReport}>Load</button>
+        <div className="action-row" style={{ marginBottom: '1rem' }}>
+          <input className="form-input" type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} />
+          <button type="button" className="btn-secondary" onClick={loadMonthlyReport}>Load</button>
           {report && (
-            <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={exportReportCsv}>Export CSV</button>
+            <button type="button" className="btn-secondary" onClick={exportReportCsv}>Export CSV</button>
           )}
         </div>
         {report && (

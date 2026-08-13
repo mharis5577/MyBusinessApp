@@ -264,7 +264,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       <div className="no-print glass-panel invoice-actions" style={{ padding: '1rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-        <button className="btn-secondary" onClick={onBack} style={{ width: 'auto' }} disabled={busy}>
+        <button className="btn-secondary" onClick={onBack} disabled={busy}>
           <ArrowLeft size={16} /> Back
         </button>
         <div className="action-chip-row" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -326,7 +326,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
       {balance > 0 && !cancelled && (
         <form className="no-print glass-panel" style={{ padding: '1rem 1.25rem' }} onSubmit={handleQuickPay}>
           <h4 style={{ fontSize: '0.95rem', fontWeight: 800, marginBottom: '0.65rem' }}>Add payment</h4>
-          <div className="payment-summary-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.5rem', marginBottom: '0.85rem' }}>
+          <div className="payment-summary-grid" style={{ marginBottom: '0.85rem' }}>
             {paySummary.lines.map((line) => (
               <div key={line.label} className="surface-block" style={{ padding: '0.55rem 0.65rem' }}>
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{line.label}</div>
@@ -336,23 +336,23 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
               </div>
             ))}
           </div>
-          <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div className="payment-form-row">
             <div style={{ flex: 1, minWidth: 120 }}>
               <label className="form-label">Payment amount</label>
               <input className="form-input" type="number" step="0.01" min="0.01" max={balance} placeholder="Amount to subtract" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
             </div>
-            <select className="form-select" style={{ width: 'auto', minWidth: 140 }} value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+            <select className="form-select" style={{ minWidth: 140 }} value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
               <option>Cash</option>
               <option>Bank Transfer / Raast</option>
               <option>JazzCash</option>
               <option>EasyPaisa</option>
             </select>
-            <label className="btn-secondary" style={{ width: 'auto', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <label className="btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <ImagePlus size={16} />
               {payScreenshot ? 'Photo ✓' : 'Screenshot'}
               <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleScreenshotPick} />
             </label>
-            <button type="submit" className="btn-primary" style={{ width: 'auto' }} disabled={paying}>
+            <button type="submit" className="btn-primary" disabled={paying}>
               <Banknote size={16} /> {paying ? 'Saving…' : 'Record Pay'}
             </button>
           </div>

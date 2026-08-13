@@ -368,7 +368,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
+      <div className="responsive-grid" style={{ gap: '1.5rem' }}>
         {/* Add Customer Form */}
         <form onSubmit={handleAddCustomer} className="glass-panel" style={{ padding: '1.5rem' }}>
           <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -388,7 +388,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
             </select>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+          <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
             <div className="form-group">
               <label className="form-label">Phone</label>
               <input className="form-input" type="text" placeholder="+92 300 0000000" value={phone} onChange={(e) => setPhone(e.target.value)} />
@@ -629,7 +629,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
               </div>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '1.5rem' }}>
               
               {/* Option A: Assign rate for existing catalog product */}
               <form onSubmit={handleSaveRate} className="surface-block" style={{ padding: '1.25rem' }}>

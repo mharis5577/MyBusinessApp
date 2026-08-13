@@ -126,7 +126,7 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
+    <div className="responsive-grid" style={{ gap: '1.5rem' }}>
       <form onSubmit={handleAdd} className="glass-panel" style={{ padding: '1.5rem' }}>
         <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <Package size={18} style={{ color: 'var(--accent-primary)' }} /> Add Item / Service Catalog
@@ -147,7 +147,7 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
           <input className="form-input" type="text" placeholder="Optional notes" value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+        <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
           <div className="form-group">
             <label className="form-label">Sell price ({currencySymbol}) *</label>
             <input className="form-input" type="number" step="0.01" placeholder="2450" value={price} onChange={(e) => setPrice(e.target.value)} required />

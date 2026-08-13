@@ -60,7 +60,7 @@ export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false,
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.65rem', marginBottom: compact ? 0 : '1rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '0.65rem', marginBottom: compact ? 0 : '1rem' }}>
         <div className="surface-block" style={{ padding: '0.75rem' }}>
           <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Sales (in)</div>
           <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--success)' }}>{formatCurrency(currencySymbol, total_sales)}</div>

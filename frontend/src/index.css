@@ -77,6 +77,12 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+html {
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   font-family: var(--font-main);
   background-color: var(--bg-main);
@@ -1349,8 +1355,110 @@ body {
     align-items: stretch !important;
   }
 
+  .invoice-actions .btn-primary,
+  .invoice-actions .btn-secondary,
+  .invoice-actions .action-chip-row .btn-primary,
+  .invoice-actions .action-chip-row .btn-secondary {
+    width: 100% !important;
+    justify-content: center;
+  }
+
   .invoice-actions .action-chip-row {
     width: 100%;
+    flex-direction: column;
+  }
+
+  .action-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+    width: 100%;
+  }
+
+  .action-row .btn-primary,
+  .action-row .btn-secondary {
+    width: 100% !important;
+    justify-content: center;
+  }
+
+  .action-row .form-input,
+  .action-row .form-select {
+    width: 100% !important;
+    max-width: 100%;
+  }
+
+  .brand {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .navbar .brand-wordmark {
+    min-width: 0;
+  }
+
+  .navbar .brand-wordmark-chocolate {
+    max-width: min(46vw, 150px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .navbar > div {
+    flex-shrink: 0;
+  }
+
+  .app-developer-footer {
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .developer-credit-name {
+    letter-spacing: 0.1em;
+    font-size: 0.68rem;
+    text-align: center;
+    padding: 0 0.5rem;
+    overflow-wrap: anywhere;
+  }
+
+  .dashboard-data-safety {
+    flex-direction: column;
+  }
+
+  .dashboard-data-safety-actions .btn-secondary {
+    width: 100% !important;
+  }
+
+  .responsive-grid,
+  .settings-form-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .payment-form-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .payment-form-row .form-input,
+  .payment-form-row .form-select,
+  .payment-form-row .btn-primary,
+  .payment-form-row .btn-secondary {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .payment-summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .more-menu-sheet,
+  .data-safety-sheet,
+  .barcode-scanner-sheet {
+    width: min(440px, calc(100% - 1.25rem));
+    max-height: min(88dvh, 640px);
+    overflow-y: auto;
+    margin-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
   }
 
   .modal-sheet {
@@ -1633,10 +1741,14 @@ body {
 
 .pin-lock-screen {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1.5rem;
+  padding: 1.25rem;
+  padding-top: max(1.25rem, env(safe-area-inset-top, 0px));
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
   background: var(--bg-main);
 }
 
@@ -1645,6 +1757,12 @@ body {
   max-width: 360px;
   padding: 1.75rem;
   text-align: center;
+}
+
+.payment-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 120px), 1fr));
+  gap: 0.5rem;
 }
 
 .stock-warn {
@@ -2126,6 +2244,91 @@ body {
   border-top: 1px solid var(--border-color);
 }
 
+/* Shared responsive layout helpers */
+.responsive-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 1rem;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.payment-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: flex-end;
+}
+
+/* Extra-narrow phones */
+@media (max-width: 380px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .navbar {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .app-container {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .brand-mark {
+    width: 30px;
+    height: 30px;
+  }
+
+  .navbar .brand-wordmark-chocolate {
+    font-size: 0.82rem;
+    max-width: 38vw;
+  }
+
+  .mobile-nav-item {
+    font-size: 0.62rem;
+    padding: 0.35rem 0.1rem;
+  }
+
+  .mobile-nav-item svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .developer-credit-name {
+    letter-spacing: 0.06em;
+  }
+}
+
+/* Landscape phones — keep content usable above bottom nav */
+@media (max-width: 900px) and (max-height: 480px) and (orientation: landscape) {
+  .mobile-bottom-nav {
+    padding-top: 0.25rem;
+    padding-bottom: calc(0.25rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .mobile-nav-item {
+    min-height: 44px;
+    gap: 0.1rem;
+    font-size: 0.6rem;
+  }
+
+  .splash-screen {
+    padding: 1rem;
+  }
+
+  .splash-logo {
+    width: 56px !important;
+    height: 56px !important;
+  }
+}
+
 @keyframes splash-rise {
   from {
     opacity: 0;
@@ -2233,6 +2436,10 @@ body {
 .data-safety-sheet {
   text-align: center;
   animation: splash-rise 0.45s ease both;
+  width: min(440px, calc(100% - 1.5rem));
+  max-height: min(88vh, 640px);
+  overflow-y: auto;
+  margin: 0.75rem;
 }
 
 .data-safety-brand {
