@@ -1,24 +1,37 @@
 import React, { useEffect, useState } from 'react';
-import { DollarSign, Clock, AlertTriangle, FileText, PlusCircle, TrendingUp, RefreshCw, Package, ArrowDownUp, Wallet, CalendarDays, Shield } from 'lucide-react';
+import {
+  DollarSign,
+  Clock,
+  AlertTriangle,
+  FileText,
+  PlusCircle,
+  TrendingUp,
+  RefreshCw,
+  Package,
+  ArrowDownUp,
+  Wallet,
+  CalendarDays,
+  Shield,
+} from 'lucide-react';
 import { formatCurrency, formatBillDateTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { getLastAutoBackupAt } from '../utils/backupManager';
 import CashflowPanel from './CashflowPanel';
 import OverduePanel from './OverduePanel';
+import StatusBadge from './StatusBadge';
+import EmptyState from './EmptyState';
 
-function StatCard({ label, value, hint, icon: Icon, accent }) {
+function StatCard({ label, value, hint, icon: Icon }) {
   return (
-    <div className="stat-card" style={{ borderLeftColor: accent }}>
+    <div className="stat-card">
       <div className="stat-card-head">
         <span className="stat-card-label">{label}</span>
-        <Icon size={16} style={{ color: accent, flexShrink: 0 }} />
+        <Icon size={15} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
       </div>
       <div className="stat-card-value" title={String(value)}>
         {value}
       </div>
-      <div className="stat-card-hint" style={{ color: accent }}>
-        {hint}
-      </div>
+      <div className="stat-card-hint">{hint}</div>
     </div>
   );
 }
@@ -48,7 +61,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     return (
       <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
         <RefreshCw className="spin" size={28} style={{ marginBottom: '0.75rem' }} />
-        <p>Loading dashboard...</p>
+        <p>Loading…</p>
       </div>
     );
   }
@@ -74,37 +87,36 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
   return (
     <div className="dashboard-page">
       <div className="glass-panel panel-hero dashboard-hero">
-        <div>
-          <h2 className="dashboard-hero-title">Today at the counter</h2>
-          <p className="dashboard-hero-sub">Create bills, track payments, and manage stock.</p>
-        </div>
+        <h2 className="dashboard-hero-title">Today at the counter</h2>
+        <p className="dashboard-hero-sub">Create a bill, collect payment, keep the shop moving.</p>
         <div className="hero-actions">
-          <button className="btn-primary" onClick={() => onNavigate('create')}>
-            <PlusCircle size={18} /> Create Bill
+          <button type="button" className="btn-primary btn-hero" onClick={() => onNavigate('create')}>
+            <PlusCircle size={20} /> Create Bill
           </button>
-          <button className="btn-secondary" onClick={() => onNavigate('database')}>
-            <FileText size={18} /> View Bills
+          <button type="button" className="btn-secondary" onClick={() => onNavigate('database')}>
+            <FileText size={17} /> Bills
           </button>
-          <button className="btn-secondary" onClick={() => onNavigate('cashflow')}>
-            <ArrowDownUp size={18} /> Cashflow
+          <button type="button" className="btn-secondary" onClick={() => onNavigate('cashflow')}>
+            <ArrowDownUp size={17} /> Cashflow
           </button>
         </div>
       </div>
 
-      <div className="glass-panel dashboard-data-safety">
-        <Shield size={18} style={{ color: 'var(--accent-primary)', flexShrink: 0, marginTop: 2 }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <strong>Your data is on this phone</strong>
-          <p>
-            Back up regularly so bills and customer dues stay safe if the phone is lost or the app is reinstalled.
-            {lastBackup ? ` Last auto-backup: ${new Date(lastBackup).toLocaleDateString()}.` : ' No weekly backup yet.'}
-          </p>
-          <div className="dashboard-data-safety-actions">
-            <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={() => onNavigate('backup')}>
-              Backup & Restore
-            </button>
+      <div className="dashboard-backup-strip">
+        <div style={{ minWidth: 0 }}>
+          <strong>
+            <Shield size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
+            Data on this phone
+          </strong>
+          <div style={{ marginTop: 2, fontSize: '0.75rem' }}>
+            {lastBackup
+              ? `Last auto-backup ${new Date(lastBackup).toLocaleDateString()}`
+              : 'Back up regularly'}
           </div>
         </div>
+        <button type="button" className="btn-secondary" onClick={() => onNavigate('backup')}>
+          Backup
+        </button>
       </div>
 
       {low_stock.length > 0 && (
@@ -147,69 +159,67 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
         }}
       />
 
-      <div className="stats-grid">
+      <div className="stats-grid stats-grid-quiet">
         <StatCard
           label="Profit today"
           value={formatCurrency(currencySymbol, profit_today, { maximumFractionDigits: 0 })}
-          hint={`Sales ${formatCurrency(currencySymbol, sales_today, { maximumFractionDigits: 0 })} − cost ${formatCurrency(currencySymbol, cost_today, { maximumFractionDigits: 0 })}`}
+          hint={`Sales ${formatCurrency(currencySymbol, sales_today, { maximumFractionDigits: 0 })} − cost`}
           icon={Wallet}
-          accent="var(--accent-primary)"
         />
         <StatCard
           label="Profit this month"
           value={formatCurrency(currencySymbol, profit_month, { maximumFractionDigits: 0 })}
-          hint={`Sales ${formatCurrency(currencySymbol, sales_month, { maximumFractionDigits: 0 })} − cost ${formatCurrency(currencySymbol, cost_month, { maximumFractionDigits: 0 })}`}
+          hint={`Sales ${formatCurrency(currencySymbol, sales_month, { maximumFractionDigits: 0 })} − cost`}
           icon={CalendarDays}
-          accent="var(--accent-teal)"
         />
         <StatCard
-          label="Revenue paid"
+          label="Collected"
           value={formatCurrency(currencySymbol, total_revenue, { maximumFractionDigits: 0 })}
-          hint={<><TrendingUp size={12} /> Collected</>}
+          hint={
+            <>
+              <TrendingUp size={12} /> Paid revenue
+            </>
+          }
           icon={DollarSign}
-          accent="var(--success)"
         />
         <StatCard
-          label="Pending"
+          label="Due"
           value={formatCurrency(currencySymbol, total_pending, { maximumFractionDigits: 0 })}
           hint="Awaiting payment"
           icon={Clock}
-          accent="var(--warning)"
         />
         <StatCard
           label="Overdue"
           value={formatCurrency(currencySymbol, total_overdue, { maximumFractionDigits: 0 })}
-          hint="Action needed"
+          hint="Needs follow-up"
           icon={AlertTriangle}
-          accent="var(--danger)"
         />
-        <StatCard
-          label="Total bills"
-          value={String(total_bills)}
-          hint="In database"
-          icon={FileText}
-          accent="var(--accent-primary)"
-        />
+        <StatCard label="Bills" value={String(total_bills)} hint="In database" icon={FileText} />
       </div>
 
       <CashflowPanel currencySymbol={currencySymbol} compact onNavigate={onNavigate} />
 
-      <div className="glass-panel dashboard-recent">
+      <div className="dashboard-recent">
         <div className="dashboard-recent-head">
-          <h3>Recent Bills</h3>
+          <h3>Recent bills</h3>
           <button
+            type="button"
             className="btn-secondary"
             onClick={() => onNavigate('database')}
             style={{ width: 'auto', minHeight: 36, padding: '0.35rem 0.75rem', fontSize: '0.78rem' }}
           >
-            View All
+            View all
           </button>
         </div>
 
         {recent_bills.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            No bills yet. Tap Create Bill to start.
-          </div>
+          <EmptyState
+            title="No bills yet"
+            body="Your first sale starts here."
+            actionLabel="Create first bill"
+            onAction={() => onNavigate('create')}
+            icon={PlusCircle}
+          />
         ) : (
           <div className="mobile-card-list dashboard-recent-list">
             {recent_bills.map((bill) => (
@@ -217,7 +227,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
                 type="button"
                 className="mobile-card dashboard-recent-item"
                 key={bill.id}
-                onClick={() => onNavigate('database')}
+                onClick={() => (onViewBill ? onViewBill(bill) : onNavigate('database'))}
               >
                 <div className="mobile-card-top">
                   <div style={{ minWidth: 0, flex: 1 }}>
@@ -232,7 +242,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
                     {formatCurrency(currencySymbol, bill.total_amount, { maximumFractionDigits: 0 })}
                   </div>
                 </div>
-                <span className={`badge badge-${bill.status}`}>{bill.status}</span>
+                <StatusBadge status={bill.status} />
               </button>
             ))}
           </div>

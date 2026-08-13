@@ -1,5 +1,4 @@
 import { ArrowDownUp, Settings, X, Package, Download } from 'lucide-react';
-import { DeveloperCredit } from './BrandMark';
 
 export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, activeTab }) {
   if (!open) return null;
@@ -65,9 +64,6 @@ export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, acti
             <small>Store profile, PIN, fingerprint</small>
           </span>
         </button>
-        <div className="more-menu-developer">
-          <DeveloperCredit compact />
-        </div>
       </div>
     </div>
   );

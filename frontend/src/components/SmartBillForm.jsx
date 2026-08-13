@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History } from 'lucide-react';
+import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History, ChevronDown, ChevronUp } from 'lucide-react';
 import { parseNaturalBillText } from '../utils/naturalParser';
 import { pakistanToday, addDaysToDateString, formatCurrency, pakistanNowTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
@@ -23,6 +23,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const [saveMode, setSaveMode] = useState('view'); // 'view' | 'new'
   const [scanOpen, setScanOpen] = useState(false);
   const [repeating, setRepeating] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Form State
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -841,7 +842,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
               <History size={16} /> {repeating ? 'Loading…' : 'Repeat last order'}
             </button>
 
-            <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem' }}>
+            <div className="grid-2-mobile-1" style={{ display: showAdvanced ? 'grid' : 'none', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem' }}>
               <div>
                 <label className="form-label">{billType === 'supplier' ? 'Supplier Email' : 'Customer Email'}</label>
                 <input
@@ -864,7 +865,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
               </div>
             </div>
 
-            <div style={{ marginTop: '0.75rem' }}>
+            <div style={{ marginTop: '0.75rem', display: showAdvanced ? 'block' : 'none' }}>
               <label className="form-label">{billType === 'supplier' ? 'Supplier Address' : 'Billing Address'}</label>
               <textarea
                 className="form-textarea"
@@ -875,7 +876,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
               />
             </div>
 
-            {billType === 'supplier' && (
+            {showAdvanced && billType === 'supplier' && (
               <div style={{ marginTop: '0.9rem', padding: '0.85rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', background: 'var(--surface-inset)' }}>
                 <p style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.65rem', color: 'var(--text-secondary)' }}>
                   Supplier Pay To bank (shown on payment advice)
@@ -1018,7 +1019,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
               </div>
             )}
 
-            <div className="form-group">
+            <div className="form-group" style={{ display: showAdvanced ? 'block' : 'none' }}>
               <label className="form-label">Notes & Terms</label>
               <textarea
                 className="form-textarea"
@@ -1029,6 +1030,16 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
             </div>
           </div>
         </div>
+
+        <button
+          type="button"
+          className="btn-secondary form-advanced-toggle"
+          style={{ marginBottom: '1.25rem' }}
+          onClick={() => setShowAdvanced((v) => !v)}
+        >
+          <span>{showAdvanced ? 'Hide extra fields' : 'More options'}</span>
+          {showAdvanced ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
 
         {/* Line Items */}
         <div style={{ marginBottom: '1.5rem' }}>

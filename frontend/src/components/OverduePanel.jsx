@@ -8,6 +8,7 @@ import {
   openWhatsAppReminder,
   normalizeWhatsAppPhone,
 } from '../utils/paymentReminder';
+import StatusBadge from './StatusBadge';
 
 export default function OverduePanel({
   currencySymbol = 'Rs.',
@@ -61,7 +62,7 @@ export default function OverduePanel({
 
   if (loading) {
     return (
-      <div className="glass-panel" style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+      <div className="panel-flat" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '0.75rem 0' }}>
         <RefreshCw className="spin" size={18} /> Checking overdue…
       </div>
     );
@@ -70,24 +71,24 @@ export default function OverduePanel({
   if (rows.length === 0) return null;
 
   return (
-    <div className="glass-panel overdue-panel">
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.65rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+    <div className="panel-flat overdue-panel">
+      <div className="panel-flat-head">
         <div>
-          <h3 style={{ fontSize: '1.05rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            <AlertTriangle size={18} style={{ color: 'var(--danger)' }} /> Due / overdue
+          <h3 className="panel-flat-title" style={{ color: 'var(--status-overdue)' }}>
+            <AlertTriangle size={17} /> Overdue
           </h3>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+          <p className="panel-flat-sub">
             {rows.length} bill{rows.length === 1 ? '' : 's'} · {formatCurrency(currencySymbol, totalDue)}
           </p>
         </div>
-        <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={load}>
+        <button type="button" className="btn-secondary" style={{ width: 'auto', minHeight: 36, padding: '0.35rem 0.7rem', fontSize: '0.75rem' }} onClick={load}>
           <RefreshCw size={14} /> Refresh
         </button>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: 280, overflowY: 'auto' }}>
+      <div className="mobile-card-list" style={{ maxHeight: 280, overflowY: 'auto' }}>
         {rows.slice(0, 12).map((r) => (
-          <div key={r.id} className="overdue-row surface-block">
+          <div key={r.id} className="overdue-row mobile-card">
             <button
               type="button"
               className="overdue-row-main"
@@ -95,14 +96,17 @@ export default function OverduePanel({
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
                 <strong style={{ fontSize: '0.9rem' }}>{r.customer_name}</strong>
-                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800 }}>
+                <span className="mobile-card-amount">
                   {formatCurrency(currencySymbol, r.balance_due)}
                 </span>
               </div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+              <div className="mobile-card-meta">
                 <span className="invoice-mono">{r.invoice_number}</span>
                 {' · '}
-                <span style={{ color: 'var(--danger)', fontWeight: 700 }}>{r.days_overdue}d overdue</span>
+                {r.days_overdue}d overdue
+              </div>
+              <div style={{ marginTop: '0.35rem' }}>
+                <StatusBadge status="overdue" />
               </div>
             </button>
             <button

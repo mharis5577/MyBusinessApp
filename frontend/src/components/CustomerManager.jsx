@@ -9,6 +9,7 @@ import {
   openWhatsAppReminder,
   normalizeWhatsAppPhone,
 } from '../utils/paymentReminder';
+import EmptyState from './EmptyState';
 
 export default function CustomerManager({ currencySymbol = 'Rs.' }) {
   const toast = useToast();
@@ -450,7 +451,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
             ))}
           </div>
           {filteredCustomers.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)' }}>No clients in this filter.</p>
+            <EmptyState title="No clients here" body="Add a customer or supplier to track dues." icon={Users} />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '420px', overflowY: 'auto' }}>
               {filteredCustomers.map((c) => {

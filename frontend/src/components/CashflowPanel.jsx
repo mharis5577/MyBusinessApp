@@ -3,6 +3,7 @@ import { ArrowDownUp, RefreshCw, TrendingUp } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
+import EmptyState from './EmptyState';
 
 export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false, onNavigate }) {
   const toast = useToast();
@@ -29,7 +30,7 @@ export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false,
 
   if (loading && !data) {
     return (
-      <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+      <div className="panel-flat" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem 0' }}>
         <RefreshCw className="spin" size={20} /> Loading cashflow…
       </div>
     );
@@ -45,37 +46,35 @@ export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false,
   } = data || {};
 
   return (
-    <div className="glass-panel" style={{ padding: '1.25rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+    <div className={`panel-flat cashflow-panel${compact ? ' is-compact' : ''}`}>
+      <div className="panel-flat-head">
         <div>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            <ArrowDownUp size={18} style={{ color: 'var(--accent-teal)' }} /> Cashflow
+          <h3 className="panel-flat-title">
+            <ArrowDownUp size={17} /> Cashflow
           </h3>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-            Sales in vs Saudia buying out (from bills)
-          </p>
+          <p className="panel-flat-sub">Sales in vs Saudia buying out</p>
         </div>
-        <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={load}>
+        <button type="button" className="btn-secondary" style={{ width: 'auto', minHeight: 36, padding: '0.35rem 0.7rem', fontSize: '0.75rem' }} onClick={load}>
           <RefreshCw size={14} /> Refresh
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '0.65rem', marginBottom: compact ? 0 : '1rem' }}>
-        <div className="surface-block" style={{ padding: '0.75rem' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Sales (in)</div>
-          <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--success)' }}>{formatCurrency(currencySymbol, total_sales)}</div>
+      <div className="stats-grid stats-grid-quiet cashflow-stats">
+        <div className="stat-card">
+          <div className="stat-card-label">Sales (in)</div>
+          <div className="stat-card-value" style={{ color: 'var(--status-paid)' }}>{formatCurrency(currencySymbol, total_sales)}</div>
         </div>
-        <div className="surface-block" style={{ padding: '0.75rem' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Saudia buying</div>
-          <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--accent-purple)' }}>{formatCurrency(currencySymbol, buying_cost)}</div>
+        <div className="stat-card">
+          <div className="stat-card-label">Saudia buying</div>
+          <div className="stat-card-value">{formatCurrency(currencySymbol, buying_cost)}</div>
         </div>
-        <div className="surface-block" style={{ padding: '0.75rem' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Est. profit</div>
-          <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, net_profit)}</div>
+        <div className="stat-card">
+          <div className="stat-card-label">Est. profit</div>
+          <div className="stat-card-value">{formatCurrency(currencySymbol, net_profit)}</div>
         </div>
-        <div className="surface-block" style={{ padding: '0.75rem' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Paid / pending sales</div>
-          <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>
+        <div className="stat-card">
+          <div className="stat-card-label">Paid / due</div>
+          <div className="stat-card-value" style={{ fontSize: '0.95rem' }}>
             {formatCurrency(currencySymbol, paid_sales)} / {formatCurrency(currencySymbol, pending_sales)}
           </div>
         </div>
@@ -83,23 +82,21 @@ export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false,
 
       {!compact && (
         <>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.85rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '0.85rem 0' }}>
             {onNavigate && (
-              <>
-                <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={() => onNavigate('create')}>
-                  <TrendingUp size={14} /> New sale / buy bill
-                </button>
-              </>
+              <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={() => onNavigate('create')}>
+                <TrendingUp size={14} /> New sale / buy bill
+              </button>
             )}
           </div>
-          <h4 style={{ fontSize: '0.9rem', fontWeight: 750, marginBottom: '0.55rem' }}>Recent money flow</h4>
+          <h4 className="panel-flat-section">Recent money flow</h4>
           {money_flow.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No bills yet.</p>
+            <EmptyState title="No bills yet" body="Cashflow appears after you save sales or Saudia buys." />
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: 320, overflowY: 'auto' }}>
+            <div className="mobile-card-list">
               {money_flow.slice(0, 40).map((row) => (
-                <div key={`${row.id}-${row.date}`} className="surface-block" style={{ padding: '0.55rem 0.7rem', fontSize: '0.78rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                <div key={`${row.id}-${row.date}`} className="mobile-card" style={{ padding: '0.7rem 0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', fontSize: '0.8rem' }}>
                     <span>
                       <span className={`type-badge ${row.bill_type === 'supplier' ? 'saudia' : 'sale'}`}>
                         {row.bill_type === 'supplier' ? 'Saudia' : 'Sale'}
@@ -110,7 +107,7 @@ export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false,
                       {row.selling > 0 ? `+${formatCurrency(currencySymbol, row.selling)}` : `−${formatCurrency(currencySymbol, row.buying)}`}
                     </span>
                   </div>
-                  <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>{row.comment}</div>
+                  <div style={{ color: 'var(--text-secondary)', marginTop: 2, fontSize: '0.75rem' }}>{row.comment}</div>
                 </div>
               ))}
             </div>

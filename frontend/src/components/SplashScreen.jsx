@@ -6,7 +6,7 @@ const SPLASH_KEY = 'elite-splash-shown';
 /**
  * Short branded splash on cold start (once per app session).
  */
-export default function SplashScreen({ onDone, minMs = 1600 }) {
+export default function SplashScreen({ onDone, minMs = 1200 }) {
   const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {

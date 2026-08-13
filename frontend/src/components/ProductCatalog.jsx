@@ -3,6 +3,7 @@ import { Package, Plus, Trash2, Search, History, Minus, RefreshCw } from 'lucide
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
+import EmptyState from './EmptyState';
 
 export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
   const toast = useToast();
@@ -217,9 +218,13 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
           </div>
         )}
 
-        {products.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)' }}>No items in catalog yet.</p>
-        ) : (
+          {products.length === 0 ? (
+            <EmptyState
+              title="No items yet"
+              body="Add chocolates and stock so bills fill faster."
+              icon={Package}
+            />
+          ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '520px', overflowY: 'auto' }}>
             {products.map((p) => {
               const low = Number(p.stock) <= 5;

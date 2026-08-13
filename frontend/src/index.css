@@ -1,4 +1,4 @@
-/* Pixis palette: warm paper, ink black, turquoise accent */
+/* CocoaDesk design tokens */
 :root,
 [data-theme="light"] {
   --bg-main: #f4f2eb;
@@ -24,11 +24,20 @@
   --warning: #b45309;
   --danger: #b91c1c;
   --info: #0e7490;
-  --radius-lg: 20px;
-  --radius-md: 14px;
+  --status-paid: #0f766e;
+  --status-due: #b45309;
+  --status-overdue: #b91c1c;
+  --status-cancelled: #6b7280;
+  --radius-lg: 16px;
+  --radius-md: 12px;
   --radius-sm: 10px;
+  --space-1: 8px;
+  --space-2: 12px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --touch: 48px;
   --shadow-lg: 0 16px 40px -20px rgba(17, 17, 17, 0.18);
-  --shadow-sm: 0 2px 10px rgba(17, 17, 17, 0.06);
+  --shadow-sm: 0 1px 4px rgba(17, 17, 17, 0.05);
   --font-main: 'Outfit', 'Sora', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-display: 'Syne', 'Outfit', sans-serif;
   --font-serif: 'Fraunces', Georgia, serif;
@@ -63,6 +72,10 @@
   --warning: #fbbf24;
   --danger: #f87171;
   --info: #67e8f9;
+  --status-paid: #2dd4bf;
+  --status-due: #fbbf24;
+  --status-overdue: #f87171;
+  --status-cancelled: #9ca3af;
   --shadow-lg: 0 16px 40px -12px rgba(0, 0, 0, 0.55);
   --navbar-bg: #0c0c0b;
   --mobile-nav-bg: #121211;
@@ -376,27 +389,33 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.7rem 1.35rem;
+  padding: 0.75rem 1.35rem;
   background: var(--ink);
   color: #f4f2eb;
   border: none;
-  border-radius: 999px;
+  border-radius: 14px;
+  font-family: var(--font-main);
   font-weight: 700;
   font-size: 0.9rem;
   cursor: pointer;
-  transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
   box-shadow: var(--shadow-sm);
-  min-height: 44px;
+  min-height: var(--touch);
 }
 
 .btn-primary:hover {
-  transform: translateY(-1px);
   background: #1c1c1c;
 }
 
 [data-theme="dark"] .btn-primary {
   background: #2dd4c8;
   color: #0c0c0b;
+}
+
+.btn-primary.btn-hero {
+  min-height: 52px;
+  font-size: 1rem;
+  padding: 0.85rem 1.5rem;
 }
 
 .btn-secondary {
@@ -408,12 +427,13 @@ body {
   background: transparent;
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  border-radius: 999px;
+  border-radius: 14px;
+  font-family: var(--font-main);
   font-weight: 650;
   font-size: 0.875rem;
   cursor: pointer;
   transition: background 0.15s ease;
-  min-height: 44px;
+  min-height: var(--touch);
 }
 
 .btn-secondary:hover {
@@ -493,34 +513,50 @@ body {
   gap: 0.35rem;
   padding: 0.28rem 0.7rem;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-family: var(--font-main);
+  font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
 
 .badge-paid {
-  background: rgba(15, 118, 110, 0.1);
-  color: var(--success);
-  border: 1px solid rgba(15, 118, 110, 0.2);
+  background: color-mix(in srgb, var(--status-paid) 14%, transparent);
+  color: var(--status-paid);
+  border: 1px solid color-mix(in srgb, var(--status-paid) 28%, transparent);
 }
 
-.badge-pending {
-  background: rgba(180, 83, 9, 0.1);
-  color: var(--warning);
-  border: 1px solid rgba(180, 83, 9, 0.2);
+.badge-pending,
+.badge-partial {
+  background: color-mix(in srgb, var(--status-due) 14%, transparent);
+  color: var(--status-due);
+  border: 1px solid color-mix(in srgb, var(--status-due) 28%, transparent);
 }
 
 .badge-overdue {
-  background: rgba(185, 28, 28, 0.1);
-  color: var(--danger);
-  border: 1px solid rgba(185, 28, 28, 0.2);
+  background: color-mix(in srgb, var(--status-overdue) 14%, transparent);
+  color: var(--status-overdue);
+  border: 1px solid color-mix(in srgb, var(--status-overdue) 28%, transparent);
 }
 
 .badge-cancelled {
-  background: rgba(71, 85, 105, 0.12);
-  color: var(--text-secondary);
-  border: 1px solid rgba(71, 85, 105, 0.22);
+  background: color-mix(in srgb, var(--status-cancelled) 12%, transparent);
+  color: var(--status-cancelled);
+  border: 1px solid color-mix(in srgb, var(--status-cancelled) 24%, transparent);
+}
+
+.status-select {
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid transparent;
+  font: inherit;
+}
+
+.status-select-block {
+  width: 100%;
+  text-align: left;
+  padding: 0.55rem 0.75rem;
 }
 
 .table-container {
@@ -927,75 +963,82 @@ body {
 .thermal-sheet {
   background: #ffffff;
   color: #000000;
-  padding: 0.95rem 0.85rem;
+  padding: 1rem 0.9rem 1.1rem;
   width: 100%;
   max-width: 320px;
   margin: 0 auto;
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
   border: 1px solid #111;
   border-radius: 8px;
+  letter-spacing: 0.01em;
 }
 
 .thermal-head {
   text-align: center;
-  margin-bottom: 0.7rem;
-  padding-bottom: 0.55rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.65rem;
   border-bottom: 1px dashed #000;
 }
 
 .thermal-head .brand-logo-svg {
-  margin: 0 auto 0.4rem;
+  margin: 0 auto 0.45rem;
 }
 
 .thermal-brand {
   font-family: var(--font-serif);
-  font-size: 1.05rem;
+  font-size: 1.08rem;
   margin: 0;
   font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .thermal-meta {
-  margin: 0.15rem 0 0;
-  font-size: 0.7rem;
-  line-height: 1.35;
+  margin: 0.2rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  opacity: 0.9;
 }
 
 .thermal-doc-type {
-  margin: 0.35rem 0 0;
-  font-size: 0.7rem;
+  margin: 0.4rem 0 0;
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .thermal-info {
-  margin-bottom: 0.55rem;
-  font-size: 0.76rem;
-  line-height: 1.45;
+  margin-bottom: 0.65rem;
+  font-size: 0.74rem;
+  line-height: 1.5;
 }
 
 .thermal-lines {
   border-top: 1px dashed #000;
   border-bottom: 1px dashed #000;
-  padding: 0.5rem 0;
-  margin: 0.45rem 0;
+  padding: 0.55rem 0;
+  margin: 0.5rem 0;
 }
 
 .thermal-cancelled {
   text-align: center;
   font-weight: 800;
-  margin: 0 0 0.4rem;
+  margin: 0 0 0.45rem;
+  letter-spacing: 0.06em;
 }
 
 .thermal-line {
   display: flex;
   justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.28rem;
+  gap: 0.55rem;
+  margin-bottom: 0.35rem;
 }
 
 .thermal-line-desc {
   flex: 1;
+  overflow-wrap: anywhere;
 }
 
 .thermal-line-amt {
@@ -1006,23 +1049,25 @@ body {
 .thermal-total {
   display: flex;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.55rem;
   font-weight: 800;
-  font-size: 0.95rem;
-  margin-top: 0.45rem;
+  font-size: 0.92rem;
+  margin-top: 0.55rem;
 }
 
 .thermal-paid {
   text-align: right;
-  font-size: 0.75rem;
-  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  margin-top: 0.35rem;
+  line-height: 1.4;
 }
 
 .thermal-bank {
-  margin-top: 0.55rem;
-  font-size: 0.7rem;
+  margin-top: 0.65rem;
+  font-size: 0.68rem;
+  line-height: 1.45;
   border-top: 1px dashed #000;
-  padding-top: 0.4rem;
+  padding-top: 0.5rem;
 }
 
 .thermal-bank-title {
@@ -1031,7 +1076,7 @@ body {
 
 .thermal-qr {
   text-align: center;
-  margin-top: 0.85rem;
+  margin-top: 0.95rem;
 }
 
 .thermal-qr img {
@@ -1040,14 +1085,54 @@ body {
 }
 
 .thermal-qr p {
-  font-size: 0.68rem;
-  margin-top: 0.2rem;
+  font-size: 0.66rem;
+  margin-top: 0.35rem;
 }
 
 .thermal-thanks {
   text-align: center;
-  font-size: 0.68rem;
-  margin-top: 0.7rem;
+  font-size: 0.66rem;
+  margin-top: 0.85rem;
+  letter-spacing: 0.04em;
+}
+
+.panel-flat {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.panel-flat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.panel-flat-title {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 750;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.panel-flat-sub {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin: 0.2rem 0 0;
+}
+
+.panel-flat-section {
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  font-weight: 750;
+  margin: 0 0 0.45rem;
 }
 
 .panel-hero {
@@ -1158,18 +1243,29 @@ body {
   }
 
   .dashboard-hero-title {
-    font-size: 1.15rem !important;
+    font-size: 1.25rem !important;
+    color: #f4f2eb;
   }
 
   .dashboard-hero-sub {
     font-size: 0.84rem;
     line-height: 1.45;
     margin-bottom: 0.15rem;
+    color: rgba(244, 242, 235, 0.62);
   }
 
   .hero-actions {
     margin-top: 0.85rem;
     gap: 0.65rem !important;
+  }
+
+  .dashboard-hero .hero-actions {
+    flex-direction: column;
+  }
+
+  .dashboard-hero .btn-primary.btn-hero,
+  .dashboard-hero .btn-secondary {
+    width: 100%;
   }
 
   .hero-actions .btn-primary,
@@ -1179,29 +1275,31 @@ body {
     font-size: 0.92rem;
   }
 
-  /* 2×2 stats — avoid four tall stacked strips */
+  /* Quiet 2-col stats on phone */
   .stats-grid {
     grid-template-columns: 1fr 1fr;
-    gap: 0.75rem;
+    gap: 0.35rem 1rem;
   }
 
   .stat-card {
-    padding: 0.8rem 0.85rem;
-    border-radius: 14px;
-    border-left-width: 3px;
+    padding: 0.65rem 0;
+    border-radius: 0;
+    border-left-width: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .stat-card-label {
-    font-size: 0.65rem;
+    font-size: 0.62rem;
   }
 
   .stat-card-value {
-    font-size: 1.05rem;
-    margin: 0.2rem 0 0.3rem;
+    font-size: 1rem;
+    margin: 0.15rem 0 0.2rem;
   }
 
   .stat-card-hint {
-    font-size: 0.68rem;
+    font-size: 0.64rem;
   }
 
   .dashboard-recent {
@@ -1499,44 +1597,103 @@ body {
   animation: spin 0.9s linear infinite;
 }
 
-/* Dashboard — mobile-safe stats */
 .dashboard-page {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--space-3);
 }
 
 .dashboard-hero {
-  padding: 1.15rem 1.2rem !important;
+  padding: var(--space-3) !important;
+  border: none;
+  background:
+    linear-gradient(145deg, #111111 0%, #1a1a1a 55%, #0d3d39 140%);
+  color: #f4f2eb;
+}
+
+[data-theme="dark"] .dashboard-hero {
+  background:
+    linear-gradient(145deg, #141413 0%, #1c1c1a 50%, #0d2f2c 140%);
 }
 
 .dashboard-hero-title {
   font-family: var(--font-display);
-  font-size: 1.35rem !important;
+  font-size: 1.45rem !important;
   font-weight: 750;
   letter-spacing: -0.03em;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.35rem;
+  color: #f4f2eb;
 }
 
 .dashboard-hero-sub {
-  color: var(--text-secondary);
+  color: rgba(244, 242, 235, 0.62);
   font-size: 0.88rem;
-  margin: 0;
+  margin: 0 0 var(--space-3);
+  max-width: 28rem;
+}
+
+.dashboard-hero .hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.dashboard-hero .btn-primary.btn-hero {
+  background: #2dd4c8;
+  color: #0c0c0b;
+  flex: 1 1 200px;
+}
+
+.dashboard-hero .btn-secondary {
+  border-color: rgba(244, 242, 235, 0.22);
+  color: #f4f2eb;
+  background: transparent;
+  min-height: 44px;
+}
+
+.dashboard-hero .btn-secondary:hover {
+  background: rgba(244, 242, 235, 0.08);
+}
+
+.dashboard-backup-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-color);
+  background: transparent;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.dashboard-backup-strip strong {
+  color: var(--text-primary);
+  font-weight: 650;
+  font-size: 0.82rem;
+}
+
+.dashboard-backup-strip .btn-secondary {
+  min-height: 36px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  width: auto;
 }
 
 .stats-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.65rem;
+  gap: var(--space-2);
 }
 
 .stat-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-left: 3px solid var(--accent-teal);
-  border-radius: 14px;
-  padding: 0.85rem 0.95rem;
-  box-shadow: var(--shadow-sm);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+  padding: var(--space-2) 0;
+  box-shadow: none;
   min-width: 0;
   overflow: hidden;
 }
@@ -1546,52 +1703,130 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.2rem;
 }
 
 .stat-card-label {
-  font-size: 0.72rem;
-  font-weight: 700;
+  font-family: var(--font-main);
+  font-size: 0.68rem;
+  font-weight: 650;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
   line-height: 1.2;
 }
 
 .stat-card-value {
   font-family: var(--font-mono);
-  font-weight: 800;
-  font-size: clamp(1.05rem, 5.2vw, 1.45rem);
+  font-weight: 700;
+  font-size: clamp(1rem, 4.5vw, 1.25rem);
   line-height: 1.2;
   color: var(--text-primary);
   overflow-wrap: anywhere;
   word-break: break-word;
-  margin: 0.15rem 0 0.35rem;
+  margin: 0.1rem 0 0.2rem;
 }
 
 .stat-card-hint {
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-family: var(--font-main);
+  font-size: 0.68rem;
+  font-weight: 500;
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  opacity: 0.9;
+  color: var(--text-muted) !important;
+  opacity: 1;
 }
 
-/* Card list styles — global so dashboard Recent Bills works on desktop too */
-.mobile-card-list {
+.dashboard-recent {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.dashboard-recent-head {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.dashboard-recent-head h3 {
+  font-family: var(--font-display);
+  font-size: 1.05rem !important;
+  font-weight: 750;
+  margin: 0;
 }
 
 .mobile-card {
-  background: var(--surface-muted);
-  border: 1px solid var(--border-color);
-  border-radius: 14px;
-  padding: 0.95rem 1.05rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+  padding: var(--space-2) 0;
   box-shadow: none;
   color: var(--text-primary);
+}
+
+.mobile-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.empty-state {
+  text-align: center;
+  padding: var(--space-4) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.empty-state-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+}
+
+.empty-state-title {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 750;
+  margin: 0;
+}
+
+.empty-state-body {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  max-width: 22rem;
+  margin: 0;
+  line-height: 1.45;
+}
+
+.form-advanced {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-color);
+}
+
+.form-advanced-toggle {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.app-container > * {
+  animation: none;
+}
+
+.app-shell {
+  animation: app-fade-in 0.35s ease both;
 }
 
 .mobile-card-top {
@@ -2030,14 +2265,20 @@ body {
 }
 
 .overdue-panel {
-  padding: 1.1rem 1.15rem;
+  padding: 0;
+  border-top: 1px solid var(--border-color);
+  padding-top: var(--space-3);
 }
 
 .overdue-row {
   display: flex;
   align-items: stretch;
   gap: 0.45rem;
-  padding: 0.35rem;
+  padding: 0.15rem 0;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 .overdue-row-main {
@@ -2048,7 +2289,7 @@ body {
   border: none;
   color: inherit;
   cursor: pointer;
-  padding: 0.45rem 0.5rem;
+  padding: 0.55rem 0;
 }
 
 .overdue-wa-btn {
@@ -2242,6 +2483,23 @@ body {
   margin-top: 0.85rem;
   padding-top: 0.75rem;
   border-top: 1px solid var(--border-color);
+}
+
+.settings-developer-credit {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-color);
+}
+
+[data-theme="dark"] .invoice-sheet {
+  /* Keep invoice printable paper look even in dark UI */
+  background: #faf9f5 !important;
+  color: #111111 !important;
+}
+
+.app-container > *.dashboard-page,
+.app-container > * {
+  animation: none !important;
 }
 
 /* Shared responsive layout helpers */

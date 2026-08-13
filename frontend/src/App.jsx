@@ -24,7 +24,7 @@ import SettingsManager from './components/SettingsManager';
 import CashflowPanel from './components/CashflowPanel';
 import MoreMenu from './components/MoreMenu';
 import SplashScreen from './components/SplashScreen';
-import BrandMark, { BrandWordmark, DeveloperCredit } from './components/BrandMark';
+import BrandMark, { BrandWordmark } from './components/BrandMark';
 import DataSafetySheet, { hasSeenDataSafety } from './components/DataSafetySheet';
 import { apiFetch } from './api/client';
 import { useToast } from './toast/ToastContext';
@@ -450,6 +450,7 @@ export default function App() {
           <BillsDatabase
             onViewBill={handleViewBill}
             onDuplicateBill={handleDuplicateBill}
+            onNavigate={(tab) => setCurrentTab(tab)}
             currencySymbol={settings.currency_symbol || 'Rs.'}
             urduLabels={Boolean(settings.urdu_labels)}
             settings={settings}
@@ -471,10 +472,6 @@ export default function App() {
             onFocusHandled={() => setFocusBackup(false)}
           />
         )}
-
-        <div className="app-developer-footer no-print">
-          <DeveloperCredit compact />
-        </div>
       </main>
 
       <MoreMenu

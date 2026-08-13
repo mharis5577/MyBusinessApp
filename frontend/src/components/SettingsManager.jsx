@@ -34,6 +34,7 @@ import {
   PHONE_FOLDER,
 } from '../utils/backupManager';
 import { readPickedFileText } from '../utils/downloadFile';
+import { DeveloperCredit } from './BrandMark';
 
 export default function SettingsManager({ onSettingsUpdated, focusBackup = false, onFocusHandled }) {
   const toast = useToast();
@@ -675,6 +676,10 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
             <Trash2 size={16} /> Wipe All Data
           </button>
         </div>
+      </div>
+
+      <div className="settings-developer-credit">
+        <DeveloperCredit compact />
       </div>
     </div>
   );

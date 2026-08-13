@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2 } from 'lucide-react';
+import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle } from 'lucide-react';
 import BillAdjustSheet from './BillAdjustSheet';
+import StatusBadge from './StatusBadge';
+import EmptyState from './EmptyState';
 import { isCancelled } from '../utils/billAdjust';
 import { pakistanToday, formatCurrency, formatBillDateTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
@@ -17,6 +19,7 @@ import { paymentSummaryText } from '../utils/billPayments';
 export default function BillsDatabase({
   onViewBill,
   onDuplicateBill,
+  onNavigate,
   currencySymbol = 'Rs.',
   urduLabels = false,
   settings: settingsProp = {},
@@ -410,7 +413,7 @@ export default function BillsDatabase({
               onClick={() => setStatusFilter(st)}
               style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', textTransform: 'capitalize' }}
             >
-              {st}
+              {st === 'pending' ? 'Due' : st}
             </button>
           ))}
         </div>
@@ -423,11 +426,20 @@ export default function BillsDatabase({
           <p style={{ marginTop: '0.5rem' }}>Loading bills database...</p>
         </div>
       ) : bills.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-          {searchQuery || statusFilter !== 'all' || billTypeFilter !== 'all'
-            ? 'No bills match your search and filters.'
-            : 'No bills yet. Create your first bill from New.'}
-        </div>
+        searchQuery || statusFilter !== 'all' || billTypeFilter !== 'all' ? (
+          <div className="empty-state">
+            <h3 className="empty-state-title">No matches</h3>
+            <p className="empty-state-body">Try a different search or clear filters.</p>
+          </div>
+        ) : (
+          <EmptyState
+            title="No bills yet"
+            body="Create your first bill to start tracking sales and dues."
+            actionLabel="Create first bill"
+            onAction={() => onNavigate?.('create')}
+            icon={PlusCircle}
+          />
+        )
       ) : (
         <>
           {/* Desktop table */}
@@ -467,17 +479,17 @@ export default function BillsDatabase({
                     </td>
                     <td>
                       {isCancelled(bill) ? (
-                        <span className="badge badge-cancelled">CANCELLED</span>
+                        <StatusBadge status="cancelled" />
                       ) : (
                         <select
-                          className={`badge badge-${bill.status}`}
-                          style={{ cursor: 'pointer', border: 'none', appearance: 'none', paddingRight: '0.5rem' }}
+                          className={`badge badge-${bill.status} status-select`}
                           value={bill.status}
                           onChange={(e) => handleUpdateStatus(bill.id, e.target.value)}
+                          aria-label="Bill status"
                         >
-                          <option value="paid">PAID</option>
-                          <option value="pending">PENDING</option>
-                          <option value="overdue">OVERDUE</option>
+                          <option value="paid">Paid</option>
+                          <option value="pending">Due</option>
+                          <option value="overdue">Overdue</option>
                         </select>
                       )}
                     </td>
@@ -552,17 +564,17 @@ export default function BillsDatabase({
                   <div className="mobile-card-amount">{formatCurrency(currencySymbol, bill.total_amount)}</div>
                 </div>
                 {isCancelled(bill) ? (
-                  <span className="badge badge-cancelled" style={{ width: '100%', textAlign: 'left', padding: '0.55rem 0.75rem' }}>CANCELLED</span>
+                  <StatusBadge status="cancelled" />
                 ) : (
                   <select
-                    className={`badge badge-${bill.status}`}
-                    style={{ cursor: 'pointer', border: 'none', width: '100%', textAlign: 'left', padding: '0.55rem 0.75rem', fontSize: '0.8rem' }}
+                    className={`badge badge-${bill.status} status-select status-select-block`}
                     value={bill.status}
                     onChange={(e) => handleUpdateStatus(bill.id, e.target.value)}
+                    aria-label="Bill status"
                   >
-                    <option value="paid">PAID</option>
-                    <option value="pending">PENDING</option>
-                    <option value="overdue">OVERDUE</option>
+                    <option value="paid">Paid</option>
+                    <option value="pending">Due</option>
+                    <option value="overdue">Overdue</option>
                   </select>
                 )}
                 <div className="mobile-card-actions">
