@@ -410,7 +410,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
       {posMode ? (
         <div id="printable-invoice" className={`thermal-sheet ${urdu ? 'invoice-bilingual' : ''} ${cancelled ? 'is-cancelled' : ''}`}>
           <div className="thermal-head">
-            <BrandMark size={22} />
+            <BrandMark size={16} />
             <h3 className="thermal-brand">{companyName}</h3>
             <p className="thermal-meta">{settings.company_phone}</p>
             <p className="thermal-meta">{settings.company_address}</p>
@@ -473,10 +473,13 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
         </div>
       ) : (
         <div id="printable-invoice" className={`invoice-sheet ${urdu ? 'invoice-bilingual' : ''} ${cancelled ? 'is-cancelled' : ''}`}>
+          <div className="inv-watermark" aria-hidden="true">
+            <BrandMark size={220} />
+          </div>
           <div className="inv-topbar" />
           <header className="inv-header">
             <div className="inv-brand-block">
-              <BrandMark size={28} />
+              <BrandMark size={18} />
               <div>
                 {companyIsElite ? (
                   <>
