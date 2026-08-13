@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import db, { dbAll, dbGet, dbRun } from './db.js';
-import { pakistanToday, pakistanYearMonth } from './pakistan.js';
+import { pakistanToday, pakistanYearMonth, pakistanNowTime } from './pakistan.js';
 
 const app = express();
 const PORT = process.env.PORT || 11000;
@@ -760,6 +760,7 @@ app.post('/api/bills', async (req, res) => {
       customer_phone,
       customer_address,
       bill_date,
+      bill_time,
       due_date,
       subtotal,
       tax_rate,
@@ -805,10 +806,10 @@ app.post('/api/bills', async (req, res) => {
         dbRun(
           `INSERT INTO bills (
             bill_type, invoice_number, customer_name, customer_email, customer_phone, customer_address,
-            bill_date, due_date, subtotal, tax_rate, tax_amount, discount_rate, discount_amount,
+            bill_date, bill_time, due_date, subtotal, tax_rate, tax_amount, discount_rate, discount_amount,
             total_amount, status, notes, payment_method,
             payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             bType,
             number,
@@ -817,6 +818,7 @@ app.post('/api/bills', async (req, res) => {
             customer_phone || '',
             customer_address || '',
             bill_date || todayStr,
+            bill_time || pakistanNowTime(),
             dueStr,
             subtotal || 0,
             tax_rate || 0,
@@ -947,6 +949,7 @@ app.put('/api/bills/:id', async (req, res) => {
       customer_phone,
       customer_address,
       bill_date,
+      bill_time,
       due_date,
       subtotal,
       tax_rate,
@@ -971,7 +974,7 @@ app.put('/api/bills/:id', async (req, res) => {
     await dbRun(
       `UPDATE bills SET
         bill_type = ?, invoice_number = ?, customer_name = ?, customer_email = ?,
-        customer_phone = ?, customer_address = ?, bill_date = ?, due_date = ?,
+        customer_phone = ?, customer_address = ?, bill_date = ?, bill_time = ?, due_date = ?,
         subtotal = ?, tax_rate = ?, tax_amount = ?, discount_rate = ?, discount_amount = ?,
         total_amount = ?, status = ?, notes = ?, payment_method = ?,
         payee_bank_name = ?, payee_account_title = ?, payee_account_number = ?, payee_payment_notes = ?
@@ -984,6 +987,7 @@ app.put('/api/bills/:id', async (req, res) => {
         customer_phone ?? existingBill.customer_phone ?? '',
         customer_address ?? existingBill.customer_address ?? '',
         bill_date || existingBill.bill_date,
+        bill_time ?? existingBill.bill_time ?? '',
         due_date || existingBill.due_date,
         subtotal ?? existingBill.subtotal,
         tax_rate ?? existingBill.tax_rate,
@@ -1446,14 +1450,14 @@ app.post('/api/restore', async (req, res) => {
         await dbRun(
           `INSERT INTO bills (
             id, bill_type, invoice_number, customer_name, customer_email, customer_phone, customer_address,
-            bill_date, due_date, subtotal, tax_rate, tax_amount, discount_rate, discount_amount,
+            bill_date, bill_time, due_date, subtotal, tax_rate, tax_amount, discount_rate, discount_amount,
             total_amount, amount_paid, status, notes, payment_method, bank_details,
             payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes,
             cancel_reason, cancelled_at, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             b.id, b.bill_type || 'customer', b.invoice_number, b.customer_name, b.customer_email || '',
-            b.customer_phone || '', b.customer_address || '', b.bill_date, b.due_date,
+            b.customer_phone || '', b.customer_address || '', b.bill_date, b.bill_time || '', b.due_date,
             b.subtotal || 0, b.tax_rate || 0, b.tax_amount || 0, b.discount_rate || 0, b.discount_amount || 0,
             b.total_amount || 0, b.amount_paid || 0, b.status || 'pending', b.notes || '',
             b.payment_method || '', b.bank_details || '',
@@ -1709,6 +1713,7 @@ app.post('/api/customers/merge', async (req, res) => {
 // -------------------------------------------------------------
 app.get('/api/cashflow', async (req, res) => {
   try {
+    const compact = String(req.query.compact || '') === '1';
     const salesRow = await dbGet(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
        WHERE COALESCE(bill_type, 'customer') != 'supplier' AND status != 'cancelled'`
@@ -1726,29 +1731,34 @@ app.get('/api/cashflow', async (req, res) => {
        WHERE COALESCE(bill_type, 'customer') != 'supplier' AND status = 'pending'`
     );
     const advanceRow = await dbGet('SELECT COALESCE(SUM(amount), 0) as total FROM advance_payments');
-    const advances = await dbAll('SELECT * FROM advance_payments ORDER BY id DESC');
+    const advances = compact
+      ? []
+      : await dbAll('SELECT * FROM advance_payments ORDER BY id DESC');
 
-    const recentBills = await dbAll(
-      `SELECT id, bill_type, invoice_number, customer_name, bill_date, total_amount, status, notes
-       FROM bills ORDER BY bill_date DESC, id DESC LIMIT 80`
-    );
+    let money_flow = [];
+    if (!compact) {
+      const recentBills = await dbAll(
+        `SELECT id, bill_type, invoice_number, customer_name, bill_date, total_amount, status, notes
+         FROM bills ORDER BY bill_date DESC, id DESC LIMIT 40`
+      );
 
-    const money_flow = recentBills.map((b) => {
-      const isSupplier = b.bill_type === 'supplier';
-      const amount = isCancelled(b) ? 0 : Number(b.total_amount) || 0;
-      return {
-        id: b.id,
-        date: b.bill_date,
-        invoice_number: b.invoice_number,
-        selling: isSupplier ? 0 : amount,
-        buying: isSupplier ? amount : 0,
-        expenditure: 0,
-        profit: isSupplier ? -amount : amount,
-        comment: `${isSupplier ? 'Buying' : 'Sale'} · ${b.customer_name}${b.notes ? ` · ${b.notes}` : ''} (${b.status})`,
-        bill_type: b.bill_type || 'customer',
-        status: b.status,
-      };
-    });
+      money_flow = recentBills.map((b) => {
+        const isSupplier = b.bill_type === 'supplier';
+        const amount = isCancelled(b) ? 0 : Number(b.total_amount) || 0;
+        return {
+          id: b.id,
+          date: b.bill_date,
+          invoice_number: b.invoice_number,
+          selling: isSupplier ? 0 : amount,
+          buying: isSupplier ? amount : 0,
+          expenditure: 0,
+          profit: isSupplier ? -amount : amount,
+          comment: `${isSupplier ? 'Buying' : 'Sale'} · ${b.customer_name}${b.notes ? ` · ${b.notes}` : ''} (${b.status})`,
+          bill_type: b.bill_type || 'customer',
+          status: b.status,
+        };
+      });
+    }
 
     const total_sales = Number(salesRow.total) || 0;
     const buying_cost = Number(buyingRow.total) || 0;

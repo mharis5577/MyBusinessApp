@@ -16,8 +16,9 @@ import {
   Undo2,
 } from 'lucide-react';
 import BillAdjustSheet from './BillAdjustSheet';
+import BrandMark from './BrandMark';
 import { isCancelled, remainingQty } from '../utils/billAdjust';
-import { formatCurrency } from '../utils/pakistan';
+import { formatCurrency, formatBillDateTime } from '../utils/pakistan';
 import { paymentSummaryText } from '../utils/billPayments';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
@@ -88,6 +89,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
   }
 
   const companyName = settings.company_name || 'ELITE CHOCOLATE';
+  const companyIsElite = /elite\s*chocolate/i.test(companyName);
   const baseName = sanitizeFilename(liveBill.invoice_number);
   const paid = Number(liveBill.amount_paid) || 0;
   const balance = Number(liveBill.balance_due ?? Math.max(0, (liveBill.total_amount || 0) - paid));
@@ -406,50 +408,50 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
       </p>
 
       {posMode ? (
-        <div id="printable-invoice" className={`thermal-sheet ${urdu ? 'invoice-bilingual' : ''}`}>
-          <div style={{ textAlign: 'center', marginBottom: '0.75rem', borderBottom: '1px dashed #000', paddingBottom: '0.5rem' }}>
-            <h3 style={{ fontSize: '1.05rem', margin: 0, fontWeight: 800 }}>{companyName}</h3>
-            <p style={{ margin: '0.2rem 0', fontSize: '0.72rem' }}>{settings.company_phone}</p>
-            <p style={{ margin: 0, fontSize: '0.72rem' }}>{settings.company_address}</p>
+        <div id="printable-invoice" className={`thermal-sheet ${urdu ? 'invoice-bilingual' : ''} ${cancelled ? 'is-cancelled' : ''}`}>
+          <div className="thermal-head">
+            <BrandMark size={42} />
+            <h3 className="thermal-brand">{companyName}</h3>
+            <p className="thermal-meta">{settings.company_phone}</p>
+            <p className="thermal-meta">{settings.company_address}</p>
             {isSupplier && (
-              <p style={{ margin: '0.35rem 0 0', fontSize: '0.72rem', fontWeight: 700 }}>
+              <p className="thermal-doc-type">
                 <BiLabel en="Purchase Payment Advice" ur="خریداری ادائیگی" urdu={urdu} />
               </p>
             )}
           </div>
-          <div style={{ marginBottom: '0.5rem', fontSize: '0.78rem' }}>
-            <div><BiLabel en={isSupplier ? 'Advice #' : 'Receipt #'} ur={isSupplier ? 'مشورہ' : 'رسید'} urdu={urdu} />: {liveBill.invoice_number}</div>
-            <div><BiLabel en="Date" ur="تاریخ" urdu={urdu} />: {liveBill.bill_date}</div>
+          <div className="thermal-info">
+            <div><BiLabel en={isSupplier ? 'Advice #' : 'Receipt #'} ur={isSupplier ? 'مشورہ' : 'رسید'} urdu={urdu} />: <b>{liveBill.invoice_number}</b></div>
+            <div><BiLabel en="Date" ur="تاریخ" urdu={urdu} />: {formatBillDateTime(liveBill)}</div>
             <div>
-              <BiLabel en={isSupplier ? 'Pay To' : 'Client'} ur={isSupplier ? 'ادائیگی برائے' : 'گاہک'} urdu={urdu} />: {liveBill.customer_name}
+              <BiLabel en={isSupplier ? 'Pay To' : 'Client'} ur={isSupplier ? 'ادائیگی برائے' : 'گاہک'} urdu={urdu} />: <b>{liveBill.customer_name}</b>
             </div>
           </div>
-          <div style={{ borderBottom: '1px dashed #000', borderTop: '1px dashed #000', padding: '0.5rem 0', margin: '0.5rem 0' }}>
-            {cancelled && (
-              <p style={{ textAlign: 'center', fontWeight: 800, margin: '0 0 0.45rem' }}>CANCELLED</p>
-            )}
+          <div className="thermal-lines">
+            {cancelled && <p className="thermal-cancelled">CANCELLED</p>}
             {liveBill.items?.map((item, idx) => {
               const rem = remainingQty(item);
               const ret = Number(item.returned_qty) || 0;
               return (
-                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem', gap: '0.5rem' }}>
-                  <span style={{ flex: 1 }}>{rem}x {item.description}{ret ? ` (${ret} returned)` : ''}</span>
-                  <span>{formatCurrency(currencySymbol, rem * (Number(item.unit_price) || 0))}</span>
+                <div key={idx} className="thermal-line">
+                  <span className="thermal-line-desc">{rem}× {item.description}{ret ? ` (${ret} returned)` : ''}</span>
+                  <span className="thermal-line-amt">{formatCurrency(currencySymbol, rem * (Number(item.unit_price) || 0))}</span>
                 </div>
               );
             })}
           </div>
-          <div style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '1rem', marginTop: '0.5rem' }}>
-            <BiLabel en={isSupplier ? 'AMOUNT TO PAY' : 'TOTAL'} ur={isSupplier ? 'ادا کی جانے والی رقم' : 'کل'} urdu={urdu} />: {formatCurrency(currencySymbol, liveBill.total_amount)}
+          <div className="thermal-total">
+            <BiLabel en={isSupplier ? 'AMOUNT TO PAY' : 'TOTAL'} ur={isSupplier ? 'ادا کی جانے والی رقم' : 'کل'} urdu={urdu} />
+            <strong>{formatCurrency(currencySymbol, liveBill.total_amount)}</strong>
           </div>
           {paid > 0 && (
-            <div style={{ textAlign: 'right', fontSize: '0.8rem', marginTop: '0.25rem' }}>
-              <BiLabel en={isSupplier ? 'Paid' : 'Paid'} ur="ادا" urdu={urdu} />: {formatCurrency(currencySymbol, paid)} · <BiLabel en="Remaining" ur="باقی" urdu={urdu} />: {formatCurrency(currencySymbol, balance)}
+            <div className="thermal-paid">
+              <BiLabel en="Paid" ur="ادا" urdu={urdu} />: {formatCurrency(currencySymbol, paid)} · <BiLabel en="Remaining" ur="باقی" urdu={urdu} />: {formatCurrency(currencySymbol, balance)}
             </div>
           )}
           {isSupplier && hasPayeeBank && (
-            <div style={{ marginTop: '0.65rem', fontSize: '0.72rem', borderTop: '1px dashed #000', paddingTop: '0.45rem' }}>
-              <div style={{ fontWeight: 700 }}><BiLabel en="Pay To Bank" ur="بینک ادائیگی" urdu={urdu} /></div>
+            <div className="thermal-bank">
+              <div className="thermal-bank-title"><BiLabel en="Pay To Bank" ur="بینک ادائیگی" urdu={urdu} /></div>
               {liveBill.payee_bank_name && <div>Bank: {liveBill.payee_bank_name}</div>}
               {liveBill.payee_account_title && <div>Title: {liveBill.payee_account_title}</div>}
               {liveBill.payee_account_number && <div>IBAN/A/C: {liveBill.payee_account_number}</div>}
@@ -462,70 +464,90 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
             </p>
           )}
           {!isSupplier && (
-            <div style={{ textAlign: 'center', marginTop: '1rem' }}>
-              <img src={qrCodeUrl} alt="Scan to Pay" style={{ width: '80px', height: '80px' }} />
-              <p style={{ fontSize: '0.7rem', marginTop: '0.2rem' }}>
-                <BiLabel en="Scan to Pay" ur="ادائیگی کے لیے اسکین کریں" urdu={urdu} />
-              </p>
+            <div className="thermal-qr">
+              <img src={qrCodeUrl} alt="Scan to Pay" width={80} height={80} />
+              <p><BiLabel en="Scan to Pay" ur="ادائیگی کے لیے اسکین کریں" urdu={urdu} /></p>
             </div>
           )}
-          <p style={{ textAlign: 'center', fontSize: '0.68rem', marginTop: '0.75rem' }}>Thank you{urdu ? ' / شکریہ' : ''}</p>
+          <p className="thermal-thanks">Thank you{urdu ? ' / شکریہ' : ''}</p>
         </div>
       ) : (
-        <div id="printable-invoice" className={`invoice-sheet ${urdu ? 'invoice-bilingual' : ''}`}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #e2e8f0', paddingBottom: '1.5rem', marginBottom: '1.5rem', gap: '1rem', flexWrap: 'wrap' }}>
-            <div>
-              <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#111111', margin: 0 }}>{companyName}</h1>
-              {isSupplier && (
-                <p style={{ color: '#64748b', fontSize: '0.75rem', margin: '0.15rem 0 0', fontWeight: 700, textTransform: 'uppercase' }}>
-                  <BiLabel en="From / Payer" ur="ادا کنندہ" urdu={urdu} />
-                </p>
-              )}
-              <p style={{ color: '#64748b', fontSize: '0.85rem', margin: '0.2rem 0', whiteSpace: 'pre-line' }}>{settings.company_address}</p>
-              <p style={{ color: '#64748b', fontSize: '0.85rem', margin: 0 }}>{settings.company_email} | {settings.company_phone}</p>
-              {settings.company_tax_id && <p style={{ color: '#64748b', fontSize: '0.8rem', margin: '0.2rem 0' }}>Tax ID: {settings.company_tax_id}</p>}
+        <div id="printable-invoice" className={`invoice-sheet ${urdu ? 'invoice-bilingual' : ''} ${cancelled ? 'is-cancelled' : ''}`}>
+          <div className="inv-topbar" />
+          <header className="inv-header">
+            <div className="inv-brand-block">
+              <BrandMark size={52} />
+              <div>
+                {companyIsElite ? (
+                  <>
+                    <div className="inv-elite">ELITE</div>
+                    <h1 className="inv-company">CHOCOLATE</h1>
+                  </>
+                ) : (
+                  <>
+                    <div className="inv-elite">ELITE CHOCOLATE</div>
+                    <h1 className="inv-company">{companyName}</h1>
+                  </>
+                )}
+                {isSupplier && (
+                  <p className="inv-eyebrow">
+                    <BiLabel en="From / Payer" ur="ادا کنندہ" urdu={urdu} />
+                  </p>
+                )}
+                <p className="inv-contact">{settings.company_address}</p>
+                <p className="inv-contact">{[settings.company_email, settings.company_phone].filter(Boolean).join(' · ')}</p>
+                {settings.company_tax_id && <p className="inv-contact">NTN / Tax: {settings.company_tax_id}</p>}
+              </div>
             </div>
-            <div style={{ textAlign: 'right' }}>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 900, color: '#0f172a', margin: 0, textTransform: 'uppercase' }}>
+            <div className="inv-doc-block">
+              <p className="inv-doc-label">
                 {isSupplier ? (
                   <BiLabel en="Purchase Payment Advice" ur="خریداری ادائیگی" urdu={urdu} />
                 ) : (
-                  <BiLabel en="SALES INVOICE" ur="سیلز انوائس" urdu={urdu} />
+                  <BiLabel en="Sales Invoice" ur="سیلز انوائس" urdu={urdu} />
                 )}
-              </h2>
-              <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '1.1rem', color: '#111111', margin: '0.25rem 0' }}>#{liveBill.invoice_number}</div>
-              <span className={`badge badge-${liveBill.status}`}>{cancelled ? 'cancelled' : liveBill.status}</span>
+              </p>
+              <div className="inv-number">#{liveBill.invoice_number}</div>
+              <span className={`badge badge-${cancelled ? 'cancelled' : liveBill.status}`}>
+                {cancelled ? 'cancelled' : liveBill.status}
+              </span>
             </div>
-          </div>
+          </header>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '1.5rem' }}>
-            <div>
-              <h4 style={{ fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, marginBottom: '0.4rem' }}>
+          <section className="inv-meta-grid">
+            <div className="inv-party">
+              <h4>
                 <BiLabel en={isSupplier ? 'Pay To' : 'Billed To'} ur={isSupplier ? 'ادائیگی برائے' : 'بل برائے'} urdu={urdu} />
               </h4>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>{liveBill.customer_name}</h3>
-              {liveBill.customer_phone && <p style={{ color: '#475569', fontSize: '0.85rem', margin: '0.2rem 0' }}>{liveBill.customer_phone}</p>}
-              {liveBill.customer_address && <p style={{ color: '#475569', fontSize: '0.8rem', margin: '0.15rem 0' }}>{liveBill.customer_address}</p>}
+              <h3>{liveBill.customer_name}</h3>
+              {liveBill.customer_phone && <p>{liveBill.customer_phone}</p>}
+              {liveBill.customer_address && <p>{liveBill.customer_address}</p>}
             </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ marginBottom: '0.4rem' }}>
-                <span style={{ color: '#64748b', fontSize: '0.85rem' }}><BiLabel en="Date" ur="تاریخ" urdu={urdu} />: </span>
-                <strong>{liveBill.bill_date}</strong>
+            <div className="inv-dates">
+              <div>
+                <span><BiLabel en="Bill date" ur="تاریخ" urdu={urdu} /></span>
+                <strong>{formatBillDateTime(liveBill)}</strong>
               </div>
               <div>
-                <span style={{ color: '#64748b', fontSize: '0.85rem' }}><BiLabel en="Due" ur="آخری تاریخ" urdu={urdu} />: </span>
+                <span><BiLabel en="Due date" ur="آخری تاریخ" urdu={urdu} /></span>
                 <strong>{liveBill.due_date}</strong>
               </div>
+              {liveBill.payment_method && (
+                <div>
+                  <span><BiLabel en="Method" ur="طریقہ" urdu={urdu} /></span>
+                  <strong>{liveBill.payment_method}</strong>
+                </div>
+              )}
             </div>
-          </div>
+          </section>
 
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1.5rem' }}>
+          <table className="inv-table">
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', fontSize: '0.8rem', textTransform: 'uppercase', textAlign: 'left' }}>
-                <th style={{ padding: '0.75rem 1rem' }}><BiLabel en="Description" ur="تفصیل" urdu={urdu} /></th>
-                <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}><BiLabel en="Qty" ur="تعداد" urdu={urdu} /></th>
-                <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}><BiLabel en="Price" ur="قیمت" urdu={urdu} /></th>
-                <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}><BiLabel en="Total" ur="کل" urdu={urdu} /></th>
+              <tr>
+                <th><BiLabel en="Description" ur="تفصیل" urdu={urdu} /></th>
+                <th className="num"><BiLabel en="Qty" ur="تعداد" urdu={urdu} /></th>
+                <th className="num"><BiLabel en="Price" ur="قیمت" urdu={urdu} /></th>
+                <th className="num"><BiLabel en="Total" ur="کل" urdu={urdu} /></th>
               </tr>
             </thead>
             <tbody>
@@ -533,51 +555,51 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
                 const rem = remainingQty(item);
                 const ret = Number(item.returned_qty) || 0;
                 return (
-                  <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
-                    <td style={{ padding: '0.85rem 1rem', color: '#0f172a', fontWeight: 600 }}>
-                      {item.description}
-                      {ret ? <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 500 }}>{ret} returned</div> : null}
+                  <tr key={idx}>
+                    <td>
+                      <span className="inv-item-name">{item.description}</span>
+                      {ret ? <span className="inv-item-note">{ret} returned</span> : null}
                     </td>
-                    <td style={{ padding: '0.85rem 1rem', textAlign: 'center' }}>{rem}</td>
-                    <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{Number(item.unit_price).toFixed(2)}</td>
-                    <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{(rem * (Number(item.unit_price) || 0)).toFixed(2)}</td>
+                    <td className="num">{rem}</td>
+                    <td className="num mono">{Number(item.unit_price).toFixed(2)}</td>
+                    <td className="num mono strong">{(rem * (Number(item.unit_price) || 0)).toFixed(2)}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <div style={{ width: '280px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0', color: '#64748b' }}>
+          <div className="inv-totals-wrap">
+            <div className="inv-totals">
+              <div className="inv-total-row">
                 <BiLabel en="Subtotal" ur="ذیلی کل" urdu={urdu} />
-                <span style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, liveBill.subtotal)}</span>
+                <span className="mono">{formatCurrency(currencySymbol, liveBill.subtotal)}</span>
               </div>
               {Number(liveBill.tax_amount) > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0', color: '#64748b' }}>
+                <div className="inv-total-row">
                   <span><BiLabel en="Tax" ur="ٹیکس" urdu={urdu} /> ({liveBill.tax_rate || 0}%)</span>
-                  <span style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, liveBill.tax_amount)}</span>
+                  <span className="mono">{formatCurrency(currencySymbol, liveBill.tax_amount)}</span>
                 </div>
               )}
               {Number(liveBill.discount_amount) > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0', color: '#15803d' }}>
+                <div className="inv-total-row is-discount">
                   <span><BiLabel en="Discount" ur="رعایت" urdu={urdu} /> ({liveBill.discount_rate || 0}%)</span>
-                  <span style={{ fontFamily: 'var(--font-mono)' }}>-{formatCurrency(currencySymbol, liveBill.discount_amount)}</span>
+                  <span className="mono">−{formatCurrency(currencySymbol, liveBill.discount_amount)}</span>
                 </div>
               )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.6rem 0 0', marginTop: '0.5rem', borderTop: '2px solid #0f172a', fontSize: '1.15rem', fontWeight: 900 }}>
+              <div className="inv-total-row is-grand">
                 <BiLabel en={isSupplier ? 'Amount to Pay' : 'Total'} ur={isSupplier ? 'ادا کی جانے والی رقم' : 'کل رقم'} urdu={urdu} />
-                <span style={{ color: '#111111', fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, liveBill.total_amount)}</span>
+                <span className="mono">{formatCurrency(currencySymbol, liveBill.total_amount)}</span>
               </div>
               {paid > 0 && (
                 <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', color: '#15803d', fontWeight: 700 }}>
+                  <div className="inv-total-row is-paid">
                     <BiLabel en="Amount Paid" ur="ادا شدہ" urdu={urdu} />
-                    <span style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, paid)}</span>
+                    <span className="mono">{formatCurrency(currencySymbol, paid)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', color: '#b45309', fontWeight: 700 }}>
+                  <div className="inv-total-row is-due">
                     <BiLabel en={isSupplier ? 'Remaining' : 'Balance Due'} ur="باقی رقم" urdu={urdu} />
-                    <span style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, balance)}</span>
+                    <span className="mono">{formatCurrency(currencySymbol, balance)}</span>
                   </div>
                 </>
               )}
@@ -585,26 +607,22 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
           </div>
 
           {payments.length > 0 && (
-            <div style={{ marginTop: '1.25rem' }}>
-              <h4 style={{ fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, marginBottom: '0.5rem' }}>
-                <BiLabel en="Payment History" ur="ادائیگی کی تاریخ" urdu={urdu} />
-              </h4>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+            <div className="inv-pay-history">
+              <h4><BiLabel en="Payment History" ur="ادائیگی کی تاریخ" urdu={urdu} /></h4>
+              <table>
                 <thead>
-                  <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>
-                    <th style={{ textAlign: 'left', padding: '0.4rem 0' }}><BiLabel en="Date" ur="تاریخ" urdu={urdu} /></th>
-                    <th style={{ textAlign: 'left', padding: '0.4rem 0' }}><BiLabel en="Method" ur="طریقہ" urdu={urdu} /></th>
-                    <th style={{ textAlign: 'right', padding: '0.4rem 0' }}><BiLabel en="Amount" ur="رقم" urdu={urdu} /></th>
+                  <tr>
+                    <th><BiLabel en="Date" ur="تاریخ" urdu={urdu} /></th>
+                    <th><BiLabel en="Method" ur="طریقہ" urdu={urdu} /></th>
+                    <th className="num"><BiLabel en="Amount" ur="رقم" urdu={urdu} /></th>
                   </tr>
                 </thead>
                 <tbody>
                   {payments.map((p) => (
-                    <tr key={p.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '0.35rem 0' }}>{p.payment_date}</td>
-                      <td style={{ padding: '0.35rem 0' }}>{p.method}</td>
-                      <td style={{ padding: '0.35rem 0', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-                        {formatCurrency(currencySymbol, p.amount)}
-                      </td>
+                    <tr key={p.id}>
+                      <td>{p.payment_date}</td>
+                      <td>{p.method}</td>
+                      <td className="num mono">{formatCurrency(currencySymbol, p.amount)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -614,12 +632,12 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
 
           {isSupplier ? (
             hasPayeeBank && (
-              <div style={{ marginTop: '1.5rem', background: '#f8fafc', padding: '1rem', borderRadius: 10, fontSize: '0.85rem', color: '#334155' }}>
+              <div className="inv-paybox">
                 <strong><BiLabel en="Pay To — Supplier Bank Details" ur="ادائیگی — سپلائر بینک تفصیلات" urdu={urdu} /></strong>
                 {liveBill.payee_bank_name && <div>Bank: {liveBill.payee_bank_name}</div>}
                 {liveBill.payee_account_title && <div>Title: {liveBill.payee_account_title}</div>}
                 {liveBill.payee_account_number && <div>IBAN / A/C: {liveBill.payee_account_number}</div>}
-                {liveBill.payee_payment_notes && <div style={{ marginTop: '0.35rem' }}>{liveBill.payee_payment_notes}</div>}
+                {liveBill.payee_payment_notes && <div className="inv-paybox-note">{liveBill.payee_payment_notes}</div>}
                 {urdu && (
                   <div className="bi-ur payment-urdu-block" dir="rtl" lang="ur">
                     براہ کرم مندرجہ بالا اکاؤنٹ پر ادائیگی بھیجیں
@@ -629,13 +647,13 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
             )
           ) : (
             (settings.bank_name || settings.mobile_wallet || settings.payment_instructions || settings.account_title) && (
-              <div style={{ marginTop: '1.5rem', background: '#f8fafc', padding: '1rem', borderRadius: 10, fontSize: '0.85rem', color: '#334155' }}>
+              <div className="inv-paybox">
                 <strong><BiLabel en="Payment Details" ur="ادائیگی تفصیلات" urdu={urdu} /></strong>
                 {settings.bank_name && <div>Bank: {settings.bank_name}</div>}
                 {settings.account_title && <div>Title: {settings.account_title}</div>}
-                {settings.account_number && <div>A/C: {settings.account_number}</div>}
-                {settings.mobile_wallet && <div>Raast / JazzCash / EasyPaisa: {settings.mobile_wallet}</div>}
-                {settings.payment_instructions && <div style={{ marginTop: '0.35rem' }}>{settings.payment_instructions}</div>}
+                {settings.account_number && <div>A/C / Raast: {settings.account_number}</div>}
+                {settings.mobile_wallet && <div>JazzCash / EasyPaisa: {settings.mobile_wallet}</div>}
+                {settings.payment_instructions && <div className="inv-paybox-note">{settings.payment_instructions}</div>}
                 {urdu && (
                   <div className="bi-ur payment-urdu-block" dir="rtl" lang="ur">
                     برائے مہربانی ادائیگی کی تصدیق واٹس ایپ پر بھیجیں
@@ -646,10 +664,15 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
           )}
 
           {liveBill.notes && (
-            <div style={{ marginTop: '1.25rem', color: '#64748b', fontSize: '0.8rem' }}>
+            <div className="inv-notes">
               <strong><BiLabel en="Notes" ur="نوٹس" urdu={urdu} />:</strong> {liveBill.notes}
             </div>
           )}
+
+          <footer className="inv-footer">
+            <span>ELITE CHOCOLATE</span>
+            <span>Thank you for your business{urdu ? ' / شکریہ' : ''}</span>
+          </footer>
         </div>
       )}
 

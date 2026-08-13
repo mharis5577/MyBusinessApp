@@ -1,7 +1,7 @@
 /**
  * Compress an image File to a JPEG data URL for storage on payments.
  */
-export function compressImageToDataUrl(file, { maxWidth = 900, quality = 0.72 } = {}) {
+export function compressImageToDataUrl(file, { maxWidth = 720, quality = 0.62 } = {}) {
   return new Promise((resolve, reject) => {
     if (!file || !file.type?.startsWith('image/')) {
       reject(new Error('Please choose an image file'));

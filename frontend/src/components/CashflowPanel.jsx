@@ -12,7 +12,7 @@ export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false,
   const load = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch('/api/cashflow');
+      const res = await apiFetch(compact ? '/api/cashflow?compact=1' : '/api/cashflow');
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
       setData(json);
@@ -25,7 +25,7 @@ export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false,
 
   useEffect(() => {
     load();
-  }, []);
+  }, [compact]);
 
   if (loading && !data) {
     return (

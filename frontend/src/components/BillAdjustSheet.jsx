@@ -79,7 +79,7 @@ export default function BillAdjustSheet({ bill, open, onClose, onUpdated, curren
   return (
     <div
       className="modal-sheet"
-      style={{ position: 'fixed', inset: 0, background: 'rgba(7,41,41,0.45)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999, padding: '0.75rem' }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(7,41,41,0.55)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999, padding: '0.75rem' }}
       onClick={onClose}
     >
       <div

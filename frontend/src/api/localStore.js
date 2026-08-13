@@ -3,7 +3,7 @@
  * Mirrors the Express /api shapes used by the UI.
  */
 import { openDB } from 'idb';
-import { pakistanToday, pakistanYearMonth } from '../utils/pakistan';
+import { pakistanToday, pakistanYearMonth, pakistanNowTime } from '../utils/pakistan';
 import { allItemsReturned, isCancelled, recalcBillTotals, remainingQty } from '../utils/billAdjust';
 
 const DB_NAME = 'elite-chocolate-pos';
@@ -90,32 +90,86 @@ async function ensureSeeded() {
 }
 
 async function nextId(db, store) {
-  const all = await db.getAll(store);
-  if (!all.length) return 1;
-  return Math.max(...all.map((r) => Number(r.id) || 0)) + 1;
+  const keys = await db.getAllKeys(store);
+  if (!keys.length) return 1;
+  return Math.max(...keys.map((k) => Number(k) || 0)) + 1;
 }
 
-async function generateNextInvoiceNumber(bType = 'customer') {
+async function generateNextInvoiceNumber(bType = 'customer', yearOverride = null) {
   const db = await ensureSeeded();
-  const year = new Date().getFullYear();
+  const year = yearOverride || Number(String(pakistanToday()).slice(0, 4)) || new Date().getFullYear();
   const prefix = bType === 'supplier' ? 'SAU' : 'INV';
   const bills = await db.getAll('bills');
-  const matching = bills
-    .filter((b) => String(b.invoice_number || '').startsWith(`${prefix}-${year}-`))
-    .sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
-  let nextNum = 1;
-  if (matching[0]?.invoice_number) {
-    const m = matching[0].invoice_number.match(new RegExp(`${prefix}-\\d+-(\\d+)`));
-    if (m?.[1]) nextNum = parseInt(m[1], 10) + 1;
+  let maxNum = 0;
+  const re = new RegExp(`^${prefix}-${year}-(\\d+)$`);
+  for (const b of bills) {
+    const m = String(b.invoice_number || '').match(re);
+    if (m?.[1]) maxNum = Math.max(maxNum, parseInt(m[1], 10) || 0);
   }
-  return `${prefix}-${year}-${String(nextNum).padStart(4, '0')}`;
+  return `${prefix}-${year}-${String(maxNum + 1).padStart(4, '0')}`;
 }
 
-async function attachBillRelations(db, bill) {
-  const items = (await db.getAll('bill_items')).filter((i) => i.bill_id === bill.id);
-  const payments = (await db.getAll('bill_payments'))
-    .filter((p) => p.bill_id === bill.id)
-    .sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+/** Allocate a unique invoice number (retries if a race created a duplicate). */
+async function allocateUniqueInvoiceNumber(db, bType, preferred = '') {
+  const year = Number(String(pakistanToday()).slice(0, 4)) || new Date().getFullYear();
+  let invNum =
+    preferred && String(preferred).trim()
+      ? String(preferred).trim()
+      : await generateNextInvoiceNumber(bType, year);
+  for (let attempt = 0; attempt < 25; attempt++) {
+    const allBills = await db.getAll('bills');
+    if (!allBills.some((b) => b.invoice_number === invNum)) return invNum;
+    invNum = await generateNextInvoiceNumber(bType, year);
+  }
+  throw new Error('Could not allocate a unique invoice number — try again');
+}
+
+/** Allocate a free numeric id; caller should prefer add() so overwrites are impossible. */
+async function allocateUniqueId(db, store) {
+  for (let attempt = 0; attempt < 25; attempt++) {
+    const id = await nextId(db, store);
+    const existing = await db.get(store, id);
+    if (!existing) return id;
+  }
+  throw new Error(`Could not allocate id for ${store}`);
+}
+
+function groupRowsByBillId(rows) {
+  const map = new Map();
+  for (const row of rows || []) {
+    const id = Number(row.bill_id);
+    if (!map.has(id)) map.set(id, []);
+    map.get(id).push(row);
+  }
+  return map;
+}
+
+function paymentsWithoutScreenshots(payments) {
+  return (payments || []).map((p) => {
+    if (!p?.screenshot_data) return p;
+    const { screenshot_data, ...rest } = p;
+    return { ...rest, has_screenshot: true };
+  });
+}
+
+async function attachBillRelations(db, bill, opts = {}) {
+  const includeScreenshots = opts.includeScreenshots !== false;
+  const includePayments = opts.includePayments !== false;
+  const items =
+    opts.itemsByBill?.get(Number(bill.id)) ||
+    (await db.getAll('bill_items')).filter((i) => i.bill_id === bill.id);
+  let payments = [];
+  if (includePayments) {
+    payments =
+      opts.paymentsByBill?.get(Number(bill.id)) ||
+      (await db.getAll('bill_payments'))
+        .filter((p) => p.bill_id === bill.id)
+        .sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+    if (opts.paymentsByBill) {
+      payments = [...payments].sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+    }
+    if (!includeScreenshots) payments = paymentsWithoutScreenshots(payments);
+  }
   return enrichBill({ ...bill, items, payments });
 }
 
@@ -662,8 +716,14 @@ async function handleLocalRequestInner(url, options = {}) {
         );
       }
       bills.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
-      const out = [];
-      for (const bill of bills) out.push(await attachBillRelations(db, bill));
+      // One pass over items (no payment screenshots) — list used to freeze phones.
+      const itemsByBill = groupRowsByBillId(await db.getAll('bill_items'));
+      const out = bills.map((bill) =>
+        enrichBill({
+          ...bill,
+          items: itemsByBill.get(Number(bill.id)) || [],
+        })
+      );
       return jsonOk(out);
     }
 
@@ -679,17 +739,31 @@ async function handleLocalRequestInner(url, options = {}) {
       }
 
       const bType = body.bill_type === 'supplier' ? 'supplier' : 'customer';
-      let invNum =
-        body.invoice_number && String(body.invoice_number).trim()
-          ? String(body.invoice_number).trim()
-          : await generateNextInvoiceNumber(bType);
-
-      const allBills = await db.getAll('bills');
-      if (allBills.some((b) => b.invoice_number === invNum)) {
-        invNum = await generateNextInvoiceNumber(bType);
+      let invNum;
+      try {
+        invNum = await allocateUniqueInvoiceNumber(
+          db,
+          bType,
+          body.invoice_number && String(body.invoice_number).trim()
+            ? String(body.invoice_number).trim()
+            : ''
+        );
+      } catch (err) {
+        return jsonErr(err.message || 'Invoice number conflict');
       }
 
-      const billId = await nextId(db, 'bills');
+      const totalAmount = Number(body.total_amount);
+      if (!Number.isFinite(totalAmount)) {
+        return jsonErr('Invalid bill total');
+      }
+
+      let billId;
+      try {
+        billId = await allocateUniqueId(db, 'bills');
+      } catch (err) {
+        return jsonErr(err.message || 'Could not create bill');
+      }
+
       const todayStr = pakistanToday();
       const bill = {
         id: billId,
@@ -700,13 +774,14 @@ async function handleLocalRequestInner(url, options = {}) {
         customer_phone: body.customer_phone || '',
         customer_address: body.customer_address || '',
         bill_date: body.bill_date || todayStr,
+        bill_time: body.bill_time || pakistanNowTime(),
         due_date: body.due_date || todayStr,
         subtotal: Number(body.subtotal) || 0,
         tax_rate: Number(body.tax_rate) || 0,
         tax_amount: Number(body.tax_amount) || 0,
         discount_rate: Number(body.discount_rate) || 0,
         discount_amount: Number(body.discount_amount) || 0,
-        total_amount: Number(body.total_amount) || 0,
+        total_amount: Math.round(totalAmount * 100) / 100,
         amount_paid: 0,
         status: body.status || 'pending',
         notes: body.notes || '',
@@ -717,27 +792,42 @@ async function handleLocalRequestInner(url, options = {}) {
         payee_payment_notes: body.payee_payment_notes || '',
         created_at: new Date().toISOString(),
       };
-      await db.put('bills', bill);
+      try {
+        await db.add('bills', bill);
+      } catch (err) {
+        // Concurrent create grabbed the same id — retry once with fresh ids
+        try {
+          bill.id = await allocateUniqueId(db, 'bills');
+          bill.invoice_number = await allocateUniqueInvoiceNumber(db, bType, '');
+          await db.add('bills', bill);
+        } catch (retryErr) {
+          return jsonErr(retryErr.message || 'Could not save bill — try again');
+        }
+      }
 
       const custName = String(body.customer_name).trim().toLowerCase();
       const allCustomers = await db.getAll('customers');
       const existingCust = allCustomers.find((c) => String(c.name || '').toLowerCase() === custName);
       if (!existingCust) {
-        const cid = await nextId(db, 'customers');
-        await db.put('customers', {
-          id: cid,
-          name: String(body.customer_name).trim(),
-          email: body.customer_email || '',
-          phone: body.customer_phone || '',
-          address: body.customer_address || '',
-          tax_id: '',
-          party_type: bType,
-          payee_bank_name: body.payee_bank_name || '',
-          payee_account_title: body.payee_account_title || '',
-          payee_account_number: body.payee_account_number || '',
-          payee_payment_notes: body.payee_payment_notes || '',
-          created_at: new Date().toISOString(),
-        });
+        const cid = await allocateUniqueId(db, 'customers');
+        try {
+          await db.add('customers', {
+            id: cid,
+            name: String(body.customer_name).trim(),
+            email: body.customer_email || '',
+            phone: body.customer_phone || '',
+            address: body.customer_address || '',
+            tax_id: '',
+            party_type: bType,
+            payee_bank_name: body.payee_bank_name || '',
+            payee_account_title: body.payee_account_title || '',
+            payee_account_number: body.payee_account_number || '',
+            payee_payment_notes: body.payee_payment_notes || '',
+            created_at: new Date().toISOString(),
+          });
+        } catch {
+          /* customer create race — non-fatal for bill */
+        }
       } else {
         await db.put('customers', {
           ...existingCust,
@@ -752,16 +842,29 @@ async function handleLocalRequestInner(url, options = {}) {
       for (const item of body.items) {
         const qty = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
         const price = Number(item.unit_price) || 0;
-        const itemId = await nextId(db, 'bill_items');
-        await db.put('bill_items', {
-          id: itemId,
-          bill_id: billId,
-          product_id: item.product_id || null,
-          description: String(item.description).trim(),
-          quantity: qty,
-          unit_price: price,
-          total: qty * price,
-        });
+        const itemId = await allocateUniqueId(db, 'bill_items');
+        try {
+          await db.add('bill_items', {
+            id: itemId,
+            bill_id: bill.id,
+            product_id: item.product_id || null,
+            description: String(item.description).trim(),
+            quantity: qty,
+            unit_price: price,
+            total: qty * price,
+          });
+        } catch {
+          const retryItemId = await allocateUniqueId(db, 'bill_items');
+          await db.add('bill_items', {
+            id: retryItemId,
+            bill_id: bill.id,
+            product_id: item.product_id || null,
+            description: String(item.description).trim(),
+            quantity: qty,
+            unit_price: price,
+            total: qty * price,
+          });
+        }
 
         if (item.product_id && bType === 'customer') {
           const product = await db.get('products', Number(item.product_id));
@@ -801,6 +904,7 @@ async function handleLocalRequestInner(url, options = {}) {
         customer_phone: body.customer_phone ?? existing.customer_phone ?? '',
         customer_address: body.customer_address ?? existing.customer_address ?? '',
         bill_date: body.bill_date ?? existing.bill_date,
+        bill_time: body.bill_time ?? existing.bill_time ?? '',
         due_date: body.due_date ?? existing.due_date,
         status: body.status ?? existing.status,
         notes: body.notes ?? existing.notes,
@@ -1006,12 +1110,13 @@ async function handleLocalRequestInner(url, options = {}) {
     const activeSales = bills.filter((b) => b.bill_type !== 'supplier' && !isCancelled(b));
     const todaySales = activeSales.filter((b) => String(b.bill_date) === today);
     const monthSales = activeSales.filter((b) => String(b.bill_date || '').startsWith(monthPrefix));
+    const itemsByBill = groupRowsByBillId(items);
     const sumSaleCost = (list) => {
       let sales = 0;
       let cost = 0;
       for (const b of list) {
         sales += Number(b.total_amount) || 0;
-        for (const it of items.filter((i) => i.bill_id === b.id)) {
+        for (const it of itemsByBill.get(Number(b.id)) || []) {
           const prod = productById.get(Number(it.product_id));
           cost += (Number(prod?.cost_price) || 0) * remainingQty(it);
         }
@@ -1185,16 +1290,15 @@ async function handleLocalRequestInner(url, options = {}) {
     const data = body?.payload && typeof body.payload === 'object' ? body.payload : body;
     if (!data || typeof data !== 'object') return jsonErr('Invalid backup payload');
 
-    const putRows = async (store, rows, mapFn) => {
-      for (const row of rows || []) {
-        if (!row || typeof row !== 'object') continue;
-        const rec = mapFn ? mapFn(row) : { ...row };
-        if (rec.id == null) rec.id = await nextId(db, store);
-        await db.put(store, rec);
-      }
-    };
+    const hasCore =
+      Array.isArray(data.bills) ||
+      Array.isArray(data.customers) ||
+      Array.isArray(data.products);
+    if (!hasCore) {
+      return jsonErr('Backup is missing shop tables (bills / customers / products)');
+    }
 
-    for (const store of [
+    const storeNames = [
       'bill_payments',
       'bill_items',
       'bills',
@@ -1203,25 +1307,49 @@ async function handleLocalRequestInner(url, options = {}) {
       'advances',
       'customers',
       'products',
-    ]) {
-      await db.clear(store);
+    ];
+
+    try {
+      const tx = db.transaction([...storeNames, 'settings'], 'readwrite');
+      await Promise.all(storeNames.map((name) => tx.objectStore(name).clear()));
+
+      const putAll = async (store, rows, mapFn) => {
+        const os = tx.objectStore(store);
+        for (const row of rows || []) {
+          if (!row || typeof row !== 'object') continue;
+          const rec = mapFn ? mapFn(row) : { ...row };
+          if (rec.id == null) {
+            const keys = await os.getAllKeys();
+            rec.id = keys.length ? Math.max(...keys.map((k) => Number(k) || 0)) + 1 : 1;
+          }
+          await os.put(rec);
+        }
+      };
+
+      await putAll('customers', data.customers, (c) => ({
+        ...c,
+        party_type: c.party_type === 'supplier' ? 'supplier' : 'customer',
+      }));
+      await putAll('products', data.products);
+      await putAll('bills', data.bills);
+      await putAll('bill_items', data.bill_items);
+      await putAll('bill_payments', data.bill_payments);
+      await putAll('advances', data.advances);
+      await putAll('rates', data.customer_product_rates || data.rates);
+      await putAll('stock_adjustments', data.stock_adjustments);
+
+      if (data.settings?.[0]) {
+        await tx.objectStore('settings').put({ ...DEFAULT_SETTINGS, ...data.settings[0], id: 1 });
+      } else if (data.settings && !Array.isArray(data.settings) && data.settings.company_name) {
+        await tx.objectStore('settings').put({ ...DEFAULT_SETTINGS, ...data.settings, id: 1 });
+      }
+
+      await tx.done;
+    } catch (err) {
+      console.error('Restore failed', err);
+      return jsonErr(err?.message || 'Restore failed — shop data was not changed safely. Try again.');
     }
-    await putRows('customers', data.customers, (c) => ({
-      ...c,
-      party_type: c.party_type === 'supplier' ? 'supplier' : 'customer',
-    }));
-    await putRows('products', data.products);
-    await putRows('bills', data.bills);
-    await putRows('bill_items', data.bill_items);
-    await putRows('bill_payments', data.bill_payments);
-    await putRows('advances', data.advances);
-    await putRows('rates', data.customer_product_rates || data.rates);
-    await putRows('stock_adjustments', data.stock_adjustments);
-    if (data.settings?.[0]) {
-      await db.put('settings', { ...DEFAULT_SETTINGS, ...data.settings[0], id: 1 });
-    } else if (data.settings && !Array.isArray(data.settings) && data.settings.company_name) {
-      await db.put('settings', { ...DEFAULT_SETTINGS, ...data.settings, id: 1 });
-    }
+
     return jsonOk({ success: true, message: 'Backup restored successfully' });
   }
 
@@ -1244,29 +1372,35 @@ async function handleLocalRequestInner(url, options = {}) {
     const total_advance = advances.reduce((s, a) => s + (Number(a.amount) || 0), 0);
     const net_profit = total_sales - buying_cost;
     const net_balance = net_profit - total_advance;
+    const includeFlow = search.get('compact') !== '1';
 
-    const recent = [...bills].sort((a, b) => {
-      const d = String(b.bill_date || '').localeCompare(String(a.bill_date || ''));
-      if (d !== 0) return d;
-      return (Number(b.id) || 0) - (Number(a.id) || 0);
-    }).slice(0, 80);
+    let money_flow = [];
+    if (includeFlow) {
+      const recent = [...bills]
+        .sort((a, b) => {
+          const d = String(b.bill_date || '').localeCompare(String(a.bill_date || ''));
+          if (d !== 0) return d;
+          return (Number(b.id) || 0) - (Number(a.id) || 0);
+        })
+        .slice(0, 40);
 
-    const money_flow = recent.map((b) => {
-      const isSupplier = b.bill_type === 'supplier';
-      const amount = isCancelled(b) ? 0 : Number(b.total_amount) || 0;
-      return {
-        id: b.id,
-        date: b.bill_date,
-        invoice_number: b.invoice_number,
-        selling: isSupplier ? 0 : amount,
-        buying: isSupplier ? amount : 0,
-        expenditure: 0,
-        profit: isSupplier ? -amount : amount,
-        comment: `${isSupplier ? 'Buying' : 'Sale'} · ${b.customer_name}${b.notes ? ` · ${b.notes}` : ''} (${b.status})`,
-        bill_type: b.bill_type || 'customer',
-        status: b.status,
-      };
-    });
+      money_flow = recent.map((b) => {
+        const isSupplier = b.bill_type === 'supplier';
+        const amount = isCancelled(b) ? 0 : Number(b.total_amount) || 0;
+        return {
+          id: b.id,
+          date: b.bill_date,
+          invoice_number: b.invoice_number,
+          selling: isSupplier ? 0 : amount,
+          buying: isSupplier ? amount : 0,
+          expenditure: 0,
+          profit: isSupplier ? -amount : amount,
+          comment: `${isSupplier ? 'Buying' : 'Sale'} · ${b.customer_name}${b.notes ? ` · ${b.notes}` : ''} (${b.status})`,
+          bill_type: b.bill_type || 'customer',
+          status: b.status,
+        };
+      });
+    }
 
     return jsonOk({
       total_sales,
@@ -1277,7 +1411,7 @@ async function handleLocalRequestInner(url, options = {}) {
       net_balance,
       paid_sales,
       pending_sales,
-      advances,
+      advances: includeFlow ? advances : [],
       money_flow,
     });
   }

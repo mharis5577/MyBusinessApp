@@ -26,13 +26,19 @@ import {
   listLocalSnapshots,
   saveLocalSnapshot,
   getLastAutoBackupAt,
+  getLastPhoneBackupPath,
   parseBackupPayload,
+  summarizeBackupPayload,
+  getLocalSnapshot,
   MAX_VERSIONS,
+  PHONE_FOLDER,
 } from '../utils/backupManager';
 import { readPickedFileText } from '../utils/downloadFile';
 
-export default function SettingsManager({ onSettingsUpdated }) {
+export default function SettingsManager({ onSettingsUpdated, focusBackup = false, onFocusHandled }) {
   const toast = useToast();
+  const backupPanelRef = useRef(null);
+  const [backupHighlight, setBackupHighlight] = useState(false);
   const [settings, setSettings] = useState({
     company_name: 'ELITE CHOCOLATE',
     company_email: 'm.haris676@gmail.com',
@@ -87,6 +93,20 @@ export default function SettingsManager({ onSettingsUpdated }) {
     refreshSnapshots();
     checkBiometricAvailable().then((r) => setBioAvailable(Boolean(r.available)));
   }, []);
+
+  useEffect(() => {
+    if (!focusBackup) return undefined;
+    const t = setTimeout(() => {
+      backupPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setBackupHighlight(true);
+      onFocusHandled?.();
+    }, 80);
+    const clear = setTimeout(() => setBackupHighlight(false), 2800);
+    return () => {
+      clearTimeout(t);
+      clearTimeout(clear);
+    };
+  }, [focusBackup, onFocusHandled]);
 
   const handleChange = (field, value) => {
     setSettings((prev) => ({ ...prev, [field]: value }));
@@ -158,7 +178,14 @@ export default function SettingsManager({ onSettingsUpdated }) {
     setBusy(true);
     try {
       const result = await exportBackupFile({ offerShare: false });
-      toast.success(`Backup saved on this phone: ${result.filename}`);
+      const parts = [];
+      if (result.inApp) parts.push('App');
+      if (result.phoneSaved) parts.push('Phone storage');
+      if (!parts.length) {
+        toast.error('Backup did not save anywhere. Free storage and try again.');
+        return;
+      }
+      toast.success(`Backup saved (${parts.join(' + ')}): ${result.filename}`);
       await refreshSnapshots();
     } catch (err) {
       toast.error('Backup failed: ' + err.message);
@@ -171,15 +198,32 @@ export default function SettingsManager({ onSettingsUpdated }) {
     setBusy(true);
     try {
       const result = await exportBackupFile({ offerShare: true });
-      toast.success(
-        result.result === 'shared'
-          ? 'Share sheet opened — save to Drive, WhatsApp, or Files.'
-          : `Backup file ready: ${result.filename}`
-      );
+      const base = [];
+      if (result.inApp) base.push('App');
+      if (result.phoneSaved) base.push('Phone');
+      if (!result.inApp && !result.phoneSaved && result.driveResult !== 'shared' && result.driveResult !== 'downloaded') {
+        toast.error('Backup did not save. Free storage, then try Backup to Drive again.');
+        return;
+      }
+      if (result.driveResult === 'shared') {
+        toast.success(
+          `${base.join(' + ') || 'Backup'} saved. Pick Google Drive in the share sheet.`
+        );
+      } else if (result.driveResult === 'cancelled') {
+        toast.info(
+          `${base.join(' + ') || 'Backup'} still saved in App${result.phoneSaved ? ' and Phone storage' : ''}. Drive share was cancelled.`
+        );
+      } else if (result.driveResult === 'downloaded') {
+        toast.success(`Backup file ready: ${result.filename}`);
+      } else {
+        toast.success(
+          `${base.join(' + ') || 'Backup'} saved${result.phonePath ? ` → ${result.phonePath}` : ''}.`
+        );
+      }
       await refreshSnapshots();
     } catch (err) {
       if (err?.name === 'AbortError') {
-        toast.info('Share cancelled. The backup is still saved in Saved versions.');
+        toast.info('Share cancelled. Backup is still in App + Phone storage.');
         await refreshSnapshots();
       } else {
         toast.error('Share failed: ' + err.message);
@@ -195,7 +239,13 @@ export default function SettingsManager({ onSettingsUpdated }) {
     try {
       const text = await readPickedFileText(file);
       const payload = parseBackupPayload(text);
-      setPendingRestore({ kind: 'file', payload, label: file.name || 'backup.json' });
+      const summary = summarizeBackupPayload(payload);
+      setPendingRestore({
+        kind: 'file',
+        payload,
+        label: file.name || 'backup.json',
+        summary,
+      });
       setRestoreConfirm('');
       toast.success('Backup file loaded. Type CONFIRM below to restore.');
     } catch (err) {
@@ -207,7 +257,14 @@ export default function SettingsManager({ onSettingsUpdated }) {
 
   const startVersionRestore = async (id) => {
     const snap = snapshots.find((s) => s.id === id);
-    setPendingRestore({ kind: 'version', id, label: snap?.filename || `version #${id}` });
+    let summary = null;
+    try {
+      const full = await getLocalSnapshot(id);
+      if (full?.payload) summary = summarizeBackupPayload(full.payload);
+    } catch {
+      /* ignore */
+    }
+    setPendingRestore({ kind: 'version', id, label: snap?.filename || `version #${id}`, summary });
     setRestoreConfirm('');
   };
 
@@ -273,9 +330,123 @@ export default function SettingsManager({ onSettingsUpdated }) {
   };
 
   const lastAuto = getLastAutoBackupAt();
+  const lastPhonePath = getLastPhoneBackupPath();
 
   return (
     <div style={{ maxWidth: '820px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div
+        id="settings-backup"
+        ref={backupPanelRef}
+        className={`glass-panel settings-backup-panel${backupHighlight ? ' is-focused' : ''}`}
+        style={{ padding: '1.5rem' }}
+      >
+        <h3 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <Download size={18} /> Backup & Restore
+        </h3>
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.65rem' }}>
+          Your shop data lives on this phone. Backups go to <b>3 places</b>: inside the app, phone folder <b>{PHONE_FOLDER}</b>, and (with Share) <b>Google Drive</b>.
+        </p>
+        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+          Last weekly auto-backup: {lastAuto ? new Date(lastAuto).toLocaleString() : 'never'} (App + phone folder every 7 days).
+        </p>
+        {lastPhonePath ? (
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+            Last phone file: {lastPhonePath}
+          </p>
+        ) : (
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+            Tip: tap <b>Backup to Drive</b>, then choose Google Drive → your folder.
+          </p>
+        )}
+        <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+          <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={busy} onClick={handleShareBackup}>
+            <Share2 size={16} /> Backup to Drive
+          </button>
+          <button type="button" className="btn-secondary" style={{ width: 'auto' }} disabled={busy} onClick={handleBackup}>
+            <Download size={16} /> App + Phone only
+          </button>
+          <button type="button" className="btn-secondary" style={{ width: 'auto' }} disabled={busy} onClick={() => fileRef.current?.click()}>
+            <Upload size={16} /> Restore from file
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json,.json,text/plain,*/*"
+            style={{ display: 'none' }}
+            onChange={startFileRestore}
+          />
+        </div>
+
+        <h4 style={{ fontSize: '0.9rem', fontWeight: 800, marginBottom: '0.55rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+          <History size={16} /> Saved versions
+        </h4>
+        {snapshots.length === 0 ? (
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No local versions yet — run a backup first.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: 220, overflowY: 'auto' }}>
+            {snapshots.map((s) => (
+              <div key={s.id} className="surface-block" style={{ padding: '0.55rem 0.7rem', display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ fontSize: '0.78rem' }}>
+                  <div style={{ fontWeight: 700 }}>{s.filename}</div>
+                  <div style={{ color: 'var(--text-muted)' }}>{s.reason} · {new Date(s.created_at).toLocaleString()}</div>
+                </div>
+                <div style={{ display: 'flex', gap: '0.35rem' }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ width: 'auto', fontSize: '0.75rem' }}
+                    disabled={busy}
+                    onClick={async () => {
+                      try {
+                        await shareLocalSnapshot(s.id);
+                      } catch (err) {
+                        if (err?.name !== 'AbortError') toast.error(err.message);
+                      }
+                    }}
+                  >
+                    Share
+                  </button>
+                  <button type="button" className="btn-secondary" style={{ width: 'auto', fontSize: '0.75rem' }} onClick={() => startVersionRestore(s.id)}>
+                    Restore
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {pendingRestore && (
+          <div style={{ marginTop: '1rem', padding: '0.9rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(180,83,9,0.35)', background: 'rgba(180,83,9,0.08)' }}>
+            <p style={{ fontSize: '0.85rem', marginBottom: '0.55rem' }}>
+              Restore <strong>{pendingRestore.label}</strong> will replace current shop data. A pre-restore safety copy is required first.
+              {pendingRestore.summary ? (
+                <>
+                  {' '}
+                  This file has {pendingRestore.summary.bills} bills, {pendingRestore.summary.customers} customers,{' '}
+                  {pendingRestore.summary.products} products.
+                </>
+              ) : null}{' '}
+              Type <strong>CONFIRM</strong>:
+            </p>
+            <input
+              className="form-input"
+              value={restoreConfirm}
+              onChange={(e) => setRestoreConfirm(e.target.value)}
+              placeholder="CONFIRM"
+              autoComplete="off"
+            />
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem', flexWrap: 'wrap' }}>
+              <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={busy} onClick={executeRestore}>
+                Restore now
+              </button>
+              <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={() => { setPendingRestore(null); setRestoreConfirm(''); }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       <form onSubmit={handleSubmit} className="glass-panel" style={{ padding: '1.5rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.85rem' }}>
           <div>
@@ -439,97 +610,6 @@ export default function SettingsManager({ onSettingsUpdated }) {
           </button>
         </div>
       </form>
-
-      <div className="glass-panel" style={{ padding: '1.5rem' }}>
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <Download size={18} /> Backup & Restore
-        </h3>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.65rem' }}>
-          <b>Backup</b> saves a copy on this phone. <b>Share</b> opens the Android share sheet so you can save to Drive, Files, or WhatsApp. Last {MAX_VERSIONS} versions stay here.
-        </p>
-        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
-          Last weekly auto-backup: {lastAuto ? new Date(lastAuto).toLocaleString() : 'never'} (runs on app open if older than 7 days).
-        </p>
-        <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-          <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={busy} onClick={handleBackup}>
-            <Download size={16} /> Backup
-          </button>
-          <button type="button" className="btn-secondary" style={{ width: 'auto' }} disabled={busy} onClick={handleShareBackup}>
-            <Share2 size={16} /> Share backup
-          </button>
-          <button type="button" className="btn-secondary" style={{ width: 'auto' }} disabled={busy} onClick={() => fileRef.current?.click()}>
-            <Upload size={16} /> Restore from file
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/json,.json,text/plain,*/*"
-            style={{ display: 'none' }}
-            onChange={startFileRestore}
-          />
-        </div>
-
-        <h4 style={{ fontSize: '0.9rem', fontWeight: 800, marginBottom: '0.55rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-          <History size={16} /> Saved versions
-        </h4>
-        {snapshots.length === 0 ? (
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No local versions yet — run a backup first.</p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: 220, overflowY: 'auto' }}>
-            {snapshots.map((s) => (
-              <div key={s.id} className="surface-block" style={{ padding: '0.55rem 0.7rem', display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ fontSize: '0.78rem' }}>
-                  <div style={{ fontWeight: 700 }}>{s.filename}</div>
-                  <div style={{ color: 'var(--text-muted)' }}>{s.reason} · {new Date(s.created_at).toLocaleString()}</div>
-                </div>
-                <div style={{ display: 'flex', gap: '0.35rem' }}>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    style={{ width: 'auto', fontSize: '0.75rem' }}
-                    disabled={busy}
-                    onClick={async () => {
-                      try {
-                        await shareLocalSnapshot(s.id);
-                      } catch (err) {
-                        if (err?.name !== 'AbortError') toast.error(err.message);
-                      }
-                    }}
-                  >
-                    Share
-                  </button>
-                  <button type="button" className="btn-secondary" style={{ width: 'auto', fontSize: '0.75rem' }} onClick={() => startVersionRestore(s.id)}>
-                    Restore
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {pendingRestore && (
-          <div style={{ marginTop: '1rem', padding: '0.9rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(180,83,9,0.35)', background: 'rgba(180,83,9,0.08)' }}>
-            <p style={{ fontSize: '0.85rem', marginBottom: '0.55rem' }}>
-              Restore <strong>{pendingRestore.label}</strong> will replace current shop data. A pre-restore snapshot is saved first. Type <strong>CONFIRM</strong>:
-            </p>
-            <input
-              className="form-input"
-              value={restoreConfirm}
-              onChange={(e) => setRestoreConfirm(e.target.value)}
-              placeholder="CONFIRM"
-              autoComplete="off"
-            />
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem', flexWrap: 'wrap' }}>
-              <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={busy} onClick={executeRestore}>
-                Restore now
-              </button>
-              <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={() => { setPendingRestore(null); setRestoreConfirm(''); }}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
 
       <div className="glass-panel" style={{ padding: '1.5rem' }}>
         <h3 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>

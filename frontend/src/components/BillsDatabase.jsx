@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2 } from 'lucide-react';
 import BillAdjustSheet from './BillAdjustSheet';
 import { isCancelled } from '../utils/billAdjust';
-import { pakistanToday, formatCurrency } from '../utils/pakistan';
+import { pakistanToday, formatCurrency, formatBillDateTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { downloadBlob } from '../utils/downloadFile';
@@ -313,12 +313,13 @@ export default function BillsDatabase({
   // Export database to CSV
   const handleExportCSV = async () => {
     if (bills.length === 0) return;
-    const headers = ['Category', 'Invoice #', 'Party / City Name', 'Date', 'Subtotal', 'Total Amount', 'Paid', 'Balance', 'Status'];
+    const headers = ['Category', 'Invoice #', 'Party / City Name', 'Date', 'Time', 'Subtotal', 'Total Amount', 'Paid', 'Balance', 'Status'];
     const rows = bills.map((b) => [
       b.bill_type === 'supplier' ? 'Saudia Arabia Buying Cost' : 'Customer Sale',
       b.invoice_number,
       `"${b.customer_name}"`,
       b.bill_date,
+      b.bill_time || '',
       b.subtotal,
       b.total_amount,
       b.amount_paid || 0,
@@ -423,7 +424,9 @@ export default function BillsDatabase({
         </div>
       ) : bills.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-          No bills found matching your search and filters.
+          {searchQuery || statusFilter !== 'all' || billTypeFilter !== 'all'
+            ? 'No bills match your search and filters.'
+            : 'No bills yet. Create your first bill from New.'}
         </div>
       ) : (
         <>
@@ -458,7 +461,7 @@ export default function BillsDatabase({
                         </div>
                       )}
                     </td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{bill.bill_date}</td>
+                    <td style={{ color: 'var(--text-secondary)' }}>{formatBillDateTime(bill)}</td>
                     <td style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', fontSize: '0.95rem', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
                       {formatCurrency(currencySymbol, bill.total_amount)}
                     </td>
@@ -542,7 +545,7 @@ export default function BillsDatabase({
                     <div className="mobile-card-title">{bill.customer_name}</div>
                     <div className="mobile-card-meta">
                       <span className="invoice-mono">{bill.invoice_number}</span>
-                      {' · '}{bill.bill_date}
+                      {' · '}{formatBillDateTime(bill)}
                       {' · '}{bill.bill_type === 'supplier' ? 'Saudia' : 'Sale'}
                     </div>
                   </div>
@@ -616,7 +619,7 @@ export default function BillsDatabase({
 
       {/* FULL EDIT BILL INTERACTIVE MODAL */}
       {editingBill && (
-        <div className="modal-sheet" style={{ position: 'fixed', inset: 0, background: 'rgba(7,41,41,0.45)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
+        <div className="modal-sheet" style={{ position: 'fixed', inset: 0, background: 'rgba(7,41,41,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
           <form onSubmit={handleSaveBillEdits} className="glass-panel" style={{ width: '100%', maxWidth: '750px', maxHeight: '90vh', overflowY: 'auto', padding: '1.75rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
               <div>
@@ -730,7 +733,7 @@ export default function BillsDatabase({
       )}
 
       {payBill && (
-        <div className="modal-sheet" style={{ position: 'fixed', inset: 0, background: 'rgba(7,41,41,0.45)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
+        <div className="modal-sheet" style={{ position: 'fixed', inset: 0, background: 'rgba(7,41,41,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
           <form onSubmit={handleRecordPayment} className="glass-panel" style={{ width: '100%', maxWidth: '420px', padding: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <div>

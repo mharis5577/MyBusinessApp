@@ -55,7 +55,7 @@ export async function readPickedFileText(file) {
  * Save or share a Blob on web + Capacitor Android.
  * Returns: 'shared' | 'downloaded'
  */
-export async function saveOrShareBlob(blob, filename, mimeType, { title } = {}) {
+export async function saveOrShareBlob(blob, filename, mimeType, { title, dialogTitle } = {}) {
   const type = mimeType || blob.type || 'application/octet-stream';
   const safeName = String(filename || 'file').replace(/[^\w.\-]+/g, '_');
 
@@ -79,11 +79,10 @@ export async function saveOrShareBlob(blob, filename, mimeType, { title } = {}) 
     });
 
     try {
-      // Android share often drops the file if `text` is also set — files only.
       await Share.share({
         title: title || safeName,
         files: [uri],
-        dialogTitle: title || 'Save or share',
+        dialogTitle: dialogTitle || title || 'Save or share',
       });
       return 'shared';
     } catch (err) {
@@ -95,7 +94,7 @@ export async function saveOrShareBlob(blob, filename, mimeType, { title } = {}) 
         await Share.share({
           title: title || safeName,
           url: uri,
-          dialogTitle: title || 'Save or share',
+          dialogTitle: dialogTitle || title || 'Save or share',
         });
         return 'shared';
       } catch (err2) {

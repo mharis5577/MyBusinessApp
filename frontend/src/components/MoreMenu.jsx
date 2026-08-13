@@ -1,6 +1,7 @@
-import { ArrowDownUp, Settings, X, Package } from 'lucide-react';
+import { ArrowDownUp, Settings, X, Package, Download } from 'lucide-react';
+import { DeveloperCredit } from './BrandMark';
 
-export default function MoreMenu({ open, onClose, onNavigate, activeTab }) {
+export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, activeTab }) {
   if (!open) return null;
 
   const go = (tab) => {
@@ -17,6 +18,20 @@ export default function MoreMenu({ open, onClose, onNavigate, activeTab }) {
             <X size={16} />
           </button>
         </div>
+        <button
+          type="button"
+          className="more-menu-item"
+          onClick={() => {
+            onOpenBackup?.();
+            onClose();
+          }}
+        >
+          <Download size={20} />
+          <span>
+            <strong>Backup & Restore</strong>
+            <small>App, phone storage, Google Drive</small>
+          </span>
+        </button>
         <button
           type="button"
           className={`more-menu-item ${activeTab === 'catalog' ? 'active' : ''}`}
@@ -47,9 +62,12 @@ export default function MoreMenu({ open, onClose, onNavigate, activeTab }) {
           <Settings size={20} />
           <span>
             <strong>Settings</strong>
-            <small>PIN, fingerprint, backup</small>
+            <small>Store profile, PIN, fingerprint</small>
           </span>
         </button>
+        <div className="more-menu-developer">
+          <DeveloperCredit compact />
+        </div>
       </div>
     </div>
   );

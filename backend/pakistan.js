@@ -9,6 +9,15 @@ export function pakistanToday() {
   }).format(new Date());
 }
 
+export function pakistanNowTime() {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Karachi',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date());
+}
+
 export function pakistanYearMonth(dateStr = pakistanToday()) {
   return String(dateStr || '').slice(0, 7);
 }

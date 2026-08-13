@@ -13,6 +13,36 @@ export function pakistanToday() {
   }).format(new Date());
 }
 
+/** Current clock time in Pakistan as HH:mm (24h) */
+export function pakistanNowTime() {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: PK_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date());
+}
+
+/** Format bill date + time for display (e.g. 2026-08-14 · 14:35) */
+export function formatBillDateTime(bill) {
+  const date = bill?.bill_date || '';
+  let time = String(bill?.bill_time || '').trim();
+  if (!time && bill?.created_at) {
+    try {
+      time = new Intl.DateTimeFormat('en-GB', {
+        timeZone: PK_TIMEZONE,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(new Date(bill.created_at));
+    } catch {
+      time = '';
+    }
+  }
+  if (date && time) return `${date} · ${time}`;
+  return date || time || '—';
+}
+
 /** Pakistan calendar month as YYYY-MM */
 export function pakistanYearMonth(dateStr = pakistanToday()) {
   return String(dateStr || '').slice(0, 7);

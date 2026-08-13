@@ -8,7 +8,6 @@ import {
   Settings,
   Moon,
   Sun,
-  Sparkles,
   Download,
   Lock,
   ArrowDownUp,
@@ -24,6 +23,9 @@ import ProductCatalog from './components/ProductCatalog';
 import SettingsManager from './components/SettingsManager';
 import CashflowPanel from './components/CashflowPanel';
 import MoreMenu from './components/MoreMenu';
+import SplashScreen from './components/SplashScreen';
+import BrandMark, { BrandWordmark, DeveloperCredit } from './components/BrandMark';
+import DataSafetySheet, { hasSeenDataSafety } from './components/DataSafetySheet';
 import { apiFetch } from './api/client';
 import { useToast } from './toast/ToastContext';
 import { maybeAutoBackup } from './utils/backupManager';
@@ -77,7 +79,18 @@ export default function App() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [bioAvailable, setBioAvailable] = useState(false);
   const [bioBusy, setBioBusy] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
+  const [showDataSafety, setShowDataSafety] = useState(false);
+  const [focusBackup, setFocusBackup] = useState(false);
   const hideAtRef = React.useRef(null);
+
+  const finishSplash = useCallback(() => setShowSplash(false), []);
+
+  const openBackupSettings = useCallback(() => {
+    setCurrentTab('settings');
+    setFocusBackup(true);
+    setMoreOpen(false);
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -99,9 +112,13 @@ export default function App() {
 
   useEffect(() => {
     fetchSettings();
-    maybeAutoBackup({ offerShare: false }).catch((err) => {
-      console.warn('Auto-backup skipped', err);
-    });
+    // Defer auto-backup so first open stays responsive on phone
+    const t = setTimeout(() => {
+      maybeAutoBackup({ offerShare: false }).catch((err) => {
+        console.warn('Auto-backup skipped', err);
+      });
+    }, 60000);
+    return () => clearTimeout(t);
   }, [fetchSettings]);
 
   useEffect(() => {
@@ -111,8 +128,10 @@ export default function App() {
   useEffect(() => {
     if (!dueRemindersEnabled(settings)) return undefined;
     if (lockRequired(settings) && !unlocked) return undefined;
-    syncDueReminders(settings).catch((err) => console.warn('Due reminders skipped', err));
-    return undefined;
+    const t = setTimeout(() => {
+      syncDueReminders(settings).catch((err) => console.warn('Due reminders skipped', err));
+    }, 8000);
+    return () => clearTimeout(t);
   }, [settings, unlocked]);
 
   useEffect(() => {
@@ -191,6 +210,12 @@ export default function App() {
 
   const needsLock = lockRequired(settings) && !unlocked;
 
+  useEffect(() => {
+    if (showSplash || needsLock || hasSeenDataSafety()) return undefined;
+    const t = setTimeout(() => setShowDataSafety(true), 450);
+    return () => clearTimeout(t);
+  }, [showSplash, needsLock]);
+
   const handlePinSubmit = (e) => {
     e.preventDefault();
     if (!pinEnabled(settings)) {
@@ -253,30 +278,20 @@ export default function App() {
   const moreActive =
     currentTab === 'cashflow' || currentTab === 'settings' || currentTab === 'catalog';
 
+  if (showSplash) {
+    return <SplashScreen onDone={finishSplash} />;
+  }
+
   if (needsLock) {
     return (
       <div className="pin-lock-screen">
-        <form className="glass-panel pin-lock-card" onSubmit={handlePinSubmit}>
-          <div
-            className="brand-mark"
-            style={{
-              margin: '0 auto 1rem',
-              width: 48,
-              height: 48,
-              borderRadius: 14,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'var(--accent-teal)',
-              color: 'var(--bg-main)',
-            }}
-          >
-            <Lock size={22} />
+        <form className="glass-panel pin-lock-card" onSubmit={handlePinSubmit} style={{ padding: '1.75rem 1.5rem', maxWidth: 360, width: '100%' }}>
+          <div style={{ margin: '0 auto 1rem', width: 56, height: 56 }}>
+            <BrandMark size={56} />
           </div>
-          <h2 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '0.35rem' }}>ELITE CHOCOLATE</h2>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
-            {pinEnabled(settings) ? 'Enter staff PIN to unlock' : 'Unlock with fingerprint'}
-          </p>
+          <div style={{ marginBottom: '1.1rem' }}>
+            <BrandWordmark subtitle={pinEnabled(settings) ? 'Enter staff PIN' : 'Fingerprint unlock'} />
+          </div>
           {pinEnabled(settings) && (
             <input
               className="form-input"
@@ -330,12 +345,9 @@ export default function App() {
           }}
         >
           <span className="brand-mark">
-            <Sparkles size={18} />
+            <BrandMark size={40} />
           </span>
-          <span className="brand-text">
-            ELITE CHOCOLATE
-            <small>POS &amp; Bills</small>
-          </span>
+          <BrandWordmark />
         </a>
 
         <nav className="desktop-nav">
@@ -397,7 +409,13 @@ export default function App() {
       <main className="app-container">
         {currentTab === 'dashboard' && (
           <DashboardStats
-            onNavigate={(tab) => setCurrentTab(tab)}
+            onNavigate={(tab) => {
+              if (tab === 'backup') {
+                openBackupSettings();
+                return;
+              }
+              setCurrentTab(tab);
+            }}
             onViewBill={(bill) => {
               setSelectedBill(bill);
               setCurrentTab('preview');
@@ -446,10 +464,33 @@ export default function App() {
           <CashflowPanel currencySymbol={settings.currency_symbol || 'Rs.'} onNavigate={(tab) => setCurrentTab(tab)} />
         )}
 
-        {currentTab === 'settings' && <SettingsManager onSettingsUpdated={fetchSettings} />}
+        {currentTab === 'settings' && (
+          <SettingsManager
+            onSettingsUpdated={fetchSettings}
+            focusBackup={focusBackup}
+            onFocusHandled={() => setFocusBackup(false)}
+          />
+        )}
+
+        <div className="app-developer-footer no-print">
+          <DeveloperCredit compact />
+        </div>
       </main>
 
-      <MoreMenu open={moreOpen} onClose={() => setMoreOpen(false)} onNavigate={setCurrentTab} activeTab={currentTab} />
+      <MoreMenu
+        open={moreOpen}
+        onClose={() => setMoreOpen(false)}
+        onNavigate={setCurrentTab}
+        onOpenBackup={openBackupSettings}
+        activeTab={currentTab}
+      />
+
+      <DataSafetySheet
+        open={showDataSafety}
+        onDismiss={() => setShowDataSafety(false)}
+        onBackup={openBackupSettings}
+        onRestore={openBackupSettings}
+      />
 
       <nav className="mobile-bottom-nav no-print">
         <button

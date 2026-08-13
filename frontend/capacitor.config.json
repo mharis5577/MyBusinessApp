@@ -1,6 +1,6 @@
 {
   "appId": "pk.elitechocolate.pos.test",
-  "appName": "ELITE CHOCOLATE Test",
+  "appName": "CocoaDesk",
   "webDir": "dist",
   "server": {
     "androidScheme": "https"

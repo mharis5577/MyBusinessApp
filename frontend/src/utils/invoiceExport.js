@@ -11,7 +11,7 @@ export async function elementToPdfBlob(element, { filename = 'Invoice.pdf' } = {
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
   const canvas = await html2canvas(element, {
-    scale: Math.min(2, window.devicePixelRatio || 2),
+    scale: Math.min(2.5, (window.devicePixelRatio || 2) * 1.25),
     useCORS: true,
     allowTaint: true,
     backgroundColor: '#ffffff',
@@ -21,10 +21,9 @@ export async function elementToPdfBlob(element, { filename = 'Invoice.pdf' } = {
       cloned.style.boxShadow = 'none';
       cloned.style.borderRadius = '0';
       cloned.style.maxWidth = 'none';
-      cloned.style.width = `${element.scrollWidth || 800}px`;
+      cloned.style.width = `${Math.max(element.scrollWidth || 800, 800)}px`;
       cloned.style.background = '#ffffff';
-      cloned.style.color = '#0f172a';
-      // Hide remote QR if it would block/taint capture
+      cloned.style.color = '#111111';
       cloned.querySelectorAll('img').forEach((img) => {
         if (!img.complete || img.naturalWidth === 0) {
           img.style.display = 'none';

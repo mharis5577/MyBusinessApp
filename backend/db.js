@@ -177,6 +177,7 @@ function initTables() {
     db.run(`ALTER TABLE bills ADD COLUMN payee_payment_notes TEXT DEFAULT ''`, () => {});
     db.run(`ALTER TABLE bills ADD COLUMN cancel_reason TEXT DEFAULT ''`, () => {});
     db.run(`ALTER TABLE bills ADD COLUMN cancelled_at TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE bills ADD COLUMN bill_time TEXT DEFAULT ''`, () => {});
 
     // Bill Items Table
     db.run(`

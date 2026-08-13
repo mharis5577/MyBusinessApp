@@ -1,13 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History } from 'lucide-react';
 import { parseNaturalBillText } from '../utils/naturalParser';
-import { pakistanToday, addDaysToDateString, formatCurrency } from '../utils/pakistan';
+import { pakistanToday, addDaysToDateString, formatCurrency, pakistanNowTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import BarcodeScanner from './BarcodeScanner';
+import { clearBillDraft, draftHasContent, loadBillDraft, saveBillDraft } from '../utils/billDraft';
 
 export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.', defaultTaxRate = 0, draftBill = null, onDraftConsumed }) {
   const toast = useToast();
+  const savingRef = useRef(false);
+  const dateTouchedRef = useRef(false);
+  const draftHydratedRef = useRef(false);
   const [billType, setBillType] = useState('customer'); // 'customer' or 'supplier'
   const [naturalText, setNaturalText] = useState('');
   const [customers, setCustomers] = useState([]);
@@ -58,6 +62,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   useEffect(() => {
     if (!draftBill) return;
     const b = draftBill;
+    dateTouchedRef.current = false;
     setBillType(b.bill_type === 'supplier' ? 'supplier' : 'customer');
     setCustomerName(b.customer_name || '');
     setCustomerEmail(b.customer_email || '');
@@ -84,8 +89,129 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
       );
     }
     fetchNextInvoiceNumber(b.bill_type === 'supplier' ? 'supplier' : 'customer');
+    clearBillDraft();
+    draftHydratedRef.current = true;
     if (onDraftConsumed) onDraftConsumed();
   }, [draftBill]);
+
+  // Restore in-progress bill after force-close / tab leave
+  useEffect(() => {
+    if (draftBill || draftHydratedRef.current) return;
+    const saved = loadBillDraft();
+    if (!draftHasContent(saved)) {
+      draftHydratedRef.current = true;
+      return;
+    }
+    draftHydratedRef.current = true;
+    dateTouchedRef.current = Boolean(saved.dateTouched);
+    setBillType(saved.billType === 'supplier' ? 'supplier' : 'customer');
+    setNaturalText(saved.naturalText || '');
+    setInvoiceNumber(saved.invoiceNumber || '');
+    setCustomerName(saved.customerName || '');
+    setCustomerEmail(saved.customerEmail || '');
+    setCustomerPhone(saved.customerPhone || '');
+    setCustomerAddress(saved.customerAddress || '');
+    setBillDate(saved.billDate || pakistanToday());
+    setDueDate(saved.dueDate || addDaysToDateString(pakistanToday(), 14));
+    setTaxRate(saved.taxRate ?? defaultTaxRate);
+    setDiscountRate(saved.discountRate ?? 0);
+    setPaymentMethod(saved.paymentMethod || 'Bank Transfer / Raast');
+    setCashTendered(saved.cashTendered || '');
+    setInitialPayment(saved.initialPayment || '');
+    setNotes(saved.notes || 'Thank you for your order!');
+    setPayeeBankName(saved.payeeBankName || '');
+    setPayeeAccountTitle(saved.payeeAccountTitle || '');
+    setPayeeAccountNumber(saved.payeeAccountNumber || '');
+    setPayeePaymentNotes(saved.payeePaymentNotes || '');
+    setSelectedCustomerId(saved.selectedCustomerId || null);
+    if (Array.isArray(saved.items) && saved.items.length) {
+      setItems(
+        saved.items.map((it) => ({
+          product_id: it.product_id || null,
+          description: it.description || '',
+          quantity: Number(it.quantity) > 0 ? Number(it.quantity) : 1,
+          unit_price: Number(it.unit_price) || 0,
+        }))
+      );
+    }
+    toast.info('Restored unsaved bill draft');
+  }, [draftBill, defaultTaxRate, toast]);
+
+  // Autosave draft while composing
+  useEffect(() => {
+    if (!draftHydratedRef.current && !draftBill) return undefined;
+    const t = setTimeout(() => {
+      const draft = {
+        billType,
+        naturalText,
+        invoiceNumber,
+        customerName,
+        customerEmail,
+        customerPhone,
+        customerAddress,
+        billDate,
+        dueDate,
+        taxRate,
+        discountRate,
+        paymentMethod,
+        cashTendered,
+        initialPayment,
+        notes,
+        payeeBankName,
+        payeeAccountTitle,
+        payeeAccountNumber,
+        payeePaymentNotes,
+        selectedCustomerId,
+        items,
+        dateTouched: dateTouchedRef.current,
+      };
+      if (draftHasContent(draft)) saveBillDraft(draft);
+      else clearBillDraft();
+    }, 400);
+    return () => clearTimeout(t);
+  }, [
+    billType,
+    naturalText,
+    invoiceNumber,
+    customerName,
+    customerEmail,
+    customerPhone,
+    customerAddress,
+    billDate,
+    dueDate,
+    taxRate,
+    discountRate,
+    paymentMethod,
+    cashTendered,
+    initialPayment,
+    notes,
+    payeeBankName,
+    payeeAccountTitle,
+    payeeAccountNumber,
+    payeePaymentNotes,
+    selectedCustomerId,
+    items,
+    draftBill,
+  ]);
+
+  // Refresh Pakistan date if form left open past midnight (unless user edited date)
+  useEffect(() => {
+    const syncDates = () => {
+      if (dateTouchedRef.current) return;
+      const today = pakistanToday();
+      setBillDate((prev) => (prev === today ? prev : today));
+      setDueDate(addDaysToDateString(today, 14));
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'visible') syncDates();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', syncDates);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', syncDates);
+    };
+  }, []);
 
   const fetchNextInvoiceNumber = async (bType = 'customer') => {
     try {
@@ -319,6 +445,8 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     setNotes(billType === 'supplier' ? 'Purchase remittance / payment advice' : 'Thank you for your order!');
     setItems([{ product_id: null, description: '', quantity: 1, unit_price: 0 }]);
     setSkuQuery('');
+    dateTouchedRef.current = false;
+    clearBillDraft();
     await fetchNextInvoiceNumber(billType);
   };
 
@@ -411,6 +539,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   // Submit and Save to SQLite DB
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (savingRef.current || loading) return;
     if (!customerName.trim()) {
       toast.error(billType === 'supplier' ? 'Please enter or select a supplier / pay-to name.' : 'Please enter or select a customer name.');
       return;
@@ -418,6 +547,14 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     if (items.length === 0 || items.some((i) => !i.description.trim())) {
       toast.error('Please ensure all item descriptions are filled out.');
       return;
+    }
+    if (!Number.isFinite(totalAmount)) {
+      toast.error('Bill total is invalid. Check quantities and prices.');
+      return;
+    }
+    if (totalAmount <= 0) {
+      const proceed = window.confirm('Bill total is Rs. 0 (or less). Save anyway?');
+      if (!proceed) return;
     }
 
     const oversell = stockWarnings.filter((w) => w.includes('need'));
@@ -429,23 +566,25 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     }
 
     const mode = saveMode;
+    savingRef.current = true;
     setLoading(true);
     try {
       const payload = {
         bill_type: billType,
         invoice_number: invoiceNumber,
-        customer_name: customerName,
+        customer_name: customerName.slice(0, 120),
         customer_email: customerEmail,
         customer_phone: customerPhone,
         customer_address: customerAddress,
-        bill_date: billDate,
-        due_date: dueDate,
+        bill_date: billDate || pakistanToday(),
+        bill_time: pakistanNowTime(),
+        due_date: dueDate || addDaysToDateString(pakistanToday(), 14),
         subtotal,
         tax_rate: parseFloat(taxRate) || 0,
         tax_amount: taxAmount,
         discount_rate: parseFloat(discountRate) || 0,
         discount_amount: discountAmount,
-        total_amount: totalAmount,
+        total_amount: Math.round(totalAmount * 100) / 100,
         status: 'pending',
         notes:
           isCashSale && changeDue != null
@@ -456,7 +595,10 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         payee_account_title: billType === 'supplier' ? payeeAccountTitle : '',
         payee_account_number: billType === 'supplier' ? payeeAccountNumber : '',
         payee_payment_notes: billType === 'supplier' ? payeePaymentNotes : '',
-        items,
+        items: items.map((it) => ({
+          ...it,
+          description: String(it.description || '').slice(0, 160),
+        })),
       };
 
       const res = await apiFetch('/api/bills', {
@@ -490,6 +632,8 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         savedBill = await recordInitialPayment(savedBill.id, Math.min(initialPayNum, totalAmount));
       }
 
+      clearBillDraft();
+
       if (mode === 'new') {
         await resetFormForNew();
         const remain = Number(savedBill?.balance_due) || 0;
@@ -508,6 +652,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
           : err.message;
       toast.error('Error saving bill: ' + msg);
     } finally {
+      savingRef.current = false;
       setLoading(false);
       setSaveMode('view');
     }
@@ -787,7 +932,10 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                   type="date"
                   className="form-input"
                   value={billDate}
-                  onChange={(e) => setBillDate(e.target.value)}
+                  onChange={(e) => {
+                    dateTouchedRef.current = true;
+                    setBillDate(e.target.value);
+                  }}
                 />
               </div>
               <div className="form-group">
@@ -796,7 +944,10 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                   type="date"
                   className="form-input"
                   value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
+                  onChange={(e) => {
+                    dateTouchedRef.current = true;
+                    setDueDate(e.target.value);
+                  }}
                 />
               </div>
             </div>

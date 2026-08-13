@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { DollarSign, Clock, AlertTriangle, FileText, PlusCircle, TrendingUp, RefreshCw, Package, ArrowDownUp, Wallet, CalendarDays } from 'lucide-react';
-import { formatCurrency } from '../utils/pakistan';
+import { DollarSign, Clock, AlertTriangle, FileText, PlusCircle, TrendingUp, RefreshCw, Package, ArrowDownUp, Wallet, CalendarDays, Shield } from 'lucide-react';
+import { formatCurrency, formatBillDateTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
+import { getLastAutoBackupAt } from '../utils/backupManager';
 import CashflowPanel from './CashflowPanel';
-import AgingReport from './AgingReport';
 import OverduePanel from './OverduePanel';
 
 function StatCard({ label, value, hint, icon: Icon, accent }) {
@@ -69,11 +69,13 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     profit_month = 0,
   } = stats || {};
 
+  const lastBackup = getLastAutoBackupAt();
+
   return (
     <div className="dashboard-page">
       <div className="glass-panel panel-hero dashboard-hero">
         <div>
-          <h2 className="dashboard-hero-title">Dashboard</h2>
+          <h2 className="dashboard-hero-title">Today at the counter</h2>
           <p className="dashboard-hero-sub">Create bills, track payments, and manage stock.</p>
         </div>
         <div className="hero-actions">
@@ -86,6 +88,22 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
           <button className="btn-secondary" onClick={() => onNavigate('cashflow')}>
             <ArrowDownUp size={18} /> Cashflow
           </button>
+        </div>
+      </div>
+
+      <div className="glass-panel dashboard-data-safety">
+        <Shield size={18} style={{ color: 'var(--accent-primary)', flexShrink: 0, marginTop: 2 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <strong>Your data is on this phone</strong>
+          <p>
+            Back up regularly so bills and customer dues stay safe if the phone is lost or the app is reinstalled.
+            {lastBackup ? ` Last auto-backup: ${new Date(lastBackup).toLocaleDateString()}.` : ' No weekly backup yet.'}
+          </p>
+          <div className="dashboard-data-safety-actions">
+            <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={() => onNavigate('backup')}>
+              Backup & Restore
+            </button>
+          </div>
         </div>
       </div>
 
@@ -176,22 +194,6 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
 
       <CashflowPanel currencySymbol={currencySymbol} compact onNavigate={onNavigate} />
 
-      <AgingReport
-        currencySymbol={currencySymbol}
-        settings={settings}
-        compact
-        onOpenBill={async (row) => {
-          try {
-            const res = await apiFetch(`/api/bills/${row.id}`);
-            const bill = await res.json();
-            if (res.ok && onViewBill) onViewBill(bill);
-            else if (onNavigate) onNavigate('database');
-          } catch {
-            if (onNavigate) onNavigate('database');
-          }
-        }}
-      />
-
       <div className="glass-panel dashboard-recent">
         <div className="dashboard-recent-head">
           <h3>Recent Bills</h3>
@@ -223,7 +225,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
                     <div className="mobile-card-meta">
                       <span className="invoice-mono">{bill.invoice_number}</span>
                       {' · '}
-                      {bill.bill_date}
+                      {formatBillDateTime(bill)}
                     </div>
                   </div>
                   <div className="mobile-card-amount">

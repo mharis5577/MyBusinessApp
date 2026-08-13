@@ -1,6 +1,5 @@
 /**
- * Local versioned backups (IndexedDB + optional native Filesystem).
- * Protects against bad restores / wipes without requiring cloud API keys.
+ * Triple backup: in-app versions + phone storage folder + Google Drive (via share).
  */
 import { openDB } from 'idb';
 import { Capacitor } from '@capacitor/core';
@@ -10,7 +9,7 @@ import { downloadBlob, saveOrShareBlob } from './downloadFile';
 
 export function parseBackupPayload(raw) {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw.payload && typeof raw.payload === 'object' ? raw.payload : raw;
+    return assertShopBackup(raw.payload && typeof raw.payload === 'object' ? raw.payload : raw);
   }
   if (typeof raw !== 'string') throw new Error('Invalid backup file');
   const cleaned = raw.replace(/^\uFEFF/, '').trim();
@@ -21,25 +20,48 @@ export function parseBackupPayload(raw) {
     throw new Error('This file is not valid JSON. Pick the .json backup file.');
   }
   const payload = data?.payload && typeof data.payload === 'object' ? data.payload : data;
+  return assertShopBackup(payload);
+}
+
+function assertShopBackup(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('This file is not an Elite Chocolate backup');
   }
-  const hasShopData =
+  const hasCore =
     Array.isArray(payload.bills) ||
     Array.isArray(payload.customers) ||
-    Array.isArray(payload.products) ||
-    Array.isArray(payload.settings);
-  if (!hasShopData) {
-    throw new Error('This file is not an Elite Chocolate shop backup');
+    Array.isArray(payload.products);
+  if (!hasCore) {
+    throw new Error('This file is not a CocoaDesk shop backup (missing bills/customers/products).');
+  }
+  // Reject near-empty "settings-only" decoys that would wipe the shop
+  const billCount = Array.isArray(payload.bills) ? payload.bills.length : 0;
+  const customerCount = Array.isArray(payload.customers) ? payload.customers.length : 0;
+  const productCount = Array.isArray(payload.products) ? payload.products.length : 0;
+  if (billCount + customerCount + productCount === 0 && !payload.exported_at) {
+    throw new Error('This backup looks empty. Pick a real CocoaDesk backup file.');
   }
   return payload;
+}
+
+export function summarizeBackupPayload(payload) {
+  const data = parseBackupPayload(payload);
+  return {
+    bills: Array.isArray(data.bills) ? data.bills.length : 0,
+    customers: Array.isArray(data.customers) ? data.customers.length : 0,
+    products: Array.isArray(data.products) ? data.products.length : 0,
+    payments: Array.isArray(data.bill_payments) ? data.bill_payments.length : 0,
+    exported_at: data.exported_at || '',
+  };
 }
 
 const BACKUP_DB = 'elite-chocolate-backup-versions';
 const BACKUP_DB_VERSION = 1;
 const MAX_VERSIONS = 8;
 const LAST_AUTO_KEY = 'last_auto_backup_at';
+const LAST_PHONE_PATH_KEY = 'elite_last_phone_backup_path';
 const AUTO_BACKUP_MS = 7 * 24 * 60 * 60 * 1000;
+const PHONE_FOLDER = 'CocoaDesk/Backups';
 
 function isNative() {
   try {
@@ -82,42 +104,86 @@ async function pruneOld(db) {
   }
 }
 
-async function writeNativeFile(filename, jsonText) {
-  if (!isNative()) return null;
+function slimPayloadForAuto(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  return {
+    ...payload,
+    bill_payments: (payload.bill_payments || []).map((p) => {
+      if (!p?.screenshot_data) return p;
+      const { screenshot_data, ...rest } = p;
+      return { ...rest, has_screenshot: true };
+    }),
+  };
+}
+
+async function ensureFsPermission() {
+  if (!isNative()) return;
   try {
-    const path = `backups/${filename}`;
-    await Filesystem.writeFile({
-      path,
-      data: jsonText,
-      directory: Directory.Data,
-      encoding: Encoding.UTF8,
-      recursive: true,
-    });
-    return path;
+    if (typeof Filesystem.requestPermissions === 'function') {
+      await Filesystem.requestPermissions();
+    }
   } catch (err) {
-    console.warn('Native backup file write failed', err);
-    return null;
+    console.warn('Filesystem permission request skipped', err);
   }
 }
 
 /**
- * Save a dated snapshot of the current shop data.
- * @param {string} reason e.g. 'manual' | 'pre-restore' | 'pre-wipe' | 'auto'
+ * Write backup into phone storage users can find in Files.
+ * Tries External → Documents → Data.
  */
-export async function saveLocalSnapshot(reason = 'manual') {
-  const payload = await fetchCurrentPayload();
-  const filename = stampFilename(
-    reason === 'pre-restore'
-      ? 'pre-restore'
-      : reason === 'pre-wipe'
-        ? 'pre-wipe'
-        : reason === 'auto'
-          ? 'auto-backup'
-          : 'backup'
-  );
-  const jsonText = JSON.stringify(payload, null, 2);
-  const nativePath = await writeNativeFile(filename, jsonText);
+async function writePhoneStorageFile(filename, jsonText) {
+  if (!isNative()) return { path: null, directory: null, uri: null, label: null };
 
+  await ensureFsPermission();
+  const relative = `${PHONE_FOLDER}/${filename}`;
+  const targets = [
+    { directory: Directory.Documents, label: `Documents → ${PHONE_FOLDER}` },
+    { directory: Directory.ExternalStorage, label: `Phone storage → ${PHONE_FOLDER}` },
+    { directory: Directory.External, label: `App external → ${PHONE_FOLDER}` },
+    { directory: Directory.Data, label: `App files → ${PHONE_FOLDER}` },
+  ];
+
+  for (const target of targets) {
+    try {
+      await Filesystem.mkdir({
+        path: PHONE_FOLDER,
+        directory: target.directory,
+        recursive: true,
+      }).catch(() => {});
+
+      await Filesystem.writeFile({
+        path: relative,
+        data: jsonText,
+        directory: target.directory,
+        encoding: Encoding.UTF8,
+        recursive: true,
+      });
+
+      let uri = null;
+      try {
+        const got = await Filesystem.getUri({ path: relative, directory: target.directory });
+        uri = got?.uri || null;
+      } catch {
+        /* ignore */
+      }
+
+      const label = `${target.label}/${filename}`;
+      try {
+        localStorage.setItem(LAST_PHONE_PATH_KEY, label);
+      } catch {
+        /* ignore */
+      }
+
+      return { path: relative, directory: target.directory, uri, label };
+    } catch (err) {
+      console.warn(`Phone backup write failed (${target.label})`, err);
+    }
+  }
+
+  return { path: null, directory: null, uri: null, label: null };
+}
+
+async function saveInAppSnapshot({ filename, reason, payload, phonePath = '' }) {
   const db = await getBackupDb();
   let id = null;
   try {
@@ -125,15 +191,100 @@ export async function saveLocalSnapshot(reason = 'manual') {
       filename,
       reason,
       created_at: new Date().toISOString(),
-      native_path: nativePath || '',
+      native_path: phonePath || '',
       payload,
     });
     await pruneOld(db);
   } catch (err) {
     console.warn('Could not keep in-app snapshot (storage full?)', err);
   }
+  return id;
+}
 
-  return { id, filename, reason, nativePath, payload };
+/**
+ * Full backup: App + Phone storage + optional Google Drive share sheet.
+ */
+export async function runFullBackup({
+  reason = 'manual',
+  offerDriveShare = true,
+  pretty = true,
+} = {}) {
+  const rawPayload = await fetchCurrentPayload();
+  const payload = reason === 'auto' ? slimPayloadForAuto(rawPayload) : rawPayload;
+  const filename = stampFilename(
+    reason === 'pre-restore'
+      ? 'pre-restore'
+      : reason === 'pre-wipe'
+        ? 'pre-wipe'
+        : reason === 'auto'
+          ? 'auto-backup'
+          : 'cocoadesk-backup'
+  );
+  const jsonText = pretty ? JSON.stringify(payload, null, 2) : JSON.stringify(payload);
+
+  const phone = await writePhoneStorageFile(filename, jsonText);
+  const id = await saveInAppSnapshot({
+    filename,
+    reason,
+    payload,
+    phonePath: phone.label || phone.path || '',
+  });
+
+  let driveResult = 'skipped';
+  if (offerDriveShare) {
+    try {
+      const blob = new Blob([jsonText], { type: 'application/json' });
+      driveResult = await saveOrShareBlob(blob, filename, 'application/json', {
+        title: 'Save backup to Google Drive',
+        dialogTitle: 'Save to Google Drive (or Files / WhatsApp)',
+      });
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        driveResult = 'cancelled';
+      } else {
+        console.warn('Drive share failed', err);
+        driveResult = 'failed';
+      }
+    }
+  } else if (!isNative()) {
+    // Browser: still download a file so PC users get a copy
+    try {
+      const blob = new Blob([jsonText], { type: 'application/json' });
+      await downloadBlob(blob, filename, 'application/json');
+      driveResult = 'downloaded';
+    } catch (err) {
+      if (err?.name !== 'AbortError') console.warn('Download backup failed', err);
+    }
+  }
+
+  return {
+    id,
+    filename,
+    reason,
+    payload,
+    phonePath: phone.label || phone.path || '',
+    phoneUri: phone.uri,
+    inApp: Boolean(id),
+    phoneSaved: Boolean(phone.path),
+    driveResult,
+    durable: Boolean(id) || Boolean(phone.path) || driveResult === 'downloaded' || driveResult === 'shared',
+  };
+}
+
+/** @deprecated alias — keep older call sites working */
+export async function saveLocalSnapshot(reason = 'manual') {
+  const result = await runFullBackup({
+    reason,
+    offerDriveShare: false,
+    pretty: reason !== 'auto',
+  });
+  return {
+    id: result.id,
+    filename: result.filename,
+    reason: result.reason,
+    nativePath: result.phonePath,
+    payload: result.payload,
+  };
 }
 
 export async function listLocalSnapshots() {
@@ -160,50 +311,26 @@ export async function deleteLocalSnapshot(id) {
   await db.delete('snapshots', Number(id));
 }
 
-/** Download / share a JSON backup file (manual export). */
+/** Manual export — full triple backup with Drive share. */
 export async function exportBackupFile({ offerShare = true } = {}) {
-  const payload = await fetchCurrentPayload();
-  const filename = stampFilename('elite-chocolate-backup');
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-
-  // Always keep a local versioned copy (do not fail the export if this is full)
-  try {
-    const db = await getBackupDb();
-    await db.add('snapshots', {
-      filename,
-      reason: 'manual',
-      created_at: new Date().toISOString(),
-      native_path: '',
-      payload,
-    });
-    await pruneOld(db);
-  } catch (err) {
-    console.warn('In-app snapshot skipped', err);
-  }
-  await writeNativeFile(filename, JSON.stringify(payload, null, 2));
-
-  if (offerShare) {
-    const result = await saveOrShareBlob(blob, filename, 'application/json', {
-      title: 'Shop backup',
-    });
-    return { filename, result, payload };
-  }
-
-  await downloadBlob(blob, filename, 'application/json');
-  return { filename, result: 'downloaded', payload };
+  return runFullBackup({
+    reason: 'manual',
+    offerDriveShare: offerShare,
+    pretty: true,
+  });
 }
 
-/** Restore API payload after optional pre-restore snapshot. */
 export async function restoreFromPayload(payload, { skipPreSnapshot = false } = {}) {
   const data = parseBackupPayload(payload);
   if (!data || typeof data !== 'object') {
     throw new Error('Invalid backup payload');
   }
   if (!skipPreSnapshot) {
-    try {
-      await saveLocalSnapshot('pre-restore');
-    } catch (err) {
-      console.warn('Pre-restore snapshot failed', err);
+    const pre = await runFullBackup({ reason: 'pre-restore', offerDriveShare: false, pretty: false });
+    if (!pre.inApp && !pre.phoneSaved && pre.driveResult !== 'downloaded') {
+      throw new Error(
+        'Could not save a pre-restore safety copy. Free some phone storage, then try Restore again.'
+      );
     }
   }
   const res = await apiFetch('/api/restore', {
@@ -225,9 +352,14 @@ export async function restoreFromLocalVersion(id) {
 export async function shareLocalSnapshot(id) {
   const snap = await getLocalSnapshot(id);
   if (!snap?.payload) throw new Error('Saved version not found');
-  const filename = snap.filename || stampFilename('elite-chocolate-backup');
-  const blob = new Blob([JSON.stringify(snap.payload, null, 2)], { type: 'application/json' });
-  return saveOrShareBlob(blob, filename, 'application/json', { title: 'Shop backup' });
+  const filename = snap.filename || stampFilename('cocoadesk-backup');
+  const jsonText = JSON.stringify(snap.payload, null, 2);
+  await writePhoneStorageFile(filename, jsonText);
+  const blob = new Blob([jsonText], { type: 'application/json' });
+  return saveOrShareBlob(blob, filename, 'application/json', {
+    title: 'Save backup to Google Drive',
+    dialogTitle: 'Save to Google Drive (or Files / WhatsApp)',
+  });
 }
 
 export function getLastAutoBackupAt() {
@@ -246,7 +378,15 @@ export function setLastAutoBackupAt(iso) {
   }
 }
 
-/** Weekly auto-export: run if last backup older than 7 days (or never). */
+export function getLastPhoneBackupPath() {
+  try {
+    return localStorage.getItem(LAST_PHONE_PATH_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+/** Weekly auto: App + phone storage. Drive share only if offerShare=true. */
 export async function maybeAutoBackup({ offerShare = false } = {}) {
   const last = getLastAutoBackupAt();
   const lastMs = last ? new Date(last).getTime() : 0;
@@ -254,22 +394,17 @@ export async function maybeAutoBackup({ offerShare = false } = {}) {
     return { skipped: true, last };
   }
 
-  const snap = await saveLocalSnapshot('auto');
-  const filename = snap.filename;
-
-  if (offerShare) {
-    try {
-      const blob = new Blob([JSON.stringify(snap.payload, null, 2)], { type: 'application/json' });
-      await saveOrShareBlob(blob, filename, 'application/json', {
-        title: 'Weekly shop backup',
-      });
-    } catch (err) {
-      if (err?.name !== 'AbortError') console.warn('Auto-backup share skipped', err);
-    }
+  const result = await runFullBackup({
+    reason: 'auto',
+    offerDriveShare: offerShare,
+    pretty: false,
+  });
+  if (result.inApp || result.phoneSaved) {
+    setLastAutoBackupAt(new Date().toISOString());
+  } else {
+    console.warn('Auto-backup produced no durable copy — will retry next launch');
   }
-
-  setLastAutoBackupAt(new Date().toISOString());
-  return { skipped: false, filename, id: snap.id };
+  return { skipped: false, ...result };
 }
 
-export { MAX_VERSIONS, LAST_AUTO_KEY };
+export { MAX_VERSIONS, LAST_AUTO_KEY, PHONE_FOLDER };
