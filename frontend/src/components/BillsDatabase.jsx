@@ -10,6 +10,7 @@ import {
   openWhatsAppReminder,
   openSmsReminder,
 } from '../utils/paymentReminder';
+import { paymentSummaryText } from '../utils/billPayments';
 
 export default function BillsDatabase({
   onViewBill,
@@ -47,8 +48,8 @@ export default function BillsDatabase({
   const [paySaving, setPaySaving] = useState(false);
   const [payScreenshot, setPayScreenshot] = useState('');
   const [payScreenshotName, setPayScreenshotName] = useState('');
+  const [payHistory, setPayHistory] = useState([]);
   const [settings, setSettings] = useState(settingsProp || {});
-  const [advanceWallet, setAdvanceWallet] = useState(0);
 
   useEffect(() => {
     setSettings(settingsProp || {});
@@ -205,13 +206,13 @@ export default function BillsDatabase({
     setPayTendered('');
     setPayScreenshot('');
     setPayScreenshotName('');
-    setAdvanceWallet(0);
+    setPayHistory([]);
     try {
-      const res = await apiFetch(`/api/advances?client=${encodeURIComponent(bill.customer_name || '')}`);
+      const res = await apiFetch(`/api/bills/${bill.id}/payments`);
       const data = await res.json();
-      if (res.ok) setAdvanceWallet(Number(data.available_advance) || 0);
+      if (res.ok) setPayHistory(Array.isArray(data) ? data : data?.payments || []);
     } catch (_) {
-      /* ignore */
+      setPayHistory(bill.payments || []);
     }
   };
 
@@ -246,35 +247,6 @@ export default function BillsDatabase({
     }
   };
 
-  const handleApplyAdvanceFromPay = async () => {
-    if (!payBill || advanceWallet <= 0) return;
-    const due = Number(
-      payBill.balance_due ?? Math.max(0, (payBill.total_amount || 0) - (payBill.amount_paid || 0))
-    );
-    const amt = Math.min(due, advanceWallet, parseFloat(payAmount) || due);
-    if (!amt || amt <= 0) return;
-    setPaySaving(true);
-    try {
-      const res = await apiFetch('/api/advances/apply', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bill_id: payBill.id,
-          client_name: payBill.customer_name,
-          amount: amt,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      setPayBill(null);
-      apiFetchBills();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setPaySaving(false);
-    }
-  };
-
   const payAmountNum = parseFloat(payAmount) || 0;
   const payTenderedNum = parseFloat(payTendered);
   const isPayCash = String(payMethod).toLowerCase().includes('cash');
@@ -282,6 +254,7 @@ export default function BillsDatabase({
     isPayCash && Number.isFinite(payTenderedNum) && payTenderedNum > 0
       ? Math.round((payTenderedNum - payAmountNum) * 100) / 100
       : null;
+  const paySummary = payBill ? paymentSummaryText(currencySymbol, payBill, payAmountNum) : null;
 
   const handleRecordPayment = async (e) => {
     e.preventDefault();
@@ -311,6 +284,12 @@ export default function BillsDatabase({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const remain = Number(data.balance_due) || 0;
+      toast.success(
+        remain > 0
+          ? `Payment saved. Remaining ${formatCurrency(currencySymbol, remain)}`
+          : 'Payment saved. Bill fully paid.'
+      );
       setPayBill(null);
       apiFetchBills();
     } catch (err) {
@@ -724,15 +703,41 @@ export default function BillsDatabase({
               <div>
                 <h3 style={{ fontSize: '1.05rem', fontWeight: 800 }}>Record Payment</h3>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                  {payBill.invoice_number} · Balance {formatCurrency(currencySymbol, payBill.balance_due ?? 0)}
+                  {payBill.invoice_number} · {payBill.customer_name}
                 </p>
               </div>
               <button type="button" className="btn-secondary" style={{ padding: '0.4rem 0.6rem', width: 'auto' }} onClick={() => setPayBill(null)}>
                 <X size={18} />
               </button>
             </div>
+
+            {paySummary && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.45rem', marginBottom: '0.85rem' }}>
+                {paySummary.lines.map((line) => (
+                  <div key={line.label} className="surface-block" style={{ padding: '0.5rem 0.6rem' }}>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{line.label}</div>
+                    <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: line.accent || 'var(--text-primary)' }}>
+                      {line.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {payHistory.length > 0 && (
+              <div style={{ marginBottom: '0.85rem', maxHeight: 120, overflowY: 'auto' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>Payment history</div>
+                {payHistory.map((p) => (
+                  <div key={p.id} style={{ fontSize: '0.78rem', display: 'flex', justifyContent: 'space-between', gap: '0.5rem', padding: '0.25rem 0', borderBottom: '1px solid var(--border-color)' }}>
+                    <span>{p.payment_date} · {p.method}</span>
+                    <strong style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, p.amount)}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="form-group">
-              <label className="form-label">Amount ({currencySymbol})</label>
+              <label className="form-label">Amount to subtract ({currencySymbol})</label>
               <input type="number" step="0.01" min="0.01" className="form-input" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} required />
             </div>
             <div className="form-group">
@@ -803,17 +808,6 @@ export default function BillsDatabase({
                 </div>
               )}
             </div>
-            {advanceWallet > 0 && (
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ width: '100%', marginBottom: '0.65rem' }}
-                disabled={paySaving}
-                onClick={handleApplyAdvanceFromPay}
-              >
-                Apply advance ({formatCurrency(currencySymbol, advanceWallet)} available)
-              </button>
-            )}
             <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', marginTop: '0.75rem' }}>
               <button type="button" className="btn-secondary" onClick={() => setPayBill(null)}>Cancel</button>
               <button type="submit" className="btn-primary" disabled={paySaving}>

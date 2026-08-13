@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2 } from 'lucide-react';
+import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History } from 'lucide-react';
 import { parseNaturalBillText } from '../utils/naturalParser';
-import { pakistanToday, addDaysToDateString } from '../utils/pakistan';
+import { pakistanToday, addDaysToDateString, formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
+import BarcodeScanner from './BarcodeScanner';
 
 export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.', defaultTaxRate = 0, draftBill = null, onDraftConsumed }) {
   const toast = useToast();
@@ -16,6 +17,8 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const [loading, setLoading] = useState(false);
   const [skuQuery, setSkuQuery] = useState('');
   const [saveMode, setSaveMode] = useState('view'); // 'view' | 'new'
+  const [scanOpen, setScanOpen] = useState(false);
+  const [repeating, setRepeating] = useState(false);
 
   // Form State
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -29,6 +32,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const [discountRate, setDiscountRate] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('Bank Transfer / Raast');
   const [cashTendered, setCashTendered] = useState('');
+  const [initialPayment, setInitialPayment] = useState('');
   const [notes, setNotes] = useState('Thank you for your order!');
   const [payeeBankName, setPayeeBankName] = useState('');
   const [payeeAccountTitle, setPayeeAccountTitle] = useState('');
@@ -274,6 +278,24 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
       ? Math.round((tenderedNum - totalAmount) * 100) / 100
       : null;
   const stockWarnings = getStockWarnings();
+  const initialPayNum = parseFloat(initialPayment) || 0;
+  const remainingAfterInitial = Math.max(0, Math.round((totalAmount - initialPayNum) * 100) / 100);
+
+  const recordInitialPayment = async (billId, amount) => {
+    const res = await apiFetch(`/api/bills/${billId}/payments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        amount,
+        method: paymentMethod,
+        payment_date: billDate,
+        notes: 'Payment at bill creation',
+      }),
+    });
+    const data = await parseJsonSafe(res);
+    if (!res.ok) throw new Error(data?.error || `Payment failed (${res.status})`);
+    return data;
+  };
 
   const resetFormForNew = async () => {
     setNaturalText('');
@@ -293,14 +315,15 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     setDiscountRate(0);
     setPaymentMethod(billType === 'supplier' ? 'Bank Transfer / Remittance' : 'Bank Transfer / Raast');
     setCashTendered('');
+    setInitialPayment('');
     setNotes(billType === 'supplier' ? 'Purchase remittance / payment advice' : 'Thank you for your order!');
     setItems([{ product_id: null, description: '', quantity: 1, unit_price: 0 }]);
     setSkuQuery('');
     await fetchNextInvoiceNumber(billType);
   };
 
-  const applySkuLookup = () => {
-    const q = skuQuery.trim().toLowerCase();
+  const applySkuLookup = (rawQuery) => {
+    const q = String(rawQuery ?? skuQuery).trim().toLowerCase();
     if (!q) return;
     const found = products.find(
       (p) =>
@@ -308,7 +331,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         String(p.name || '').toLowerCase().includes(q)
     );
     if (!found) {
-      toast.error(`No item matched "${skuQuery}"`);
+      toast.error(`No item matched "${rawQuery ?? skuQuery}"`);
       return;
     }
 
@@ -334,6 +357,55 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
       return [...prev, newRow];
     });
     setSkuQuery('');
+    toast.success(`Added ${found.name}`);
+  };
+
+  const handleRepeatLastOrder = async () => {
+    const name = (customerName || '').trim();
+    if (!name) {
+      toast.error('Select or enter a client first');
+      return;
+    }
+    setRepeating(true);
+    try {
+      const res = await apiFetch(`/api/bills?search=${encodeURIComponent(name)}&type=${billType}`);
+      const list = await res.json();
+      if (!res.ok) throw new Error(list?.error || `HTTP ${res.status}`);
+      const match = (list || []).find(
+        (b) =>
+          String(b.customer_name || '').trim().toLowerCase() === name.toLowerCase() &&
+          Array.isArray(b.items) &&
+          b.items.length > 0
+      );
+      if (!match) {
+        toast.error('No previous bill found for this client');
+        return;
+      }
+      setCustomerEmail(match.customer_email || customerEmail);
+      setCustomerPhone(match.customer_phone || customerPhone);
+      setCustomerAddress(match.customer_address || customerAddress);
+      setTaxRate(match.tax_rate ?? defaultTaxRate);
+      setDiscountRate(match.discount_rate ?? 0);
+      setPaymentMethod(
+        match.payment_method ||
+          (billType === 'supplier' ? 'Bank Transfer / Remittance' : 'Bank Transfer / Raast')
+      );
+      setItems(
+        match.items.map((it) => ({
+          product_id: it.product_id || null,
+          description: it.description || '',
+          quantity: it.quantity || 1,
+          unit_price: it.unit_price || 0,
+        }))
+      );
+      setBillDate(pakistanToday());
+      setDueDate(addDaysToDateString(pakistanToday(), 14));
+      toast.success(`Loaded items from ${match.invoice_number}`);
+    } catch (err) {
+      toast.error(err.message || 'Could not load last order');
+    } finally {
+      setRepeating(false);
+    }
   };
 
   // Submit and Save to SQLite DB
@@ -410,11 +482,24 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         setInvoiceNumber(data.invoice_number);
       }
 
+      let savedBill = data;
+      if (initialPayNum > 0 && savedBill?.id) {
+        if (initialPayNum > totalAmount) {
+          toast.info('Payment amount capped to bill total.');
+        }
+        savedBill = await recordInitialPayment(savedBill.id, Math.min(initialPayNum, totalAmount));
+      }
+
       if (mode === 'new') {
         await resetFormForNew();
-        toast.success(`Saved ${data.invoice_number}. Form cleared for next bill.`);
+        const remain = Number(savedBill?.balance_due) || 0;
+        toast.success(
+          remain > 0
+            ? `Saved ${savedBill.invoice_number}. Remaining ${formatCurrency(currencySymbol, remain)}`
+            : `Saved ${savedBill.invoice_number}. Fully paid.`
+        );
       } else {
-        onBillGenerated(data);
+        onBillGenerated(savedBill);
       }
     } catch (err) {
       const msg =
@@ -601,6 +686,15 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
               onChange={(e) => setCustomerName(e.target.value)}
               required
             />
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ width: '100%', marginTop: '0.5rem' }}
+              disabled={repeating || !customerName.trim()}
+              onClick={handleRepeatLastOrder}
+            >
+              <History size={16} /> {repeating ? 'Loading…' : 'Repeat last order'}
+            </button>
 
             <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem' }}>
               <div>
@@ -809,8 +903,11 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                 }
               }}
             />
-            <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={applySkuLookup}>
+            <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={() => applySkuLookup()}>
               <PackageCheck size={16} /> Add
+            </button>
+            <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={() => setScanOpen(true)}>
+              <Camera size={16} /> Scan
             </button>
           </div>
 
@@ -1031,6 +1128,29 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                 {currencySymbol}{totalAmount.toFixed(2)}
               </span>
             </div>
+
+            <div className="form-group" style={{ marginTop: '0.85rem', marginBottom: 0 }}>
+              <label className="form-label">Amount received now (optional)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="form-input"
+                placeholder="0 — partial or full payment"
+                value={initialPayment}
+                onChange={(e) => setInitialPayment(e.target.value)}
+              />
+              {initialPayNum > 0 && (
+                <div style={{ marginTop: '0.45rem', fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                  <span style={{ color: 'var(--success)' }}>
+                    Paid now: {formatCurrency(currencySymbol, Math.min(initialPayNum, totalAmount))}
+                  </span>
+                  <span style={{ color: remainingAfterInitial > 0 ? 'var(--warning)' : 'var(--success)', fontWeight: 700 }}>
+                    Remaining: {formatCurrency(currencySymbol, remainingAfterInitial)}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1060,6 +1180,15 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
           </button>
         </div>
       </form>
+
+      <BarcodeScanner
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onDetected={(code) => {
+          setSkuQuery(code);
+          applySkuLookup(code);
+        }}
+      />
     </div>
   );
 }

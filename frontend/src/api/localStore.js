@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = {
   mobile_wallet: '03337669709 (Raast / JazzCash / EasyPaisa)',
   payment_instructions: 'Please share payment screenshot on WhatsApp +923337669709',
   app_pin: '',
+  biometric_lock: 0,
   urdu_labels: 0,
   low_stock_threshold: 5,
 };
@@ -188,6 +189,7 @@ async function handleLocalRequestInner(url, options = {}) {
         ...body,
         id: 1,
         urdu_labels: body.urdu_labels ? 1 : 0,
+        biometric_lock: body.biometric_lock ? 1 : 0,
         low_stock_threshold: body.low_stock_threshold ?? prev.low_stock_threshold ?? 5,
         updated_at: new Date().toISOString(),
       };

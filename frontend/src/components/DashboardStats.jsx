@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { DollarSign, Clock, AlertTriangle, FileText, PlusCircle, TrendingUp, RefreshCw, Package, Wallet, ArrowDownUp } from 'lucide-react';
+import { DollarSign, Clock, AlertTriangle, FileText, PlusCircle, TrendingUp, RefreshCw, Package, ArrowDownUp } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import CashflowPanel from './CashflowPanel';
 import AgingReport from './AgingReport';
+import OverduePanel from './OverduePanel';
 
 function StatCard({ label, value, hint, icon: Icon, accent }) {
   return (
@@ -79,9 +80,6 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
           <button className="btn-secondary" onClick={() => onNavigate('cashflow')}>
             <ArrowDownUp size={18} /> Cashflow
           </button>
-          <button className="btn-secondary" onClick={() => onNavigate('advances')}>
-            <Wallet size={18} /> Advances
-          </button>
         </div>
       </div>
 
@@ -109,6 +107,21 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
           </button>
         </div>
       )}
+
+      <OverduePanel
+        currencySymbol={currencySymbol}
+        settings={settings}
+        onViewBill={async (row) => {
+          try {
+            const res = await apiFetch(`/api/bills/${row.id}`);
+            const bill = await res.json();
+            if (res.ok && onViewBill) onViewBill(bill);
+            else if (onNavigate) onNavigate('database');
+          } catch {
+            if (onNavigate) onNavigate('database');
+          }
+        }}
+      />
 
       <div className="stats-grid">
         <StatCard

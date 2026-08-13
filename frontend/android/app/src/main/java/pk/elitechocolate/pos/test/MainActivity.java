@@ -1,4 +1,4 @@
-package pk.elitechocolate.pos;
+package pk.elitechocolate.pos.test;
 
 import com.getcapacitor.BridgeActivity;
 

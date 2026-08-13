@@ -1328,3 +1328,91 @@ body {
 .aging-row:hover {
   border-color: var(--accent-teal);
 }
+
+.more-menu-overlay,
+.barcode-scanner-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.more-menu-sheet,
+.barcode-scanner-sheet {
+  width: min(440px, 100%);
+  padding: 1.1rem 1.15rem 1.25rem;
+  margin-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+.more-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  text-align: left;
+  border: 1px solid var(--border-color);
+  background: var(--surface-inset);
+  color: var(--text-primary);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 0.95rem;
+  margin-bottom: 0.55rem;
+  cursor: pointer;
+}
+
+.more-menu-item strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.more-menu-item small {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 0.15rem;
+}
+
+.more-menu-item.active {
+  border-color: var(--accent-teal);
+  background: color-mix(in srgb, var(--accent-teal) 12%, transparent);
+}
+
+.barcode-scanner-video {
+  width: 100%;
+  max-height: 55vh;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  background: #000;
+}
+
+.overdue-panel {
+  padding: 1.1rem 1.15rem;
+}
+
+.overdue-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.45rem;
+  padding: 0.35rem;
+}
+
+.overdue-row-main {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.45rem 0.5rem;
+}
+
+.overdue-wa-btn {
+  width: auto !important;
+  min-width: 56px;
+  padding: 0.45rem 0.55rem !important;
+  align-self: center;
+}

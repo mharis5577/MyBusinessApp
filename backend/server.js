@@ -90,6 +90,7 @@ app.put('/api/settings', async (req, res) => {
       app_pin,
       urdu_labels,
       low_stock_threshold,
+      biometric_lock,
     } = req.body;
 
     await dbRun(
@@ -110,6 +111,7 @@ app.put('/api/settings', async (req, res) => {
         app_pin = ?,
         urdu_labels = ?,
         low_stock_threshold = ?,
+        biometric_lock = ?,
         updated_at = CURRENT_TIMESTAMP
        WHERE id = (SELECT id FROM settings LIMIT 1)`,
       [
@@ -129,6 +131,7 @@ app.put('/api/settings', async (req, res) => {
         app_pin ?? '',
         urdu_labels ? 1 : 0,
         low_stock_threshold ?? 5,
+        biometric_lock ? 1 : 0,
       ]
     );
 
@@ -1331,13 +1334,13 @@ app.post('/api/restore', async (req, res) => {
             company_name=?, company_email=?, company_phone=?, company_address=?, company_tax_id=?,
             logo_url=?, currency_symbol=?, default_tax_rate=?, bank_name=?, account_title=?,
             account_number=?, mobile_wallet=?, payment_instructions=?, app_pin=?, urdu_labels=?,
-            low_stock_threshold=?
+            low_stock_threshold=?, biometric_lock=?
            WHERE id = (SELECT id FROM settings LIMIT 1)`,
           [
             s.company_name, s.company_email, s.company_phone, s.company_address, s.company_tax_id,
             s.logo_url || '', s.currency_symbol || 'Rs.', s.default_tax_rate || 0, s.bank_name || '',
             s.account_title || '', s.account_number || '', s.mobile_wallet || '', s.payment_instructions || '',
-            s.app_pin || '', s.urdu_labels ? 1 : 0, s.low_stock_threshold ?? 5,
+            s.app_pin || '', s.urdu_labels ? 1 : 0, s.low_stock_threshold ?? 5, s.biometric_lock ? 1 : 0,
           ]
         );
       }

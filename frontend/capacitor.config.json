@@ -1,6 +1,6 @@
 {
-  "appId": "pk.elitechocolate.pos",
-  "appName": "ELITE CHOCOLATE",
+  "appId": "pk.elitechocolate.pos.test",
+  "appName": "ELITE CHOCOLATE Test",
   "webDir": "dist",
   "server": {
     "androidScheme": "https"

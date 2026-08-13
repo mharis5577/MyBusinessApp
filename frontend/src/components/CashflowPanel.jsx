@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowDownUp, RefreshCw, TrendingUp, ShoppingBag } from 'lucide-react';
+import { ArrowDownUp, RefreshCw, TrendingUp } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
@@ -39,8 +39,6 @@ export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false,
     total_sales = 0,
     buying_cost = 0,
     net_profit = 0,
-    total_advance = 0,
-    net_balance = 0,
     paid_sales = 0,
     pending_sales = 0,
     money_flow = [],
@@ -76,14 +74,6 @@ export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false,
           <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, net_profit)}</div>
         </div>
         <div className="surface-block" style={{ padding: '0.75rem' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Advances</div>
-          <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, total_advance)}</div>
-        </div>
-        <div className="surface-block" style={{ padding: '0.75rem' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Net after advances</div>
-          <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, net_balance)}</div>
-        </div>
-        <div className="surface-block" style={{ padding: '0.75rem' }}>
           <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Paid / pending sales</div>
           <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>
             {formatCurrency(currencySymbol, paid_sales)} / {formatCurrency(currencySymbol, pending_sales)}
@@ -98,9 +88,6 @@ export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false,
               <>
                 <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={() => onNavigate('create')}>
                   <TrendingUp size={14} /> New sale / buy bill
-                </button>
-                <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={() => onNavigate('advances')}>
-                  <ShoppingBag size={14} /> Advances
                 </button>
               </>
             )}

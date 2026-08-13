@@ -448,7 +448,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
           <GitMerge size={18} /> Merge duplicate clients
         </h3>
         <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-          Reassign bills, rates, and advances to the primary profile, then delete duplicates. Type MERGE to confirm.
+          Reassign bills and rates to the primary profile, then delete duplicates. Type MERGE to confirm.
         </p>
         {mergeSuggestions.length > 0 && (
           <div style={{ marginBottom: '0.75rem', fontSize: '0.8rem', color: 'var(--warning)' }}>
@@ -533,29 +533,10 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
                     <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--warning)' }}>{formatCurrency(currencySymbol, ledger.totals.outstanding)}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Advance left</div>
-                    <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--info)' }}>
-                      {formatCurrency(currencySymbol, ledger.totals.available_advance ?? ledger.totals.advances ?? 0)}
-                    </div>
-                  </div>
-                  <div>
                     <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Bills</div>
                     <div style={{ fontWeight: 800 }}>{ledger.totals.bill_count}</div>
                   </div>
                 </div>
-                {(ledger.advances || []).length > 0 && (
-                  <div style={{ marginBottom: '0.75rem', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                    <strong style={{ color: 'var(--text-primary)' }}>Advances:</strong>{' '}
-                    {(ledger.advances || []).slice(0, 5).map((a) => (
-                      <span key={a.id} style={{ marginRight: '0.65rem' }}>
-                        {a.payment_date}: {formatCurrency(currencySymbol, a.amount)}
-                        {Number(a.remaining) < Number(a.amount)
-                          ? ` (left ${formatCurrency(currencySymbol, a.remaining)})`
-                          : ''}
-                      </span>
-                    ))}
-                  </div>
-                )}
                 <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                   {(ledger.bills || []).slice(0, 12).map((b) => (
                     <div key={b.id} style={{ fontSize: '0.78rem', display: 'flex', justifyContent: 'space-between', gap: '0.5rem', color: 'var(--text-secondary)' }}>

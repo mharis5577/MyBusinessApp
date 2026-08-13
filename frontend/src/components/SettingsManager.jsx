@@ -10,7 +10,9 @@ import {
   FileBarChart2,
   History,
   Share2,
+  Fingerprint,
 } from 'lucide-react';
+import { checkBiometricAvailable } from '../utils/appSecurity';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
@@ -41,10 +43,12 @@ export default function SettingsManager({ onSettingsUpdated }) {
     mobile_wallet: '',
     payment_instructions: '',
     app_pin: '',
+    biometric_lock: 0,
     urdu_labels: 0,
     low_stock_threshold: 5,
   });
 
+  const [bioAvailable, setBioAvailable] = useState(false);
   const [savedMsg, setSavedMsg] = useState(false);
   const [resetMsg, setResetMsg] = useState('');
   const [wipeConfirm, setWipeConfirm] = useState('');
@@ -75,6 +79,7 @@ export default function SettingsManager({ onSettingsUpdated }) {
       })
       .catch((err) => console.error(err));
     refreshSnapshots();
+    checkBiometricAvailable().then((r) => setBioAvailable(Boolean(r.available)));
   }, []);
 
   const handleChange = (field, value) => {
@@ -90,6 +95,7 @@ export default function SettingsManager({ onSettingsUpdated }) {
         body: JSON.stringify({
           ...settings,
           urdu_labels: settings.urdu_labels ? 1 : 0,
+          biometric_lock: settings.biometric_lock ? 1 : 0,
           low_stock_threshold: parseInt(settings.low_stock_threshold, 10) || 5,
         }),
       });
@@ -280,13 +286,41 @@ export default function SettingsManager({ onSettingsUpdated }) {
             <input className="form-input" type="number" step="0.1" value={settings.default_tax_rate ?? 0} onChange={(e) => handleChange('default_tax_rate', parseFloat(e.target.value) || 0)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Staff PIN (blank = unlocked)</label>
+            <label className="form-label">Staff PIN (blank = no PIN lock)</label>
             <input className="form-input" type="password" inputMode="numeric" placeholder="e.g. 1234" value={settings.app_pin || ''} onChange={(e) => handleChange('app_pin', e.target.value)} />
           </div>
           <div className="form-group">
             <label className="form-label">Low stock threshold</label>
             <input className="form-input" type="number" min="0" value={settings.low_stock_threshold ?? 5} onChange={(e) => handleChange('low_stock_threshold', e.target.value)} />
           </div>
+        </div>
+
+        <div className="surface-block" style={{ marginTop: '1rem', padding: '0.9rem 1rem' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', fontSize: '0.9rem', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              style={{ marginTop: 3 }}
+              checked={Boolean(Number(settings.biometric_lock))}
+              onChange={(e) => {
+                if (e.target.checked && !bioAvailable) {
+                  toast.info('Fingerprint is not available on this device yet. Rebuild the APK after installing the biometric plugin.');
+                }
+                if (e.target.checked && !(settings.app_pin && String(settings.app_pin).trim())) {
+                  toast.info('Tip: also set a Staff PIN as a backup unlock method.');
+                }
+                handleChange('biometric_lock', e.target.checked ? 1 : 0);
+              }}
+            />
+            <span>
+              <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Fingerprint size={16} /> Unlock with fingerprint
+              </strong>
+              <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                Off by default — the app will never ask for fingerprint until you turn this on yourself.
+                {bioAvailable ? ' Device fingerprint is ready.' : ' (Sensor not detected on this device.)'}
+              </span>
+            </span>
+          </label>
         </div>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginTop: '0.75rem', fontSize: '0.9rem', cursor: 'pointer' }}>

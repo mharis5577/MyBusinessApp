@@ -15,6 +15,7 @@ import {
   ImagePlus,
 } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
+import { paymentSummaryText } from '../utils/billPayments';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { downloadBlob, saveOrShareBlob } from '../utils/downloadFile';
@@ -51,7 +52,6 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
   const [paying, setPaying] = useState(false);
   const [payScreenshot, setPayScreenshot] = useState('');
   const [previewShot, setPreviewShot] = useState(null);
-  const [advanceWallet, setAdvanceWallet] = useState(0);
 
   useEffect(() => {
     setLiveBill(bill);
@@ -72,17 +72,6 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
       .catch((err) => console.error(err));
   }, []);
 
-  useEffect(() => {
-    if (!liveBill?.customer_name || liveBill.bill_type === 'supplier') {
-      setAdvanceWallet(0);
-      return;
-    }
-    apiFetch(`/api/advances?client=${encodeURIComponent(liveBill.customer_name)}`)
-      .then((res) => res.json())
-      .then((data) => setAdvanceWallet(Number(data.available_advance) || 0))
-      .catch(() => setAdvanceWallet(0));
-  }, [liveBill?.id, liveBill?.customer_name, liveBill?.amount_paid]);
-
   if (!liveBill) {
     return (
       <div style={{ textAlign: 'center', padding: '3rem' }}>
@@ -98,6 +87,8 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
   const baseName = sanitizeFilename(liveBill.invoice_number);
   const paid = Number(liveBill.amount_paid) || 0;
   const balance = Number(liveBill.balance_due ?? Math.max(0, (liveBill.total_amount || 0) - paid));
+  const payAmountNum = parseFloat(payAmount) || 0;
+  const paySummary = paymentSummaryText(currencySymbol, liveBill, payAmountNum);
   const urdu = Boolean(urduLabels);
   const isSupplier = liveBill.bill_type === 'supplier';
   const hasPayeeBank =
@@ -245,30 +236,12 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
       setLiveBill(data);
       setPayAmount('');
       setPayScreenshot('');
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setPaying(false);
-    }
-  };
-
-  const handleApplyAdvance = async () => {
-    if (advanceWallet <= 0 || balance <= 0) return;
-    setPaying(true);
-    try {
-      const res = await apiFetch('/api/advances/apply', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bill_id: liveBill.id,
-          client_name: liveBill.customer_name,
-          amount: Math.min(balance, advanceWallet),
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      setLiveBill(data.bill);
-      setAdvanceWallet(Number(data.available_advance) || 0);
+      const remain = Number(data.balance_due) || 0;
+      toast.success(
+        remain > 0
+          ? `Payment saved. Remaining ${formatCurrency(currencySymbol, remain)}`
+          : 'Payment saved. Bill fully paid.'
+      );
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -330,14 +303,21 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
 
       {balance > 0 && (
         <form className="no-print glass-panel" style={{ padding: '1rem 1.25rem' }} onSubmit={handleQuickPay}>
+          <h4 style={{ fontSize: '0.95rem', fontWeight: 800, marginBottom: '0.65rem' }}>Add payment</h4>
+          <div className="payment-summary-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.5rem', marginBottom: '0.85rem' }}>
+            {paySummary.lines.map((line) => (
+              <div key={line.label} className="surface-block" style={{ padding: '0.55rem 0.65rem' }}>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{line.label}</div>
+                <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', fontSize: '0.9rem', color: line.accent || 'var(--text-primary)' }}>
+                  {line.value}
+                </div>
+              </div>
+            ))}
+          </div>
           <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div style={{ flex: 1, minWidth: 120 }}>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 4 }}>
-                {isSupplier ? 'Remaining to pay' : 'Balance due'}:{' '}
-                <strong style={{ color: 'var(--text-primary)' }}>{formatCurrency(currencySymbol, balance)}</strong>
-                {paid > 0 ? ` · Paid ${formatCurrency(currencySymbol, paid)}` : ''}
-              </div>
-              <input className="form-input" type="number" step="0.01" min="0.01" placeholder="Payment amount" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+              <label className="form-label">Payment amount</label>
+              <input className="form-input" type="number" step="0.01" min="0.01" max={balance} placeholder="Amount to subtract" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
             </div>
             <select className="form-select" style={{ width: 'auto', minWidth: 140 }} value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
               <option>Cash</option>
@@ -362,33 +342,42 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
               </button>
             </div>
           )}
-          {advanceWallet > 0 && (
-            <button type="button" className="btn-secondary" style={{ marginTop: '0.65rem', width: 'auto' }} disabled={paying} onClick={handleApplyAdvance}>
-              Apply advance ({formatCurrency(currencySymbol, Math.min(balance, advanceWallet))})
-            </button>
-          )}
         </form>
       )}
 
-      {payments.length > 0 && (
+      {(payments.length > 0 || paid > 0) && (
         <div className="no-print glass-panel" style={{ padding: '1rem 1.25rem' }}>
           <h4 style={{ fontSize: '0.9rem', fontWeight: 800, marginBottom: '0.65rem' }}>Payment history</h4>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-            {payments.map((p) => (
-              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', fontSize: '0.85rem' }}>
-                <div>
-                  <strong style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, p.amount)}</strong>
-                  {' · '}{p.method} · {p.payment_date}
-                  {p.notes ? <span style={{ color: 'var(--text-muted)' }}> · {p.notes}</span> : null}
+          {paid > 0 && (
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.65rem' }}>
+              Total paid: <strong style={{ color: 'var(--success)' }}>{formatCurrency(currencySymbol, paid)}</strong>
+              {balance > 0 ? (
+                <> · Remaining: <strong style={{ color: 'var(--warning)' }}>{formatCurrency(currencySymbol, balance)}</strong></>
+              ) : (
+                <> · <strong style={{ color: 'var(--success)' }}>Fully paid</strong></>
+              )}
+            </p>
+          )}
+          {payments.length === 0 ? (
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>No individual payment records yet.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+              {payments.map((p) => (
+                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', fontSize: '0.85rem' }}>
+                  <div>
+                    <strong style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, p.amount)}</strong>
+                    {' · '}{p.method} · {p.payment_date}
+                    {p.notes ? <span style={{ color: 'var(--text-muted)' }}> · {p.notes}</span> : null}
+                  </div>
+                  {p.screenshot_data && (
+                    <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.25rem' }} onClick={() => setPreviewShot(p.screenshot_data)}>
+                      <img src={p.screenshot_data} alt="Proof" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
+                    </button>
+                  )}
                 </div>
-                {p.screenshot_data && (
-                  <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.25rem' }} onClick={() => setPreviewShot(p.screenshot_data)}>
-                    <img src={p.screenshot_data} alt="Proof" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -547,13 +536,47 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
                 <span style={{ color: '#0d4a4a', fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, liveBill.total_amount)}</span>
               </div>
               {paid > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', color: '#b45309', fontWeight: 700 }}>
-                  <BiLabel en={isSupplier ? 'Remaining' : 'Balance Due'} ur="باقی رقم" urdu={urdu} />
-                  <span style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, balance)}</span>
-                </div>
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', color: '#15803d', fontWeight: 700 }}>
+                    <BiLabel en="Amount Paid" ur="ادا شدہ" urdu={urdu} />
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, paid)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', color: '#b45309', fontWeight: 700 }}>
+                    <BiLabel en={isSupplier ? 'Remaining' : 'Balance Due'} ur="باقی رقم" urdu={urdu} />
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, balance)}</span>
+                  </div>
+                </>
               )}
             </div>
           </div>
+
+          {payments.length > 0 && (
+            <div style={{ marginTop: '1.25rem' }}>
+              <h4 style={{ fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, marginBottom: '0.5rem' }}>
+                <BiLabel en="Payment History" ur="ادائیگی کی تاریخ" urdu={urdu} />
+              </h4>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>
+                    <th style={{ textAlign: 'left', padding: '0.4rem 0' }}><BiLabel en="Date" ur="تاریخ" urdu={urdu} /></th>
+                    <th style={{ textAlign: 'left', padding: '0.4rem 0' }}><BiLabel en="Method" ur="طریقہ" urdu={urdu} /></th>
+                    <th style={{ textAlign: 'right', padding: '0.4rem 0' }}><BiLabel en="Amount" ur="رقم" urdu={urdu} /></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payments.map((p) => (
+                    <tr key={p.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '0.35rem 0' }}>{p.payment_date}</td>
+                      <td style={{ padding: '0.35rem 0' }}>{p.method}</td>
+                      <td style={{ padding: '0.35rem 0', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                        {formatCurrency(currencySymbol, p.amount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {isSupplier ? (
             hasPayeeBank && (

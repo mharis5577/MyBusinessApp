@@ -54,6 +54,7 @@ function initTables() {
       { name: 'app_pin', type: 'TEXT DEFAULT ""' },
       { name: 'urdu_labels', type: 'INTEGER DEFAULT 0' },
       { name: 'low_stock_threshold', type: 'INTEGER DEFAULT 5' },
+      { name: 'biometric_lock', type: 'INTEGER DEFAULT 0' },
     ];
 
     columnsToAdd.forEach((col) => {
