@@ -55,6 +55,7 @@ function initTables() {
       { name: 'urdu_labels', type: 'INTEGER DEFAULT 0' },
       { name: 'low_stock_threshold', type: 'INTEGER DEFAULT 5' },
       { name: 'biometric_lock', type: 'INTEGER DEFAULT 0' },
+      { name: 'due_reminders', type: 'INTEGER DEFAULT 0' },
     ];
 
     columnsToAdd.forEach((col) => {
@@ -134,6 +135,7 @@ function initTables() {
       )
     `);
     db.run(`ALTER TABLE products ADD COLUMN sku TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE products ADD COLUMN cost_price REAL DEFAULT 0.0`, () => {});
 
     // Bills Table
     db.run(`
@@ -173,6 +175,8 @@ function initTables() {
     db.run(`ALTER TABLE bills ADD COLUMN payee_account_title TEXT DEFAULT ''`, () => {});
     db.run(`ALTER TABLE bills ADD COLUMN payee_account_number TEXT DEFAULT ''`, () => {});
     db.run(`ALTER TABLE bills ADD COLUMN payee_payment_notes TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE bills ADD COLUMN cancel_reason TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE bills ADD COLUMN cancelled_at TEXT DEFAULT ''`, () => {});
 
     // Bill Items Table
     db.run(`
@@ -203,6 +207,7 @@ function initTables() {
       )
     `);
     db.run(`ALTER TABLE bill_payments ADD COLUMN screenshot_data TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE bill_items ADD COLUMN returned_qty INTEGER DEFAULT 0`, () => {});
 
     // Advance Payments Table
     db.run(`

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { DollarSign, Clock, AlertTriangle, FileText, PlusCircle, TrendingUp, RefreshCw, Package, ArrowDownUp } from 'lucide-react';
+import { DollarSign, Clock, AlertTriangle, FileText, PlusCircle, TrendingUp, RefreshCw, Package, ArrowDownUp, Wallet, CalendarDays } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import CashflowPanel from './CashflowPanel';
@@ -61,6 +61,12 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     recent_bills = [],
     low_stock = [],
     low_stock_threshold = 5,
+    sales_today = 0,
+    cost_today = 0,
+    profit_today = 0,
+    sales_month = 0,
+    cost_month = 0,
+    profit_month = 0,
   } = stats || {};
 
   return (
@@ -124,6 +130,20 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
       />
 
       <div className="stats-grid">
+        <StatCard
+          label="Profit today"
+          value={formatCurrency(currencySymbol, profit_today, { maximumFractionDigits: 0 })}
+          hint={`Sales ${formatCurrency(currencySymbol, sales_today, { maximumFractionDigits: 0 })} − cost ${formatCurrency(currencySymbol, cost_today, { maximumFractionDigits: 0 })}`}
+          icon={Wallet}
+          accent="var(--accent-primary)"
+        />
+        <StatCard
+          label="Profit this month"
+          value={formatCurrency(currencySymbol, profit_month, { maximumFractionDigits: 0 })}
+          hint={`Sales ${formatCurrency(currencySymbol, sales_month, { maximumFractionDigits: 0 })} − cost ${formatCurrency(currencySymbol, cost_month, { maximumFractionDigits: 0 })}`}
+          icon={CalendarDays}
+          accent="var(--accent-teal)"
+        />
         <StatCard
           label="Revenue paid"
           value={formatCurrency(currencySymbol, total_revenue, { maximumFractionDigits: 0 })}

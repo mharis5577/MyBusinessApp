@@ -11,8 +11,10 @@ import {
   History,
   Share2,
   Fingerprint,
+  Bell,
 } from 'lucide-react';
 import { checkBiometricAvailable } from '../utils/appSecurity';
+import { cancelDueReminders, requestDueReminderPermission, syncDueReminders } from '../utils/dueReminders';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
@@ -20,11 +22,14 @@ import {
   exportBackupFile,
   restoreFromPayload,
   restoreFromLocalVersion,
+  shareLocalSnapshot,
   listLocalSnapshots,
   saveLocalSnapshot,
   getLastAutoBackupAt,
+  parseBackupPayload,
   MAX_VERSIONS,
 } from '../utils/backupManager';
+import { readPickedFileText } from '../utils/downloadFile';
 
 export default function SettingsManager({ onSettingsUpdated }) {
   const toast = useToast();
@@ -44,6 +49,7 @@ export default function SettingsManager({ onSettingsUpdated }) {
     payment_instructions: '',
     app_pin: '',
     biometric_lock: 0,
+    due_reminders: 0,
     urdu_labels: 0,
     low_stock_threshold: 5,
   });
@@ -96,6 +102,7 @@ export default function SettingsManager({ onSettingsUpdated }) {
           ...settings,
           urdu_labels: settings.urdu_labels ? 1 : 0,
           biometric_lock: settings.biometric_lock ? 1 : 0,
+          due_reminders: settings.due_reminders ? 1 : 0,
           low_stock_threshold: parseInt(settings.low_stock_threshold, 10) || 5,
         }),
       });
@@ -106,6 +113,11 @@ export default function SettingsManager({ onSettingsUpdated }) {
         setSavedMsg(true);
         toast.success('Settings saved');
         setTimeout(() => setSavedMsg(false), 3000);
+        if (Number(updated.due_reminders)) {
+          syncDueReminders(updated).catch(() => {});
+        } else {
+          cancelDueReminders().catch(() => {});
+        }
       }
     } catch (err) {
       toast.error('Error updating settings: ' + err.message);
@@ -145,11 +157,33 @@ export default function SettingsManager({ onSettingsUpdated }) {
   const handleBackup = async () => {
     setBusy(true);
     try {
-      const result = await exportBackupFile({ offerShare: true });
-      toast.success(`Backup saved: ${result.filename}. On phone, use share sheet to save to Drive/Files.`);
+      const result = await exportBackupFile({ offerShare: false });
+      toast.success(`Backup saved on this phone: ${result.filename}`);
       await refreshSnapshots();
     } catch (err) {
-      if (err?.name !== 'AbortError') toast.error('Backup failed: ' + err.message);
+      toast.error('Backup failed: ' + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleShareBackup = async () => {
+    setBusy(true);
+    try {
+      const result = await exportBackupFile({ offerShare: true });
+      toast.success(
+        result.result === 'shared'
+          ? 'Share sheet opened — save to Drive, WhatsApp, or Files.'
+          : `Backup file ready: ${result.filename}`
+      );
+      await refreshSnapshots();
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        toast.info('Share cancelled. The backup is still saved in Saved versions.');
+        await refreshSnapshots();
+      } else {
+        toast.error('Share failed: ' + err.message);
+      }
     } finally {
       setBusy(false);
     }
@@ -159,10 +193,11 @@ export default function SettingsManager({ onSettingsUpdated }) {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      const payload = JSON.parse(text);
-      setPendingRestore({ kind: 'file', payload, label: file.name });
+      const text = await readPickedFileText(file);
+      const payload = parseBackupPayload(text);
+      setPendingRestore({ kind: 'file', payload, label: file.name || 'backup.json' });
       setRestoreConfirm('');
+      toast.success('Backup file loaded. Type CONFIRM below to restore.');
     } catch (err) {
       toast.error('Invalid backup file: ' + err.message);
     } finally {
@@ -189,11 +224,12 @@ export default function SettingsManager({ onSettingsUpdated }) {
       } else {
         await restoreFromPayload(pendingRestore.payload);
       }
-      toast.success('Backup restored. A pre-restore snapshot was kept.');
+      toast.success('Backup restored. Reloading…');
       setPendingRestore(null);
       setRestoreConfirm('');
       await refreshSnapshots();
       if (onSettingsUpdated) onSettingsUpdated();
+      setTimeout(() => window.location.reload(), 400);
     } catch (err) {
       toast.error('Restore failed: ' + err.message);
     } finally {
@@ -323,6 +359,40 @@ export default function SettingsManager({ onSettingsUpdated }) {
           </label>
         </div>
 
+        <div className="surface-block" style={{ marginTop: '0.75rem', padding: '0.9rem 1rem' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', fontSize: '0.9rem', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              style={{ marginTop: 3 }}
+              checked={Boolean(Number(settings.due_reminders))}
+              onChange={async (e) => {
+                const on = e.target.checked;
+                handleChange('due_reminders', on ? 1 : 0);
+                if (on) {
+                  const perm = await requestDueReminderPermission();
+                  if (!perm.granted && perm.reason !== 'web') {
+                    toast.info('Allow notifications when Android asks, then save settings.');
+                  } else if (perm.reason === 'web') {
+                    toast.info('Due reminders work on the phone APK (Android notifications).');
+                  } else {
+                    toast.success('Due reminders will alert you about overdue bills.');
+                  }
+                } else {
+                  cancelDueReminders().catch(() => {});
+                }
+              }}
+            />
+            <span>
+              <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Bell size={16} /> Due-date notifications
+              </strong>
+              <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                Off by default. When on, the phone can remind you of overdue / due-today bills (daily at 10:00).
+              </span>
+            </span>
+          </label>
+        </div>
+
         <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginTop: '0.75rem', fontSize: '0.9rem', cursor: 'pointer' }}>
           <input
             type="checkbox"
@@ -375,19 +445,28 @@ export default function SettingsManager({ onSettingsUpdated }) {
           <Download size={18} /> Backup & Restore
         </h3>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.65rem' }}>
-          Downloads keep a versioned local snapshot (last {MAX_VERSIONS}). On Android, the share sheet can save to Google Drive or Files — no API keys needed.
+          <b>Backup</b> saves a copy on this phone. <b>Share</b> opens the Android share sheet so you can save to Drive, Files, or WhatsApp. Last {MAX_VERSIONS} versions stay here.
         </p>
         <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
           Last weekly auto-backup: {lastAuto ? new Date(lastAuto).toLocaleString() : 'never'} (runs on app open if older than 7 days).
         </p>
         <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
           <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={busy} onClick={handleBackup}>
-            <Share2 size={16} /> Backup / Share
+            <Download size={16} /> Backup
+          </button>
+          <button type="button" className="btn-secondary" style={{ width: 'auto' }} disabled={busy} onClick={handleShareBackup}>
+            <Share2 size={16} /> Share backup
           </button>
           <button type="button" className="btn-secondary" style={{ width: 'auto' }} disabled={busy} onClick={() => fileRef.current?.click()}>
             <Upload size={16} /> Restore from file
           </button>
-          <input ref={fileRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={startFileRestore} />
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json,.json,text/plain,*/*"
+            style={{ display: 'none' }}
+            onChange={startFileRestore}
+          />
         </div>
 
         <h4 style={{ fontSize: '0.9rem', fontWeight: 800, marginBottom: '0.55rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
@@ -403,9 +482,26 @@ export default function SettingsManager({ onSettingsUpdated }) {
                   <div style={{ fontWeight: 700 }}>{s.filename}</div>
                   <div style={{ color: 'var(--text-muted)' }}>{s.reason} · {new Date(s.created_at).toLocaleString()}</div>
                 </div>
-                <button type="button" className="btn-secondary" style={{ width: 'auto', fontSize: '0.75rem' }} onClick={() => startVersionRestore(s.id)}>
-                  Restore
-                </button>
+                <div style={{ display: 'flex', gap: '0.35rem' }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ width: 'auto', fontSize: '0.75rem' }}
+                    disabled={busy}
+                    onClick={async () => {
+                      try {
+                        await shareLocalSnapshot(s.id);
+                      } catch (err) {
+                        if (err?.name !== 'AbortError') toast.error(err.message);
+                      }
+                    }}
+                  >
+                    Share
+                  </button>
+                  <button type="button" className="btn-secondary" style={{ width: 'auto', fontSize: '0.75rem' }} onClick={() => startVersionRestore(s.id)}>
+                    Restore
+                  </button>
+                </div>
               </div>
             ))}
           </div>

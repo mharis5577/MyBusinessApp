@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import db, { dbAll, dbGet, dbRun } from './db.js';
-import { pakistanToday } from './pakistan.js';
+import { pakistanToday, pakistanYearMonth } from './pakistan.js';
 
 const app = express();
 const PORT = process.env.PORT || 11000;
@@ -9,18 +9,62 @@ const PORT = process.env.PORT || 11000;
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
 
+function isCancelled(bill) {
+  return bill?.status === 'cancelled';
+}
+
+function remainingQty(item) {
+  return Math.max(0, (Number(item?.quantity) || 0) - (Number(item?.returned_qty) || 0));
+}
+
+function recalcBillTotals(bill, items) {
+  const subtotal = Math.round(
+    (items || []).reduce((s, it) => s + remainingQty(it) * (Number(it.unit_price) || 0), 0) * 100
+  ) / 100;
+  const discountRate = Number(bill?.discount_rate) || 0;
+  const discount_amount = Math.round(((subtotal * discountRate) / 100) * 100) / 100;
+  const after = Math.max(0, subtotal - discount_amount);
+  const taxRate = Number(bill?.tax_rate) || 0;
+  const tax_amount = Math.round(((after * taxRate) / 100) * 100) / 100;
+  const total_amount = Math.round((after + tax_amount) * 100) / 100;
+  return { subtotal, discount_amount, tax_amount, total_amount };
+}
+
 function enrichBill(bill) {
   if (!bill) return bill;
   const paid = Number(bill.amount_paid) || 0;
   const total = Number(bill.total_amount) || 0;
   bill.amount_paid = paid;
-  bill.balance_due = Math.max(0, Math.round((total - paid) * 100) / 100);
+  bill.balance_due = isCancelled(bill) ? 0 : Math.max(0, Math.round((total - paid) * 100) / 100);
+  return bill;
+}
+
+async function restoreStockForQtys(bill, items, qtyByItemId, reason) {
+  const bType = bill.bill_type === 'supplier' ? 'supplier' : 'customer';
+  for (const it of items) {
+    const qty = Number(qtyByItemId.get(Number(it.id)) || 0);
+    if (!qty || !it.product_id) continue;
+    const delta = bType === 'supplier' ? -qty : qty;
+    await dbRun('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?', [delta, it.product_id]);
+    await dbRun(
+      'INSERT INTO stock_adjustments (product_id, delta, reason, notes) VALUES (?, ?, ?, ?)',
+      [it.product_id, delta, reason, `${bill.invoice_number} · ${it.description}`]
+    );
+  }
+}
+
+async function loadFullBill(billId) {
+  const bill = enrichBill(await dbGet('SELECT * FROM bills WHERE id = ?', [billId]));
+  if (!bill) return null;
+  bill.items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [billId]);
+  bill.payments = await dbAll('SELECT * FROM bill_payments WHERE bill_id = ? ORDER BY id DESC', [billId]);
   return bill;
 }
 
 async function refreshBillPaidStatus(billId) {
   const bill = await dbGet('SELECT * FROM bills WHERE id = ?', [billId]);
   if (!bill) return null;
+  if (isCancelled(bill)) return loadFullBill(billId);
   const sumRow = await dbGet(
     'SELECT COALESCE(SUM(amount), 0) as paid FROM bill_payments WHERE bill_id = ?',
     [billId]
@@ -31,7 +75,7 @@ async function refreshBillPaidStatus(billId) {
   if (paid >= total && total > 0) status = 'paid';
   else if (paid > 0 && status === 'paid') status = 'pending';
   await dbRun('UPDATE bills SET amount_paid = ?, status = ? WHERE id = ?', [paid, status, billId]);
-  return enrichBill(await dbGet('SELECT * FROM bills WHERE id = ?', [billId]));
+  return loadFullBill(billId);
 }
 
 // Logger middleware
@@ -91,6 +135,7 @@ app.put('/api/settings', async (req, res) => {
       urdu_labels,
       low_stock_threshold,
       biometric_lock,
+      due_reminders,
     } = req.body;
 
     await dbRun(
@@ -112,6 +157,7 @@ app.put('/api/settings', async (req, res) => {
         urdu_labels = ?,
         low_stock_threshold = ?,
         biometric_lock = ?,
+        due_reminders = ?,
         updated_at = CURRENT_TIMESTAMP
        WHERE id = (SELECT id FROM settings LIMIT 1)`,
       [
@@ -132,6 +178,7 @@ app.put('/api/settings', async (req, res) => {
         urdu_labels ? 1 : 0,
         low_stock_threshold ?? 5,
         biometric_lock ? 1 : 0,
+        due_reminders ? 1 : 0,
       ]
     );
 
@@ -515,12 +562,12 @@ app.get('/api/products', async (req, res) => {
 
 app.post('/api/products', async (req, res) => {
   try {
-    const { name, description, price, unit, stock, sku } = req.body;
+    const { name, description, price, cost_price, unit, stock, sku } = req.body;
     if (!name) return res.status(400).json({ error: 'Product name is required' });
 
     const result = await dbRun(
-      'INSERT INTO products (name, description, price, unit, stock, sku) VALUES (?, ?, ?, ?, ?, ?)',
-      [name, description || '', price || 0, unit || 'item', stock ?? 100, sku || '']
+      'INSERT INTO products (name, description, price, cost_price, unit, stock, sku) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [name, description || '', price || 0, cost_price || 0, unit || 'item', stock ?? 100, sku || '']
     );
 
     const product = await dbGet('SELECT * FROM products WHERE id = ?', [result.lastID]);
@@ -532,16 +579,17 @@ app.post('/api/products', async (req, res) => {
 
 app.put('/api/products/:id', async (req, res) => {
   try {
-    const { name, description, price, unit, stock, sku } = req.body;
+    const { name, description, price, cost_price, unit, stock, sku } = req.body;
     const existing = await dbGet('SELECT * FROM products WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Product not found' });
 
     await dbRun(
-      `UPDATE products SET name = ?, description = ?, price = ?, unit = ?, stock = ?, sku = ? WHERE id = ?`,
+      `UPDATE products SET name = ?, description = ?, price = ?, cost_price = ?, unit = ?, stock = ?, sku = ? WHERE id = ?`,
       [
         name ?? existing.name,
         description ?? existing.description,
         price ?? existing.price,
+        cost_price ?? existing.cost_price ?? 0,
         unit ?? existing.unit,
         stock ?? existing.stock,
         sku ?? existing.sku,
@@ -918,6 +966,7 @@ app.put('/api/bills/:id', async (req, res) => {
 
     const existingBill = await dbGet('SELECT * FROM bills WHERE id = ?', [id]);
     if (!existingBill) return res.status(404).json({ error: 'Bill not found' });
+    if (isCancelled(existingBill)) return res.status(400).json({ error: 'Cancelled bills cannot be edited' });
 
     await dbRun(
       `UPDATE bills SET
@@ -985,6 +1034,7 @@ app.put('/api/bills/:id/status', async (req, res) => {
 
     const bill = await dbGet('SELECT * FROM bills WHERE id = ?', [req.params.id]);
     if (!bill) return res.status(404).json({ error: 'Bill not found' });
+    if (isCancelled(bill)) return res.status(400).json({ error: 'Cancelled bills cannot change status' });
 
     if (status === 'paid') {
       const total = Number(bill.total_amount) || 0;
@@ -1021,18 +1071,106 @@ app.post('/api/bills/:id/payments', async (req, res) => {
     }
     const bill = await dbGet('SELECT * FROM bills WHERE id = ?', [req.params.id]);
     if (!bill) return res.status(404).json({ error: 'Bill not found' });
+    if (isCancelled(bill)) return res.status(400).json({ error: 'Cannot take payment on a cancelled bill' });
 
     await dbRun(
       'INSERT INTO bill_payments (bill_id, amount, method, payment_date, notes, screenshot_data) VALUES (?, ?, ?, ?, ?, ?)',
       [bill.id, amount, method, payment_date, notes, req.body.screenshot_data || '']
     );
     const updated = await refreshBillPaidStatus(bill.id);
-    updated.items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [bill.id]);
-    updated.payments = await dbAll(
-      'SELECT * FROM bill_payments WHERE bill_id = ? ORDER BY id DESC',
-      [bill.id]
-    );
     res.status(201).json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/bills/:id/cancel', async (req, res) => {
+  try {
+    const bill = await dbGet('SELECT * FROM bills WHERE id = ?', [req.params.id]);
+    if (!bill) return res.status(404).json({ error: 'Bill not found' });
+    if (isCancelled(bill)) return res.status(400).json({ error: 'Bill is already cancelled' });
+    const items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [bill.id]);
+    const qtyByItemId = new Map(items.map((it) => [Number(it.id), remainingQty(it)]));
+    await restoreStockForQtys(bill, items, qtyByItemId, 'bill cancel');
+    const reason = String(req.body.reason || '').trim();
+    const noteLine = `Cancelled ${pakistanToday()}${reason ? `: ${reason}` : ''}`;
+    const notes = [bill.notes, noteLine].filter(Boolean).join('\n');
+    await dbRun(
+      `UPDATE bills SET status = 'cancelled', cancelled_at = ?, cancel_reason = ?, notes = ? WHERE id = ?`,
+      [new Date().toISOString(), reason, notes, bill.id]
+    );
+    res.json(await loadFullBill(bill.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/bills/:id/return', async (req, res) => {
+  try {
+    const bill = await dbGet('SELECT * FROM bills WHERE id = ?', [req.params.id]);
+    if (!bill) return res.status(404).json({ error: 'Bill not found' });
+    if (isCancelled(bill)) return res.status(400).json({ error: 'Cancelled bills cannot be returned' });
+    const items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [bill.id]);
+    const requested = Array.isArray(req.body.items) ? req.body.items : [];
+    const qtyByItemId = new Map();
+    for (const row of requested) {
+      const item = items.find((it) => Number(it.id) === Number(row.id));
+      if (!item) return res.status(400).json({ error: 'Return line does not belong to this bill' });
+      const qty = Math.floor(Number(row.quantity) || 0);
+      if (qty <= 0) continue;
+      const left = remainingQty(item);
+      if (qty > left) {
+        return res.status(400).json({ error: `Cannot return ${qty} of ${item.description} (${left} left)` });
+      }
+      qtyByItemId.set(Number(item.id), qty);
+    }
+    if (!qtyByItemId.size) return res.status(400).json({ error: 'Enter at least one quantity to return' });
+
+    await restoreStockForQtys(bill, items, qtyByItemId, 'bill return');
+    for (const it of items) {
+      const extra = qtyByItemId.get(Number(it.id)) || 0;
+      if (!extra) continue;
+      const returned_qty = (Number(it.returned_qty) || 0) + extra;
+      const lineTotal = Math.round((Number(it.quantity) - returned_qty) * (Number(it.unit_price) || 0) * 100) / 100;
+      await dbRun('UPDATE bill_items SET returned_qty = ?, total = ? WHERE id = ?', [returned_qty, lineTotal, it.id]);
+    }
+
+    const freshItems = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [bill.id]);
+    const totals = recalcBillTotals(bill, freshItems);
+    const reason = String(req.body.reason || '').trim();
+    const summary = [...qtyByItemId.entries()]
+      .map(([itemId, qty]) => {
+        const it = items.find((row) => Number(row.id) === Number(itemId));
+        return `${qty}× ${it?.description || itemId}`;
+      })
+      .join(', ');
+    const noteLine = `Return ${pakistanToday()}: ${summary}${reason ? ` (${reason})` : ''}`;
+    const notes = [bill.notes, noteLine].filter(Boolean).join('\n');
+    const fullyReturned = freshItems.length > 0 && freshItems.every((it) => remainingQty(it) <= 0);
+
+    if (fullyReturned) {
+      await dbRun(
+        `UPDATE bills SET subtotal = ?, discount_amount = ?, tax_amount = ?, total_amount = ?,
+          status = 'cancelled', cancelled_at = ?, cancel_reason = ?, notes = ? WHERE id = ?`,
+        [
+          totals.subtotal,
+          totals.discount_amount,
+          totals.tax_amount,
+          totals.total_amount,
+          new Date().toISOString(),
+          reason || 'All items returned',
+          notes,
+          bill.id,
+        ]
+      );
+      return res.json(await loadFullBill(bill.id));
+    }
+
+    await dbRun(
+      `UPDATE bills SET subtotal = ?, discount_amount = ?, tax_amount = ?, total_amount = ?, notes = ? WHERE id = ?`,
+      [totals.subtotal, totals.discount_amount, totals.tax_amount, totals.total_amount, notes, bill.id]
+    );
+    res.json(await refreshBillPaidStatus(bill.id));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1081,9 +1219,40 @@ app.get('/api/stats', async (req, res) => {
     const settings = await dbGet('SELECT low_stock_threshold FROM settings LIMIT 1');
     const threshold = Number(settings?.low_stock_threshold) || 5;
     const lowStock = await dbAll(
-      'SELECT id, name, sku, stock, price, unit FROM products WHERE stock <= ? ORDER BY stock ASC, name ASC LIMIT 20',
+      'SELECT id, name, sku, stock, price, cost_price, unit FROM products WHERE stock <= ? ORDER BY stock ASC, name ASC LIMIT 20',
       [threshold]
     );
+
+    const today = pakistanToday();
+    const monthPrefix = pakistanYearMonth(today);
+    const sumSaleCost = async (list) => {
+      let sales = 0;
+      let cost = 0;
+      for (const b of list) {
+        sales += Number(b.total_amount) || 0;
+        const items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [b.id]);
+        for (const it of items) {
+          if (!it.product_id) continue;
+          const prod = await dbGet('SELECT cost_price FROM products WHERE id = ?', [it.product_id]);
+          cost += (Number(prod?.cost_price) || 0) * remainingQty(it);
+        }
+      }
+      return {
+        sales: Math.round(sales * 100) / 100,
+        cost: Math.round(cost * 100) / 100,
+        profit: Math.round((sales - cost) * 100) / 100,
+      };
+    };
+    const todaySales = await dbAll(
+      "SELECT * FROM bills WHERE bill_type != 'supplier' AND status != 'cancelled' AND bill_date = ?",
+      [today]
+    );
+    const monthSales = await dbAll(
+      "SELECT * FROM bills WHERE bill_type != 'supplier' AND status != 'cancelled' AND bill_date LIKE ?",
+      [`${monthPrefix}%`]
+    );
+    const todayTotals = await sumSaleCost(todaySales);
+    const monthTotals = await sumSaleCost(monthSales);
 
     res.json({
       total_revenue: totalRevenueRow.total || 0,
@@ -1096,6 +1265,12 @@ app.get('/api/stats', async (req, res) => {
       recent_bills: recentBills,
       low_stock: lowStock,
       low_stock_threshold: threshold,
+      sales_today: todayTotals.sales,
+      cost_today: todayTotals.cost,
+      profit_today: todayTotals.profit,
+      sales_month: monthTotals.sales,
+      cost_month: monthTotals.cost,
+      profit_month: monthTotals.profit,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1115,14 +1290,15 @@ app.get('/api/ledger', async (req, res) => {
       [name]
     );
     bills.forEach(enrichBill);
+    const active = bills.filter((b) => !isCancelled(b));
 
     const advances = await dbAll(
       `SELECT * FROM advance_payments WHERE LOWER(TRIM(client_name)) = LOWER(?) ORDER BY payment_date DESC, id DESC`,
       [name]
     );
 
-    const totalBilled = bills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
-    const totalPaid = bills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
+    const totalBilled = active.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const totalPaid = active.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
     const totalAdvance = advances.reduce((s, b) => s + (Number(b.amount) || 0), 0);
     const availableAdvance = advances.reduce((s, b) => {
       const rem = b.remaining == null ? Number(b.amount) || 0 : Number(b.remaining) || 0;
@@ -1163,7 +1339,7 @@ app.get('/api/reports/monthly', async (req, res) => {
     const prefix = `${year}-${mm}`;
 
     const bills = await dbAll(
-      `SELECT * FROM bills WHERE bill_date LIKE ? ORDER BY bill_date ASC, id ASC`,
+      `SELECT * FROM bills WHERE bill_date LIKE ? AND status != 'cancelled' ORDER BY bill_date ASC, id ASC`,
       [`${prefix}%`]
     );
     bills.forEach(enrichBill);
@@ -1262,8 +1438,8 @@ app.post('/api/restore', async (req, res) => {
       }
       for (const p of data.products || []) {
         await dbRun(
-          'INSERT INTO products (id, name, description, price, unit, stock, sku, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [p.id, p.name, p.description || '', p.price || 0, p.unit || 'item', p.stock ?? 0, p.sku || '', p.created_at || null]
+          'INSERT INTO products (id, name, description, price, cost_price, unit, stock, sku, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [p.id, p.name, p.description || '', p.price || 0, p.cost_price || 0, p.unit || 'item', p.stock ?? 0, p.sku || '', p.created_at || null]
         );
       }
       for (const b of data.bills || []) {
@@ -1272,8 +1448,9 @@ app.post('/api/restore', async (req, res) => {
             id, bill_type, invoice_number, customer_name, customer_email, customer_phone, customer_address,
             bill_date, due_date, subtotal, tax_rate, tax_amount, discount_rate, discount_amount,
             total_amount, amount_paid, status, notes, payment_method, bank_details,
-            payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes,
+            cancel_reason, cancelled_at, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             b.id, b.bill_type || 'customer', b.invoice_number, b.customer_name, b.customer_email || '',
             b.customer_phone || '', b.customer_address || '', b.bill_date, b.due_date,
@@ -1281,14 +1458,14 @@ app.post('/api/restore', async (req, res) => {
             b.total_amount || 0, b.amount_paid || 0, b.status || 'pending', b.notes || '',
             b.payment_method || '', b.bank_details || '',
             b.payee_bank_name || '', b.payee_account_title || '', b.payee_account_number || '',
-            b.payee_payment_notes || '', b.created_at || null,
+            b.payee_payment_notes || '', b.cancel_reason || '', b.cancelled_at || '', b.created_at || null,
           ]
         );
       }
       for (const i of data.bill_items || []) {
         await dbRun(
-          'INSERT INTO bill_items (id, bill_id, product_id, description, quantity, unit_price, total) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [i.id, i.bill_id, i.product_id || null, i.description, i.quantity || 1, i.unit_price || 0, i.total || 0]
+          'INSERT INTO bill_items (id, bill_id, product_id, description, quantity, unit_price, total, returned_qty) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [i.id, i.bill_id, i.product_id || null, i.description, i.quantity || 1, i.unit_price || 0, i.total || 0, i.returned_qty || 0]
         );
       }
       for (const p of data.bill_payments || []) {
@@ -1334,13 +1511,14 @@ app.post('/api/restore', async (req, res) => {
             company_name=?, company_email=?, company_phone=?, company_address=?, company_tax_id=?,
             logo_url=?, currency_symbol=?, default_tax_rate=?, bank_name=?, account_title=?,
             account_number=?, mobile_wallet=?, payment_instructions=?, app_pin=?, urdu_labels=?,
-            low_stock_threshold=?, biometric_lock=?
+            low_stock_threshold=?, biometric_lock=?, due_reminders=?
            WHERE id = (SELECT id FROM settings LIMIT 1)`,
           [
             s.company_name, s.company_email, s.company_phone, s.company_address, s.company_tax_id,
             s.logo_url || '', s.currency_symbol || 'Rs.', s.default_tax_rate || 0, s.bank_name || '',
             s.account_title || '', s.account_number || '', s.mobile_wallet || '', s.payment_instructions || '',
             s.app_pin || '', s.urdu_labels ? 1 : 0, s.low_stock_threshold ?? 5, s.biometric_lock ? 1 : 0,
+            s.due_reminders ? 1 : 0,
           ]
         );
       }
@@ -1367,6 +1545,7 @@ app.get('/api/reports/aging', async (req, res) => {
       `SELECT * FROM bills
        WHERE COALESCE(bill_type, 'customer') != 'supplier'
          AND status != 'paid'
+         AND status != 'cancelled'
        ORDER BY due_date ASC, id ASC`
     );
 
@@ -1532,11 +1711,11 @@ app.get('/api/cashflow', async (req, res) => {
   try {
     const salesRow = await dbGet(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
-       WHERE COALESCE(bill_type, 'customer') != 'supplier'`
+       WHERE COALESCE(bill_type, 'customer') != 'supplier' AND status != 'cancelled'`
     );
     const buyingRow = await dbGet(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
-       WHERE bill_type = 'supplier'`
+       WHERE bill_type = 'supplier' AND status != 'cancelled'`
     );
     const paidSalesRow = await dbGet(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
@@ -1556,7 +1735,7 @@ app.get('/api/cashflow', async (req, res) => {
 
     const money_flow = recentBills.map((b) => {
       const isSupplier = b.bill_type === 'supplier';
-      const amount = Number(b.total_amount) || 0;
+      const amount = isCancelled(b) ? 0 : Number(b.total_amount) || 0;
       return {
         id: b.id,
         date: b.bill_date,

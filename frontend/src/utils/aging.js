@@ -41,7 +41,7 @@ export function buildAgingReport(bills, today = pakistanToday()) {
   const rows = (bills || [])
     .filter((b) => (b.bill_type || 'customer') !== 'supplier')
     .map((b) => enrichAgingBill(b, today))
-    .filter((b) => (Number(b.balance_due) || 0) > 0 && b.status !== 'paid')
+    .filter((b) => (Number(b.balance_due) || 0) > 0 && b.status !== 'paid' && b.status !== 'cancelled')
     .sort((a, b) => b.days_overdue - a.days_overdue || String(a.due_date).localeCompare(String(b.due_date)));
 
   const buckets = { current: [], d30: [], d60: [], d90: [] };

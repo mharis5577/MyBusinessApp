@@ -4,9 +4,36 @@
  */
 import { openDB } from 'idb';
 import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { apiFetch } from '../api/client';
 import { downloadBlob, saveOrShareBlob } from './downloadFile';
+
+export function parseBackupPayload(raw) {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw.payload && typeof raw.payload === 'object' ? raw.payload : raw;
+  }
+  if (typeof raw !== 'string') throw new Error('Invalid backup file');
+  const cleaned = raw.replace(/^\uFEFF/, '').trim();
+  let data;
+  try {
+    data = JSON.parse(cleaned);
+  } catch {
+    throw new Error('This file is not valid JSON. Pick the .json backup file.');
+  }
+  const payload = data?.payload && typeof data.payload === 'object' ? data.payload : data;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('This file is not an Elite Chocolate backup');
+  }
+  const hasShopData =
+    Array.isArray(payload.bills) ||
+    Array.isArray(payload.customers) ||
+    Array.isArray(payload.products) ||
+    Array.isArray(payload.settings);
+  if (!hasShopData) {
+    throw new Error('This file is not an Elite Chocolate shop backup');
+  }
+  return payload;
+}
 
 const BACKUP_DB = 'elite-chocolate-backup-versions';
 const BACKUP_DB_VERSION = 1;
@@ -61,8 +88,9 @@ async function writeNativeFile(filename, jsonText) {
     const path = `backups/${filename}`;
     await Filesystem.writeFile({
       path,
-      data: btoa(unescape(encodeURIComponent(jsonText))),
+      data: jsonText,
       directory: Directory.Data,
+      encoding: Encoding.UTF8,
       recursive: true,
     });
     return path;
@@ -91,14 +119,19 @@ export async function saveLocalSnapshot(reason = 'manual') {
   const nativePath = await writeNativeFile(filename, jsonText);
 
   const db = await getBackupDb();
-  const id = await db.add('snapshots', {
-    filename,
-    reason,
-    created_at: new Date().toISOString(),
-    native_path: nativePath || '',
-    payload,
-  });
-  await pruneOld(db);
+  let id = null;
+  try {
+    id = await db.add('snapshots', {
+      filename,
+      reason,
+      created_at: new Date().toISOString(),
+      native_path: nativePath || '',
+      payload,
+    });
+    await pruneOld(db);
+  } catch (err) {
+    console.warn('Could not keep in-app snapshot (storage full?)', err);
+  }
 
   return { id, filename, reason, nativePath, payload };
 }
@@ -133,22 +166,25 @@ export async function exportBackupFile({ offerShare = true } = {}) {
   const filename = stampFilename('elite-chocolate-backup');
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
 
-  // Always keep a local versioned copy
-  const db = await getBackupDb();
-  await db.add('snapshots', {
-    filename,
-    reason: 'manual',
-    created_at: new Date().toISOString(),
-    native_path: '',
-    payload,
-  });
-  await pruneOld(db);
+  // Always keep a local versioned copy (do not fail the export if this is full)
+  try {
+    const db = await getBackupDb();
+    await db.add('snapshots', {
+      filename,
+      reason: 'manual',
+      created_at: new Date().toISOString(),
+      native_path: '',
+      payload,
+    });
+    await pruneOld(db);
+  } catch (err) {
+    console.warn('In-app snapshot skipped', err);
+  }
   await writeNativeFile(filename, JSON.stringify(payload, null, 2));
 
   if (offerShare) {
     const result = await saveOrShareBlob(blob, filename, 'application/json', {
       title: 'Shop backup',
-      text: 'Save to Drive or Files via the share sheet.',
     });
     return { filename, result, payload };
   }
@@ -159,7 +195,8 @@ export async function exportBackupFile({ offerShare = true } = {}) {
 
 /** Restore API payload after optional pre-restore snapshot. */
 export async function restoreFromPayload(payload, { skipPreSnapshot = false } = {}) {
-  if (!payload || typeof payload !== 'object') {
+  const data = parseBackupPayload(payload);
+  if (!data || typeof data !== 'object') {
     throw new Error('Invalid backup payload');
   }
   if (!skipPreSnapshot) {
@@ -172,17 +209,25 @@ export async function restoreFromPayload(payload, { skipPreSnapshot = false } = 
   const res = await apiFetch('/api/restore', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(data),
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
+  const result = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
+  return result;
 }
 
 export async function restoreFromLocalVersion(id) {
   const snap = await getLocalSnapshot(id);
   if (!snap?.payload) throw new Error('Saved version not found');
   return restoreFromPayload(snap.payload);
+}
+
+export async function shareLocalSnapshot(id) {
+  const snap = await getLocalSnapshot(id);
+  if (!snap?.payload) throw new Error('Saved version not found');
+  const filename = snap.filename || stampFilename('elite-chocolate-backup');
+  const blob = new Blob([JSON.stringify(snap.payload, null, 2)], { type: 'application/json' });
+  return saveOrShareBlob(blob, filename, 'application/json', { title: 'Shop backup' });
 }
 
 export function getLastAutoBackupAt() {
@@ -217,7 +262,6 @@ export async function maybeAutoBackup({ offerShare = false } = {}) {
       const blob = new Blob([JSON.stringify(snap.payload, null, 2)], { type: 'application/json' });
       await saveOrShareBlob(blob, filename, 'application/json', {
         title: 'Weekly shop backup',
-        text: 'Optional: save to Google Drive / Files via share sheet.',
       });
     } catch (err) {
       if (err?.name !== 'AbortError') console.warn('Auto-backup share skipped', err);

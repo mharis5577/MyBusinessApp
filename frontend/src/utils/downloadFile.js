@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 
 function isNative() {
@@ -21,6 +21,11 @@ async function blobToBase64(blob) {
   return btoa(binary);
 }
 
+function isTextMime(mimeType) {
+  const type = String(mimeType || '').toLowerCase();
+  return type.includes('json') || type.startsWith('text/') || type.includes('csv');
+}
+
 function anchorDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -33,42 +38,78 @@ function anchorDownload(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+export async function readPickedFileText(file) {
+  if (!file) throw new Error('No file selected');
+  if (typeof file.text === 'function') {
+    return file.text();
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Could not read that file'));
+    reader.readAsText(file);
+  });
+}
+
 /**
  * Save or share a Blob on web + Capacitor Android.
  * Returns: 'shared' | 'downloaded'
  */
-export async function saveOrShareBlob(blob, filename, mimeType, { title, text } = {}) {
+export async function saveOrShareBlob(blob, filename, mimeType, { title } = {}) {
   const type = mimeType || blob.type || 'application/octet-stream';
-  const file = blob instanceof File ? blob : new File([blob], filename, { type });
+  const safeName = String(filename || 'file').replace(/[^\w.\-]+/g, '_');
 
   if (isNative()) {
-    const base64 = await blobToBase64(blob);
-    const path = `exports/${Date.now()}_${filename}`;
-    const written = await Filesystem.writeFile({
+    const path = `share/${Date.now()}_${safeName}`;
+    const writeOpts = {
       path,
-      data: base64,
       directory: Directory.Cache,
       recursive: true,
+    };
+    if (isTextMime(type)) {
+      writeOpts.data = await blob.text();
+      writeOpts.encoding = Encoding.UTF8;
+    } else {
+      writeOpts.data = await blobToBase64(blob);
+    }
+    await Filesystem.writeFile(writeOpts);
+    const { uri } = await Filesystem.getUri({
+      path,
+      directory: Directory.Cache,
     });
-    const uri = written.uri;
+
     try {
+      // Android share often drops the file if `text` is also set — files only.
       await Share.share({
-        title: title || filename,
-        text: text || '',
+        title: title || safeName,
         files: [uri],
         dialogTitle: title || 'Save or share',
       });
       return 'shared';
     } catch (err) {
-      if (err?.message?.includes('cancel') || err?.message?.includes('abort')) {
+      const msg = String(err?.message || err || '');
+      if (/cancel|abort|dismiss/i.test(msg)) {
         throw Object.assign(new Error('Share cancelled'), { name: 'AbortError' });
       }
-      // Fall through to web share / download attempts
-      console.warn('Capacitor Share failed, trying fallbacks', err);
+      try {
+        await Share.share({
+          title: title || safeName,
+          url: uri,
+          dialogTitle: title || 'Save or share',
+        });
+        return 'shared';
+      } catch (err2) {
+        const msg2 = String(err2?.message || err2 || '');
+        if (/cancel|abort|dismiss/i.test(msg2)) {
+          throw Object.assign(new Error('Share cancelled'), { name: 'AbortError' });
+        }
+        console.warn('Capacitor Share failed, downloading instead', err2);
+      }
     }
   }
 
-  const sharePayload = { files: [file], title: title || filename, text: text || '' };
+  const file = blob instanceof File ? blob : new File([blob], safeName, { type });
+  const sharePayload = { files: [file], title: title || safeName };
   if (navigator.canShare && navigator.canShare(sharePayload)) {
     try {
       await navigator.share(sharePayload);
@@ -78,7 +119,7 @@ export async function saveOrShareBlob(blob, filename, mimeType, { title, text } 
     }
   }
 
-  anchorDownload(blob, filename);
+  anchorDownload(blob, safeName);
   return 'downloaded';
 }
 

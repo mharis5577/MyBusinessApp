@@ -11,6 +11,7 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
+  const [costPrice, setCostPrice] = useState('');
   const [unit, setUnit] = useState('item');
   const [stock, setStock] = useState('100');
   const [sku, setSku] = useState('');
@@ -58,6 +59,7 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
           name,
           description,
           price: parseFloat(price),
+          cost_price: parseFloat(costPrice) || 0,
           unit,
           stock: parseInt(stock, 10),
           sku: sku.trim(),
@@ -67,6 +69,7 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
         setName('');
         setDescription('');
         setPrice('');
+        setCostPrice('');
         setUnit('item');
         setStock('100');
         setSku('');
@@ -82,6 +85,25 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
     try {
       const res = await apiFetch(`/api/products/${id}`, { method: 'DELETE' });
       if (res.ok) apiFetchProducts();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const saveCost = async (product, value) => {
+    const cost_price = parseFloat(value);
+    if (Number.isNaN(cost_price) || cost_price < 0) return;
+    try {
+      const res = await apiFetch(`/api/products/${product.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...product, cost_price }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      apiFetchProducts();
     } catch (err) {
       toast.error(err.message);
     }
@@ -127,13 +149,17 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
           <div className="form-group">
-            <label className="form-label">Unit Price ({currencySymbol}) *</label>
+            <label className="form-label">Sell price ({currencySymbol}) *</label>
             <input className="form-input" type="number" step="0.01" placeholder="2450" value={price} onChange={(e) => setPrice(e.target.value)} required />
           </div>
           <div className="form-group">
-            <label className="form-label">Unit Type</label>
-            <input className="form-input" type="text" placeholder="box, item" value={unit} onChange={(e) => setUnit(e.target.value)} />
+            <label className="form-label">Cost price ({currencySymbol})</label>
+            <input className="form-input" type="number" step="0.01" placeholder="Saudia cost" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} />
           </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Unit Type</label>
+          <input className="form-input" type="text" placeholder="box, item" value={unit} onChange={(e) => setUnit(e.target.value)} />
         </div>
 
         <div className="form-group">
@@ -205,8 +231,21 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
                       {p.sku ? <span style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: '0.78rem' }}> · {p.sku}</span> : null}
                     </h4>
                     <div style={{ fontSize: '0.85rem', color: 'var(--accent-primary)', fontWeight: 800 }}>
-                      {formatCurrency(currencySymbol, p.price)}{' '}
+                      Sell {formatCurrency(currencySymbol, p.price)}{' '}
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 400 }}>/ {p.unit}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.35rem' }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Cost</span>
+                      <input
+                        className="form-input"
+                        type="number"
+                        step="0.01"
+                        defaultValue={p.cost_price || ''}
+                        key={`${p.id}-${p.cost_price || 0}`}
+                        onBlur={(e) => saveCost(p, e.target.value)}
+                        style={{ width: 110, minHeight: 34, padding: '0.25rem 0.45rem', fontSize: '0.8rem' }}
+                        placeholder="0"
+                      />
                     </div>
                     {p.description && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{p.description}</div>}
                     <div style={{ fontSize: '0.75rem', marginTop: '0.2rem', color: low ? 'var(--warning)' : 'var(--text-muted)', fontWeight: low ? 700 : 400 }}>

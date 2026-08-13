@@ -27,6 +27,7 @@ import MoreMenu from './components/MoreMenu';
 import { apiFetch } from './api/client';
 import { useToast } from './toast/ToastContext';
 import { maybeAutoBackup } from './utils/backupManager';
+import { dueRemindersEnabled, syncDueReminders } from './utils/dueReminders';
 import {
   authenticateBiometric,
   biometricEnabled,
@@ -60,6 +61,7 @@ export default function App() {
     urdu_labels: 0,
     app_pin: '',
     biometric_lock: 0,
+    due_reminders: 0,
   });
   const [theme, setTheme] = useState(getInitialTheme);
   const [unlocked, setUnlocked] = useState(() => {
@@ -105,6 +107,13 @@ export default function App() {
   useEffect(() => {
     checkBiometricAvailable().then((r) => setBioAvailable(Boolean(r.available)));
   }, []);
+
+  useEffect(() => {
+    if (!dueRemindersEnabled(settings)) return undefined;
+    if (lockRequired(settings) && !unlocked) return undefined;
+    syncDueReminders(settings).catch((err) => console.warn('Due reminders skipped', err));
+    return undefined;
+  }, [settings, unlocked]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -413,6 +422,7 @@ export default function App() {
             bill={selectedBill}
             onBack={() => setCurrentTab('database')}
             onDuplicate={handleDuplicateBill}
+            onBillUpdated={setSelectedBill}
             currencySymbol={settings.currency_symbol || 'Rs.'}
             urduLabels={Boolean(settings.urdu_labels)}
           />

@@ -8,3 +8,7 @@ export function pakistanToday() {
     day: '2-digit',
   }).format(new Date());
 }
+
+export function pakistanYearMonth(dateStr = pakistanToday()) {
+  return String(dateStr || '').slice(0, 7);
+}

@@ -13,6 +13,11 @@ export function pakistanToday() {
   }).format(new Date());
 }
 
+/** Pakistan calendar month as YYYY-MM */
+export function pakistanYearMonth(dateStr = pakistanToday()) {
+  return String(dateStr || '').slice(0, 7);
+}
+
 /** Add days to a YYYY-MM-DD date string (calendar days, not UTC shift) */
 export function addDaysToDateString(dateStr, days) {
   const [y, m, d] = String(dateStr).split('-').map(Number);

@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, Plus, Trash2, Mail, Phone, Tag, Check, PackagePlus, BookOpen, GitMerge } from 'lucide-react';
+import { Users, Plus, Trash2, Mail, Phone, Tag, Check, PackagePlus, BookOpen, GitMerge, MessageCircle, Bell } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { normalizePartyName } from '../utils/aging';
+import {
+  buildPaymentReminderText,
+  openWhatsAppReminder,
+  normalizeWhatsAppPhone,
+} from '../utils/paymentReminder';
 
 export default function CustomerManager({ currencySymbol = 'Rs.' }) {
   const toast = useToast();
@@ -13,6 +18,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
   const [customerRates, setCustomerRates] = useState([]);
   const [ledger, setLedger] = useState(null);
   const [partyFilter, setPartyFilter] = useState('all');
+  const [shopSettings, setShopSettings] = useState({});
 
   // Form State for new customer
   const [name, setName] = useState('');
@@ -88,7 +94,67 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
   useEffect(() => {
     apiFetchCustomers();
     apiFetchProducts();
+    apiFetch('/api/settings')
+      .then((res) => res.json())
+      .then((data) => setShopSettings(data || {}))
+      .catch(() => {});
   }, []);
+
+  const openCall = (c, e) => {
+    e.stopPropagation();
+    const digits = String(c.phone || '').replace(/[^\d+]/g, '');
+    if (!digits) {
+      toast.error('No phone number on this client');
+      return;
+    }
+    window.location.href = `tel:${digits}`;
+  };
+
+  const openWhatsApp = (c, e) => {
+    e.stopPropagation();
+    if (!normalizeWhatsAppPhone(c.phone)) {
+      toast.error('No phone number on this client');
+      return;
+    }
+    openWhatsAppReminder(c.phone, `Assalam o Alaikum ${c.name},`);
+  };
+
+  const remindUnpaid = async (c, e) => {
+    e.stopPropagation();
+    if (!normalizeWhatsAppPhone(c.phone)) {
+      toast.error('No phone number on this client');
+      return;
+    }
+    try {
+      const res = await apiFetch(`/api/ledger?name=${encodeURIComponent(c.name)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const unpaid = (data.bills || []).filter(
+        (b) =>
+          b.bill_type !== 'supplier' &&
+          b.status !== 'cancelled' &&
+          Number(b.balance_due ?? Math.max(0, (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0))) > 0
+      );
+      if (!unpaid.length) {
+        toast.info('No unpaid bills for this client');
+        return;
+      }
+      const bill = unpaid[0];
+      const text = buildPaymentReminderText({
+        bill: {
+          ...bill,
+          customer_phone: c.phone,
+          balance_due: Number(bill.balance_due ?? Math.max(0, (Number(bill.total_amount) || 0) - (Number(bill.amount_paid) || 0))),
+        },
+        settings: shopSettings,
+        currencySymbol,
+        urdu: Boolean(shopSettings.urdu_labels),
+      });
+      openWhatsAppReminder(c.phone, text);
+    } catch (err) {
+      toast.error(err.message || 'Could not load unpaid bills');
+    }
+  };
 
   const handleSelectCustomer = (c) => {
     setSelectedCustomer(c);
@@ -421,8 +487,23 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
                       )}
                     </div>
 
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                      <span className="badge" style={{ background: isSelected ? 'var(--accent-teal)' : 'var(--surface-muted)', color: isSelected ? '#ebeae1' : 'var(--text-secondary)' }}>
+                    <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      {c.phone && (
+                        <>
+                          <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.5rem' }} title="Call" onClick={(e) => openCall(c, e)}>
+                            <Phone size={14} />
+                          </button>
+                          <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.5rem', color: '#25D366' }} title="WhatsApp" onClick={(e) => openWhatsApp(c, e)}>
+                            <MessageCircle size={14} />
+                          </button>
+                          {pt === 'customer' && (
+                            <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.5rem' }} title="Remind unpaid" onClick={(e) => remindUnpaid(c, e)}>
+                              <Bell size={14} />
+                            </button>
+                          )}
+                        </>
+                      )}
+                      <span className="badge" style={{ background: isSelected ? 'var(--ink)' : 'var(--surface-muted)', color: isSelected ? '#f4f2eb' : 'var(--text-secondary)' }}>
                         {isSelected ? 'Selected' : 'Rates'}
                       </span>
                       <button

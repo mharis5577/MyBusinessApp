@@ -13,7 +13,10 @@ import {
   Smartphone,
   Bell,
   ImagePlus,
+  Undo2,
 } from 'lucide-react';
+import BillAdjustSheet from './BillAdjustSheet';
+import { isCancelled, remainingQty } from '../utils/billAdjust';
 import { formatCurrency } from '../utils/pakistan';
 import { paymentSummaryText } from '../utils/billPayments';
 import { apiFetch } from '../api/client';
@@ -41,7 +44,7 @@ function BiLabel({ en, ur, urdu, className, style }) {
   );
 }
 
-export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymbol = 'Rs.', urduLabels = false }) {
+export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdated, currencySymbol = 'Rs.', urduLabels = false }) {
   const toast = useToast();
   const [settings, setSettings] = useState({});
   const [posMode, setPosMode] = useState(false);
@@ -52,6 +55,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
   const [paying, setPaying] = useState(false);
   const [payScreenshot, setPayScreenshot] = useState('');
   const [previewShot, setPreviewShot] = useState(null);
+  const [adjustOpen, setAdjustOpen] = useState(false);
 
   useEffect(() => {
     setLiveBill(bill);
@@ -253,6 +257,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrPaymentText)}`;
   const busy = Boolean(sharing);
   const payments = liveBill.payments || [];
+  const cancelled = isCancelled(liveBill);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -269,7 +274,12 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
               <Copy size={16} /> Duplicate
             </button>
           )}
-          {balance > 0 && liveBill.bill_type !== 'supplier' && (
+          {!cancelled && (
+            <button className="btn-secondary" onClick={() => setAdjustOpen(true)} disabled={busy}>
+              <Undo2 size={16} /> Return / Cancel
+            </button>
+          )}
+          {balance > 0 && !cancelled && liveBill.bill_type !== 'supplier' && (
             <>
               <button className="btn-secondary" style={{ color: '#25D366' }} onClick={() => handleRemind('whatsapp')} disabled={busy}>
                 <Bell size={16} /> Remind WA
@@ -301,7 +311,17 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
         </div>
       </div>
 
-      {balance > 0 && (
+      {cancelled && (
+        <div className="no-print surface-block" style={{ padding: '0.85rem 1rem', borderLeft: '4px solid var(--text-secondary)' }}>
+          <strong>Cancelled</strong>
+          <span style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+            Kept in history. Stock was put back.
+            {liveBill.cancel_reason ? ` Reason: ${liveBill.cancel_reason}` : ''}
+          </span>
+        </div>
+      )}
+
+      {balance > 0 && !cancelled && (
         <form className="no-print glass-panel" style={{ padding: '1rem 1.25rem' }} onSubmit={handleQuickPay}>
           <h4 style={{ fontSize: '0.95rem', fontWeight: 800, marginBottom: '0.65rem' }}>Add payment</h4>
           <div className="payment-summary-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.5rem', marginBottom: '0.85rem' }}>
@@ -405,12 +425,19 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
             </div>
           </div>
           <div style={{ borderBottom: '1px dashed #000', borderTop: '1px dashed #000', padding: '0.5rem 0', margin: '0.5rem 0' }}>
-            {liveBill.items?.map((item, idx) => (
-              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem', gap: '0.5rem' }}>
-                <span style={{ flex: 1 }}>{item.quantity}x {item.description}</span>
-                <span>{formatCurrency(currencySymbol, item.total)}</span>
-              </div>
-            ))}
+            {cancelled && (
+              <p style={{ textAlign: 'center', fontWeight: 800, margin: '0 0 0.45rem' }}>CANCELLED</p>
+            )}
+            {liveBill.items?.map((item, idx) => {
+              const rem = remainingQty(item);
+              const ret = Number(item.returned_qty) || 0;
+              return (
+                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem', gap: '0.5rem' }}>
+                  <span style={{ flex: 1 }}>{rem}x {item.description}{ret ? ` (${ret} returned)` : ''}</span>
+                  <span>{formatCurrency(currencySymbol, rem * (Number(item.unit_price) || 0))}</span>
+                </div>
+              );
+            })}
           </div>
           <div style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '1rem', marginTop: '0.5rem' }}>
             <BiLabel en={isSupplier ? 'AMOUNT TO PAY' : 'TOTAL'} ur={isSupplier ? 'ادا کی جانے والی رقم' : 'کل'} urdu={urdu} />: {formatCurrency(currencySymbol, liveBill.total_amount)}
@@ -448,7 +475,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
         <div id="printable-invoice" className={`invoice-sheet ${urdu ? 'invoice-bilingual' : ''}`}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #e2e8f0', paddingBottom: '1.5rem', marginBottom: '1.5rem', gap: '1rem', flexWrap: 'wrap' }}>
             <div>
-              <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#0d4a4a', margin: 0 }}>{companyName}</h1>
+              <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#111111', margin: 0 }}>{companyName}</h1>
               {isSupplier && (
                 <p style={{ color: '#64748b', fontSize: '0.75rem', margin: '0.15rem 0 0', fontWeight: 700, textTransform: 'uppercase' }}>
                   <BiLabel en="From / Payer" ur="ادا کنندہ" urdu={urdu} />
@@ -466,8 +493,8 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
                   <BiLabel en="SALES INVOICE" ur="سیلز انوائس" urdu={urdu} />
                 )}
               </h2>
-              <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '1.1rem', color: '#0d4a4a', margin: '0.25rem 0' }}>#{liveBill.invoice_number}</div>
-              <span className={`badge badge-${liveBill.status}`}>{liveBill.status}</span>
+              <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '1.1rem', color: '#111111', margin: '0.25rem 0' }}>#{liveBill.invoice_number}</div>
+              <span className={`badge badge-${liveBill.status}`}>{cancelled ? 'cancelled' : liveBill.status}</span>
             </div>
           </div>
 
@@ -502,14 +529,21 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
               </tr>
             </thead>
             <tbody>
-              {liveBill.items?.map((item, idx) => (
-                <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
-                  <td style={{ padding: '0.85rem 1rem', color: '#0f172a', fontWeight: 600 }}>{item.description}</td>
-                  <td style={{ padding: '0.85rem 1rem', textAlign: 'center' }}>{item.quantity}</td>
-                  <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{Number(item.unit_price).toFixed(2)}</td>
-                  <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{Number(item.total).toFixed(2)}</td>
-                </tr>
-              ))}
+              {liveBill.items?.map((item, idx) => {
+                const rem = remainingQty(item);
+                const ret = Number(item.returned_qty) || 0;
+                return (
+                  <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
+                    <td style={{ padding: '0.85rem 1rem', color: '#0f172a', fontWeight: 600 }}>
+                      {item.description}
+                      {ret ? <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 500 }}>{ret} returned</div> : null}
+                    </td>
+                    <td style={{ padding: '0.85rem 1rem', textAlign: 'center' }}>{rem}</td>
+                    <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{Number(item.unit_price).toFixed(2)}</td>
+                    <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{(rem * (Number(item.unit_price) || 0)).toFixed(2)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 
@@ -533,7 +567,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.6rem 0 0', marginTop: '0.5rem', borderTop: '2px solid #0f172a', fontSize: '1.15rem', fontWeight: 900 }}>
                 <BiLabel en={isSupplier ? 'Amount to Pay' : 'Total'} ur={isSupplier ? 'ادا کی جانے والی رقم' : 'کل رقم'} urdu={urdu} />
-                <span style={{ color: '#0d4a4a', fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, liveBill.total_amount)}</span>
+                <span style={{ color: '#111111', fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, liveBill.total_amount)}</span>
               </div>
               {paid > 0 && (
                 <>
@@ -618,6 +652,17 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, currencySymb
           )}
         </div>
       )}
+
+      <BillAdjustSheet
+        bill={liveBill}
+        open={adjustOpen}
+        onClose={() => setAdjustOpen(false)}
+        onUpdated={(updated) => {
+          setLiveBill(updated);
+          onBillUpdated?.(updated);
+        }}
+        currencySymbol={currencySymbol}
+      />
 
       {previewShot && (
         <div

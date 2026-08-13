@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Eye, Trash2, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus } from 'lucide-react';
+import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2 } from 'lucide-react';
+import BillAdjustSheet from './BillAdjustSheet';
+import { isCancelled } from '../utils/billAdjust';
 import { pakistanToday, formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
@@ -49,6 +51,7 @@ export default function BillsDatabase({
   const [payScreenshot, setPayScreenshot] = useState('');
   const [payScreenshotName, setPayScreenshotName] = useState('');
   const [payHistory, setPayHistory] = useState([]);
+  const [adjustBill, setAdjustBill] = useState(null);
   const [settings, setSettings] = useState(settingsProp || {});
 
   useEffect(() => {
@@ -93,6 +96,10 @@ export default function BillsDatabase({
 
   // Open Edit Modal
   const handleOpenEditModal = (bill) => {
+    if (isCancelled(bill)) {
+      toast.info('Cancelled bills are kept for history and cannot be edited.');
+      return;
+    }
     setEditingBill(bill);
     setEditType(bill.bill_type || 'customer');
     setEditInvNum(bill.invoice_number);
@@ -182,22 +189,26 @@ export default function BillsDatabase({
     }
   };
 
-  // Delete Bill
-  const handleDeleteBill = async (id) => {
-    if (!window.confirm('Delete this bill permanently? This cannot be undone.')) {
-      return;
-    }
-    try {
-      const res = await apiFetch(`/api/bills/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        apiFetchBills();
+  const openAdjust = async (bill) => {
+    if (isCancelled(bill)) return;
+    let full = bill;
+    if (!bill.items?.length) {
+      try {
+        const res = await apiFetch(`/api/bills/${bill.id}`);
+        const data = await res.json();
+        if (res.ok && data?.id) full = data;
+      } catch (_) {
+        /* use list row */
       }
-    } catch (err) {
-      toast.error('Error deleting bill: ' + err.message);
     }
+    setAdjustBill(full);
   };
 
   const openPayModal = async (bill) => {
+    if (isCancelled(bill)) {
+      toast.info('Cancelled bills cannot take payment.');
+      return;
+    }
     setPayBill(bill);
     const due = Number(bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0)));
     setPayAmount(due > 0 ? String(due) : '');
@@ -390,7 +401,7 @@ export default function BillsDatabase({
 
         {/* Payment Status Pills */}
         <div className="filter-pills" style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
-          {['all', 'paid', 'pending', 'overdue'].map((st) => (
+          {['all', 'paid', 'pending', 'overdue', 'cancelled'].map((st) => (
             <button
               key={st}
               type="button"
@@ -452,26 +463,33 @@ export default function BillsDatabase({
                       {formatCurrency(currencySymbol, bill.total_amount)}
                     </td>
                     <td>
-                      <select
-                        className={`badge badge-${bill.status}`}
-                        style={{ cursor: 'pointer', border: 'none', appearance: 'none', paddingRight: '0.5rem' }}
-                        value={bill.status}
-                        onChange={(e) => handleUpdateStatus(bill.id, e.target.value)}
-                      >
-                        <option value="paid">PAID</option>
-                        <option value="pending">PENDING</option>
-                        <option value="overdue">OVERDUE</option>
-                      </select>
+                      {isCancelled(bill) ? (
+                        <span className="badge badge-cancelled">CANCELLED</span>
+                      ) : (
+                        <select
+                          className={`badge badge-${bill.status}`}
+                          style={{ cursor: 'pointer', border: 'none', appearance: 'none', paddingRight: '0.5rem' }}
+                          value={bill.status}
+                          onChange={(e) => handleUpdateStatus(bill.id, e.target.value)}
+                        >
+                          <option value="paid">PAID</option>
+                          <option value="pending">PENDING</option>
+                          <option value="overdue">OVERDUE</option>
+                        </select>
+                      )}
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <div style={{ display: 'flex', justifyContent: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
                         <button className="btn-secondary" style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto' }} onClick={() => onViewBill(bill)}>
                           <Eye size={14} /> View
                         </button>
-                        <button className="btn-secondary" style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto' }} onClick={() => openPayModal(bill)} title="Record payment">
-                          <Banknote size={14} /> Pay
-                        </button>
-                        {(Number(bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0))) > 0) &&
+                        {!isCancelled(bill) && (
+                          <button className="btn-secondary" style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto' }} onClick={() => openPayModal(bill)} title="Record payment">
+                            <Banknote size={14} /> Pay
+                          </button>
+                        )}
+                        {!isCancelled(bill) &&
+                          (Number(bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0))) > 0) &&
                           bill.bill_type !== 'supplier' && (
                           <>
                             <button
@@ -492,17 +510,21 @@ export default function BillsDatabase({
                             </button>
                           </>
                         )}
-                        <button className="btn-secondary" style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto' }} onClick={() => handleOpenEditModal(bill)}>
-                          <Edit3 size={14} /> Edit
-                        </button>
+                        {!isCancelled(bill) && (
+                          <button className="btn-secondary" style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto' }} onClick={() => handleOpenEditModal(bill)}>
+                            <Edit3 size={14} /> Edit
+                          </button>
+                        )}
                         {onDuplicateBill && (
                           <button className="btn-secondary" style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto' }} onClick={() => onDuplicateBill(bill)} title="Duplicate">
                             <Copy size={14} />
                           </button>
                         )}
-                        <button className="btn-danger" style={{ padding: '0.35rem 0.55rem', width: 'auto' }} onClick={() => handleDeleteBill(bill.id)}>
-                          <Trash2 size={14} />
-                        </button>
+                        {!isCancelled(bill) && (
+                          <button className="btn-secondary" style={{ padding: '0.35rem 0.55rem', width: 'auto' }} onClick={() => openAdjust(bill)} title="Return or cancel">
+                            <Undo2 size={14} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -526,24 +548,31 @@ export default function BillsDatabase({
                   </div>
                   <div className="mobile-card-amount">{formatCurrency(currencySymbol, bill.total_amount)}</div>
                 </div>
-                <select
-                  className={`badge badge-${bill.status}`}
-                  style={{ cursor: 'pointer', border: 'none', width: '100%', textAlign: 'left', padding: '0.55rem 0.75rem', fontSize: '0.8rem' }}
-                  value={bill.status}
-                  onChange={(e) => handleUpdateStatus(bill.id, e.target.value)}
-                >
-                  <option value="paid">PAID</option>
-                  <option value="pending">PENDING</option>
-                  <option value="overdue">OVERDUE</option>
-                </select>
+                {isCancelled(bill) ? (
+                  <span className="badge badge-cancelled" style={{ width: '100%', textAlign: 'left', padding: '0.55rem 0.75rem' }}>CANCELLED</span>
+                ) : (
+                  <select
+                    className={`badge badge-${bill.status}`}
+                    style={{ cursor: 'pointer', border: 'none', width: '100%', textAlign: 'left', padding: '0.55rem 0.75rem', fontSize: '0.8rem' }}
+                    value={bill.status}
+                    onChange={(e) => handleUpdateStatus(bill.id, e.target.value)}
+                  >
+                    <option value="paid">PAID</option>
+                    <option value="pending">PENDING</option>
+                    <option value="overdue">OVERDUE</option>
+                  </select>
+                )}
                 <div className="mobile-card-actions">
                   <button className="btn-secondary" onClick={() => onViewBill(bill)}>
                     <Eye size={14} /> View
                   </button>
-                  <button className="btn-secondary" onClick={() => openPayModal(bill)}>
-                    <Banknote size={14} /> Pay
-                  </button>
-                  {(Number(bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0))) > 0) &&
+                  {!isCancelled(bill) && (
+                    <button className="btn-secondary" onClick={() => openPayModal(bill)}>
+                      <Banknote size={14} /> Pay
+                    </button>
+                  )}
+                  {!isCancelled(bill) &&
+                    (Number(bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0))) > 0) &&
                     bill.bill_type !== 'supplier' && (
                     <>
                       <button
@@ -563,17 +592,21 @@ export default function BillsDatabase({
                       </button>
                     </>
                   )}
-                  <button className="btn-secondary" onClick={() => handleOpenEditModal(bill)}>
-                    <Edit3 size={14} /> Edit
-                  </button>
+                  {!isCancelled(bill) && (
+                    <button className="btn-secondary" onClick={() => handleOpenEditModal(bill)}>
+                      <Edit3 size={14} /> Edit
+                    </button>
+                  )}
                   {onDuplicateBill && (
                     <button className="btn-secondary" onClick={() => onDuplicateBill(bill)}>
                       <Copy size={14} />
                     </button>
                   )}
-                  <button className="btn-danger" onClick={() => handleDeleteBill(bill.id)}>
-                    <Trash2 size={14} />
-                  </button>
+                  {!isCancelled(bill) && (
+                    <button className="btn-secondary" onClick={() => openAdjust(bill)}>
+                      <Undo2 size={14} /> Return
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -817,6 +850,14 @@ export default function BillsDatabase({
           </form>
         </div>
       )}
+
+      <BillAdjustSheet
+        bill={adjustBill}
+        open={Boolean(adjustBill)}
+        onClose={() => setAdjustBill(null)}
+        onUpdated={() => apiFetchBills()}
+        currencySymbol={currencySymbol}
+      />
     </div>
   );
 }
