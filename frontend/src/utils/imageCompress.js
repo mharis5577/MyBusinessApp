@@ -36,3 +36,35 @@ export function compressImageToDataUrl(file, { maxWidth = 720, quality = 0.62 } 
     reader.readAsDataURL(file);
   });
 }
+
+/** Shrink an existing data URL (thumbs for payment proofs). */
+export function shrinkDataUrl(dataUrl, { maxWidth = 160, quality = 0.5 } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!dataUrl) {
+      resolve('');
+      return;
+    }
+    const img = new Image();
+    img.onerror = () => resolve(dataUrl);
+    img.onload = () => {
+      const scale = Math.min(1, maxWidth / Math.max(img.width, 1));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      try {
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      } catch {
+        resolve(dataUrl);
+      }
+    };
+    img.src = dataUrl;
+  });
+}

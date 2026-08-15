@@ -1,5 +1,3 @@
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
 import { resolveBillExportOptions, DEFAULT_BILL_SEND_PREFS } from './billSendPrefs';
 
 /**
@@ -222,6 +220,7 @@ function canvasToJpegBlob(canvas, quality = 0.88) {
 async function captureElement(element, options = {}) {
   const { onclone: userOnclone, scale, layoutWidth, maxWidth, ...rest } = options;
   const restoreWindow = patchComputedStyleColors(window);
+  const { default: html2canvas } = await import('html2canvas');
   try {
     return await html2canvas(element, {
       useCORS: true,
@@ -276,6 +275,7 @@ export async function elementToPdfBlob(element, { filename = 'Invoice.pdf', ...e
     throw new Error('Could not render invoice (empty canvas)');
   }
 
+  const { jsPDF } = await import('jspdf');
   const pdf = new jsPDF({
     unit: 'pt',
     format: 'a4',

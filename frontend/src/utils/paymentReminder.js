@@ -28,6 +28,7 @@ export function buildPaymentReminderText({
   );
   const company = settings.company_name || 'ELITE CHOCOLATE';
   const isSupplier = bill.bill_type === 'supplier';
+  const isHelp = bill.bill_type === 'help' || bill.bill_type === 'loan';
 
   if (isSupplier) {
     const en = [
@@ -69,6 +70,39 @@ export function buildPaymentReminderText({
       .join('\n');
 
     return ur;
+  }
+
+  if (isHelp) {
+    const remaining = formatCurrency(currencySymbol, balance);
+    const en = [
+      `Assalam o Alaikum ${bill.customer_name || 'Friend'},`,
+      '',
+      `Help / loan ${bill.invoice_number} from ${company}.`,
+      `Still to return: ${remaining}`,
+      bill.due_date ? `Return by: ${bill.due_date}` : null,
+      '',
+      `— ${company}`,
+    ]
+      .filter((line) => line !== null)
+      .join('\n');
+
+    if (!urdu) return en;
+
+    return [
+      `السلام علیکم ${bill.customer_name || ''}،`,
+      '',
+      `مدد / قرض ${bill.invoice_number} — ${company}`,
+      `واپسی باقی: ${remaining}`,
+      bill.due_date ? `واپسی کی تاریخ: ${bill.due_date}` : null,
+      '',
+      `— ${company}`,
+      '',
+      '---',
+      '',
+      en,
+    ]
+      .filter((line) => line !== null)
+      .join('\n');
   }
 
   const methods = getPaymentMethods(settings);

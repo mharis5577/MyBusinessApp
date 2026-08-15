@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Clock, MessageCircle, RefreshCw } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
+import { billTypeBadgeClass, billTypeShortLabel, isHelpBill } from '../utils/billTypes';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { buildPaymentReminderText, openWhatsAppReminder, normalizeWhatsAppPhone } from '../utils/paymentReminder';
@@ -245,6 +246,12 @@ export default function AgingReport({
               </div>
               <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                 <span className="invoice-mono">{r.invoice_number}</span>
+                {isHelpBill(r) ? (
+                  <>
+                    {' · '}
+                    <span className={`type-badge ${billTypeBadgeClass(r)}`}>{billTypeShortLabel(r)}</span>
+                  </>
+                ) : null}
                 {' · '}Due {r.due_date || '—'}
                 {' · '}
                 <span style={{ color: r.days_overdue >= 30 ? 'var(--danger)' : 'var(--warning)', fontWeight: 700 }}>

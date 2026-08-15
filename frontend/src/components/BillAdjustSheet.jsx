@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Undo2, Ban } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
@@ -23,6 +24,15 @@ export default function BillAdjustSheet({ bill, open, onClose, onUpdated, curren
     for (const it of bill.items || []) next[it.id] = '';
     setQtyMap(next);
   }, [open, bill]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
 
   if (!open || !bill || isCancelled(bill)) return null;
 
@@ -85,19 +95,19 @@ export default function BillAdjustSheet({ bill, open, onClose, onUpdated, curren
 
   return (
     <>
-      <div
-        className="modal-sheet"
-        style={{ position: 'fixed', inset: 0, background: 'rgba(7,41,41,0.55)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999, padding: '0.75rem' }}
-        onClick={onClose}
-      >
-        <div
-          className="glass-panel"
-          style={{ width: '100%', maxWidth: 520, maxHeight: '88vh', overflowY: 'auto', padding: '1.15rem 1.2rem 1.35rem' }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
-            <div>
-              <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>Return / Cancel</h3>
+      {createPortal(
+        <div className="modal-sheet modal-sheet--portal" onClick={onClose}>
+          <div
+            className="glass-panel"
+            style={{ width: '100%', maxWidth: 520, overflowY: 'auto', padding: '1.15rem 1.2rem 1.35rem' }}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bill-adjust-title"
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
+              <div>
+                <h3 id="bill-adjust-title" style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>Return / Cancel</h3>
               <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0' }}>
                 {bill.invoice_number} · {bill.customer_name}
               </p>
@@ -163,8 +173,10 @@ export default function BillAdjustSheet({ bill, open, onClose, onUpdated, curren
               </button>
             </form>
           )}
-        </div>
-      </div>
+          </div>
+        </div>,
+        document.body,
+      )}
 
       <ConfirmDialog
         open={cancelConfirm}

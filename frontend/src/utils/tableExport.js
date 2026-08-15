@@ -1,4 +1,3 @@
-import { jsPDF } from 'jspdf';
 import { downloadBlob } from './downloadFile';
 import { formatPkMoney } from './pakistan';
 
@@ -43,6 +42,7 @@ export async function downloadTablePdf({
   landscape = false,
   colWeights = null,
 }) {
+  const { jsPDF } = await import('jspdf');
   const pdf = new jsPDF({
     orientation: landscape || headers.length > 6 ? 'landscape' : 'portrait',
     unit: 'pt',

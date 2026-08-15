@@ -1,23 +1,101 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle, FileText } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle, FileText, ChevronDown } from 'lucide-react';
 import BillAdjustSheet from './BillAdjustSheet';
 import StatusBadge, { StatusSelect } from './StatusBadge';
+import TypeSelect from './TypeSelect';
 import EmptyState from './EmptyState';
 import ConfirmDialog from './ConfirmDialog';
 import AppSelect from './AppSelect';
 import { isCancelled } from '../utils/billAdjust';
-import { pakistanToday, formatCurrency, formatBillDateTime } from '../utils/pakistan';
+import { pakistanToday, formatCurrency, formatBillDateTime, addDaysToDateString } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { downloadBlob } from '../utils/downloadFile';
 import { downloadCsv, downloadTablePdf, exportMoney } from '../utils/tableExport';
 import { compressImageToDataUrl } from '../utils/imageCompress';
+import { persistPaymentProof } from '../utils/paymentProof';
 import {
   buildPaymentReminderText,
   openWhatsAppReminder,
   openSmsReminder,
 } from '../utils/paymentReminder';
 import { paymentSummaryText, billBalance } from '../utils/billPayments';
+import { loadFullBill } from '../utils/loadBill';
+import {
+  billTypeBadgeClass,
+  billTypeBadgeLabel,
+  billTypeExportLabel,
+  billTypeFullLabel,
+  BILLS_TYPE_FILTER_KEY,
+  HELP_PERIODS,
+  isHelpBill,
+  normalizeBillType,
+} from '../utils/billTypes';
+
+const BILLS_PAGE_SIZE = 50;
+
+function BillsCardMenu({ id, openId, setOpenId, label, icon: Icon, children, danger = false }) {
+  const ref = useRef(null);
+  const open = openId === id;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => {
+      if (!ref.current?.contains(e.target)) setOpenId(null);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') setOpenId(null);
+    };
+    const onScroll = (e) => {
+      if (ref.current?.contains(e.target)) return;
+      setOpenId(null);
+    };
+    document.addEventListener('pointerdown', onDoc);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('pointerdown', onDoc);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [open, setOpenId]);
+
+  return (
+    <div className={`inv-dd${danger ? ' inv-dd--danger' : ''}`} ref={ref}>
+      <button
+        type="button"
+        className={`btn-secondary inv-dd-trigger${open ? ' is-open' : ''}${danger ? ' inv-dd-trigger--danger' : ''}`}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpenId(open ? null : id)}
+      >
+        {Icon ? <Icon size={14} /> : null}
+        <span>{label}</span>
+        <ChevronDown size={14} className={`inv-dd-chevron${open ? ' is-open' : ''}`} aria-hidden />
+      </button>
+      {open ? (
+        <div className="inv-dd-menu" role="menu">
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function BillsCardMenuItem({ icon: Icon, label, onClick, danger = false }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className={`inv-dd-item${danger ? ' is-danger' : ''}`}
+      onClick={onClick}
+    >
+      {Icon ? <Icon size={15} /> : null}
+      <span>{label}</span>
+    </button>
+  );
+}
 
 export default function BillsDatabase({
   onViewBill,
@@ -26,16 +104,28 @@ export default function BillsDatabase({
   currencySymbol = 'Rs.',
   urduLabels = false,
   settings: settingsProp = {},
+  active = true,
 }) {
   const toast = useToast();
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [listAnimKey, setListAnimKey] = useState(0);
-  const [billTypeFilter, setBillTypeFilter] = useState('all'); // 'all', 'customer', 'supplier'
+  const [billTypeFilter, setBillTypeFilter] = useState(() => {
+    try {
+      const pref = sessionStorage.getItem(BILLS_TYPE_FILTER_KEY);
+      if (pref === 'help' || pref === 'supplier' || pref === 'customer') {
+        sessionStorage.removeItem(BILLS_TYPE_FILTER_KEY);
+        return pref;
+      }
+    } catch {
+      /* ignore */
+    }
+    return 'all';
+  });
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [visibleCount, setVisibleCount] = useState(BILLS_PAGE_SIZE);
 
   // Edit Modal State
   const [editingBill, setEditingBill] = useState(null);
@@ -43,6 +133,7 @@ export default function BillsDatabase({
   const [editInvNum, setEditInvNum] = useState('');
   const [editCustomerName, setEditCustomerName] = useState('');
   const [editBillDate, setEditBillDate] = useState('');
+  const [editDueDate, setEditDueDate] = useState('');
   const [editStatus, setEditStatus] = useState('pending');
   const [editNotes, setEditNotes] = useState('');
   const [editTaxRate, setEditTaxRate] = useState(0);
@@ -63,20 +154,13 @@ export default function BillsDatabase({
   const [settings, setSettings] = useState(settingsProp || {});
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [cardMenu, setCardMenu] = useState(null);
+  const editFormRef = useRef(null);
+  const payFormRef = useRef(null);
 
   useEffect(() => {
     setSettings(settingsProp || {});
   }, [settingsProp]);
-
-  useEffect(() => {
-    if (settingsProp?.company_name) return;
-    apiFetch('/api/settings')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data) setSettings((prev) => ({ ...prev, ...data }));
-      })
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
@@ -95,7 +179,7 @@ export default function BillsDatabase({
       const res = await apiFetch(url);
       const data = await res.json();
       setBills(data || []);
-      if (soft) setListAnimKey((k) => k + 1);
+      if (!soft) setVisibleCount(BILLS_PAGE_SIZE);
     } catch (err) {
       console.error('Error apiFetching bills database:', err);
     } finally {
@@ -108,23 +192,57 @@ export default function BillsDatabase({
     apiFetchBills();
   }, [billTypeFilter, statusFilter, debouncedSearch]);
 
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    if (active) apiFetchBills({ soft: true });
+  }, [active]);
+
   // Open Edit Modal
-  const handleOpenEditModal = (bill) => {
+  const handleOpenEditModal = async (bill) => {
     if (isCancelled(bill)) {
       toast.info('Cancelled bills are kept for history and cannot be edited.');
       return;
     }
-    setEditingBill(bill);
-    setEditType(bill.bill_type || 'customer');
-    setEditInvNum(bill.invoice_number);
-    setEditCustomerName(bill.customer_name);
-    setEditBillDate(bill.bill_date);
-    setEditStatus(bill.status);
-    setEditNotes(bill.notes || '');
-    setEditTaxRate(bill.tax_rate ?? 0);
-    setEditDiscountRate(bill.discount_rate ?? 0);
-    setEditItems(bill.items ? JSON.parse(JSON.stringify(bill.items)) : []);
+    const full = await loadFullBill(bill);
+    setEditingBill(full);
+    setEditType(normalizeBillType(full.bill_type));
+    setEditInvNum(full.invoice_number);
+    setEditCustomerName(full.customer_name);
+    setEditBillDate(full.bill_date);
+    setEditDueDate(full.due_date || '');
+    setEditStatus(full.status);
+    setEditNotes(full.notes || '');
+    setEditTaxRate(full.tax_rate ?? 0);
+    setEditDiscountRate(full.discount_rate ?? 0);
+    setEditItems(full.items ? JSON.parse(JSON.stringify(full.items)) : []);
   };
+
+  useEffect(() => {
+    if (!editingBill && !payBill) return undefined;
+    const close = () => {
+      setEditingBill(null);
+      setPayBill(null);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') close();
+    };
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const frame = requestAnimationFrame(() => {
+      if (editFormRef.current) editFormRef.current.scrollTop = 0;
+      if (payFormRef.current) payFormRef.current.scrollTop = 0;
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [editingBill, payBill]);
 
   // Line Item Handlers in Edit Modal
   const handleItemChange = (index, field, value) => {
@@ -163,6 +281,7 @@ export default function BillsDatabase({
           invoice_number: editInvNum,
           customer_name: editCustomerName,
           bill_date: editBillDate,
+          due_date: editDueDate || editBillDate,
           status: editStatus,
           notes: editNotes,
           subtotal,
@@ -208,6 +327,30 @@ export default function BillsDatabase({
     }
   };
 
+  const handleUpdateType = async (bill, nextType) => {
+    const type = normalizeBillType(nextType);
+    if (isCancelled(bill) || normalizeBillType(bill.bill_type) === type) return;
+    const payload = { bill_type: type };
+    if (type === 'help' && !bill.due_date) {
+      payload.due_date = addDaysToDateString(bill.bill_date || pakistanToday(), 30);
+    }
+    try {
+      const res = await apiFetch(`/api/bills/${bill.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      toast.success(
+        type === 'help' ? 'Updated to Help / loan' : type === 'supplier' ? 'Updated to Saudia buying' : 'Updated to Sale'
+      );
+      apiFetchBills();
+    } catch (err) {
+      toast.error('Error updating type: ' + err.message);
+    }
+  };
+
   const askDeleteBill = (bill) => {
     setDeleteTarget(bill);
   };
@@ -241,16 +384,7 @@ export default function BillsDatabase({
 
   const openAdjust = async (bill) => {
     if (isCancelled(bill)) return;
-    let full = bill;
-    if (!bill.items?.length) {
-      try {
-        const res = await apiFetch(`/api/bills/${bill.id}`);
-        const data = await res.json();
-        if (res.ok && data?.id) full = data;
-      } catch (_) {
-        /* use list row */
-      }
-    }
+    const full = await loadFullBill(bill);
     setAdjustBill(full);
   };
 
@@ -336,6 +470,7 @@ export default function BillsDatabase({
         const cashLine = `Cash tendered: ${currencySymbol}${payTenderedNum.toFixed(2)} · Change: ${currencySymbol}${Math.max(0, payChangeDue).toFixed(2)}${payChangeDue < 0 ? ' (short)' : ''}`;
         notes = notes?.trim() ? `${notes}\n${cashLine}` : cashLine;
       }
+      const proof = await persistPaymentProof(payScreenshot || '');
       const res = await apiFetch(`/api/bills/${payBill.id}/payments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -344,7 +479,9 @@ export default function BillsDatabase({
           method: payMethod,
           payment_date: pakistanToday(),
           notes,
-          screenshot_data: payScreenshot || '',
+          screenshot_data: proof.screenshot_data,
+          screenshot_path: proof.screenshot_path,
+          screenshot_thumb: proof.screenshot_thumb,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -405,7 +542,7 @@ export default function BillsDatabase({
         else if (status === 'paid') status = 'due';
       }
       return [
-        b.bill_type === 'supplier' ? 'Saudia Buying' : 'Customer Sale',
+        billTypeExportLabel(b),
         b.invoice_number || '',
         b.customer_name || '',
         b.bill_date || '',
@@ -460,6 +597,9 @@ export default function BillsDatabase({
       if (err?.name !== 'AbortError') toast.error('PDF export failed: ' + err.message);
     }
   };
+
+  const visibleBills = bills.slice(0, visibleCount);
+  const hiddenCount = Math.max(0, bills.length - visibleCount);
 
   return (
     <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -519,6 +659,14 @@ export default function BillsDatabase({
           >
             Saudia
           </button>
+          <button
+            type="button"
+            className={`nav-btn ${billTypeFilter === 'help' ? 'active' : ''}`}
+            onClick={() => setBillTypeFilter('help')}
+            style={{ padding: '0.45rem 0.9rem', fontSize: '0.825rem' }}
+          >
+            Help
+          </button>
         </div>
 
         {/* Search */}
@@ -572,10 +720,7 @@ export default function BillsDatabase({
           />
         )
       ) : (
-        <div
-          key={listAnimKey}
-          className={`bills-list-panel${refreshing ? ' is-refreshing' : ''}${listAnimKey > 0 ? ' bills-list-panel--enter' : ''}`}
-        >
+        <div className={`bills-list-panel${refreshing ? ' is-refreshing' : ''}`}>
           {/* Desktop table */}
           <div className="table-container desktop-only-table">
             <table className="data-table">
@@ -591,12 +736,19 @@ export default function BillsDatabase({
                 </tr>
               </thead>
               <tbody>
-                {bills.map((bill) => (
+                {visibleBills.map((bill) => (
                   <tr key={bill.id}>
                     <td>
-                      <span className={`type-badge ${bill.bill_type === 'supplier' ? 'saudia' : 'sale'}`}>
-                        {bill.bill_type === 'supplier' ? 'SAUDIA BUYING' : 'SALE'}
-                      </span>
+                      {isCancelled(bill) ? (
+                        <span className={`type-badge ${billTypeBadgeClass(bill)}`}>
+                          {billTypeBadgeLabel(bill)}
+                        </span>
+                      ) : (
+                        <TypeSelect
+                          value={bill.bill_type}
+                          onChange={(next) => handleUpdateType(bill, next)}
+                        />
+                      )}
                     </td>
                     <td className="invoice-mono">{bill.invoice_number}</td>
                     <td>
@@ -635,7 +787,11 @@ export default function BillsDatabase({
                             style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto', opacity: canTakePayment(bill) ? 1 : 0.45 }}
                             onClick={() => openPayModal(bill)}
                             disabled={!canTakePayment(bill)}
-                            title={canTakePayment(bill) ? 'Record payment' : 'Fully paid — Pay locked'}
+                            title={
+                              canTakePayment(bill)
+                                ? isHelpBill(bill) ? 'Record repayment' : 'Record payment'
+                                : 'Fully paid — Pay locked'
+                            }
                           >
                             <Banknote size={14} /> Pay
                           </button>
@@ -693,100 +849,182 @@ export default function BillsDatabase({
           </div>
 
           {/* Mobile cards */}
-          <div className="mobile-only mobile-card-list">
-            {bills.map((bill) => (
-              <div className="mobile-card" key={`m-${bill.id}`}>
-                <div className="mobile-card-top">
-                  <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="mobile-only mobile-card-list bills-card-list">
+            {visibleBills.map((bill) => {
+              const due = billBalance(bill);
+              const paidAmt = Number(bill.amount_paid) || 0;
+              const canPay = canTakePayment(bill);
+              const canRemind = canPay && bill.bill_type !== 'supplier';
+              return (
+              <div className="mobile-card bills-bill-card" key={`m-${bill.id}`}>
+                <div className="bills-card-head">
+                  <div className="bills-card-who">
                     <div className="mobile-card-title">{bill.customer_name}</div>
-                    <div className="mobile-card-meta">
-                      <span className="invoice-mono">{bill.invoice_number}</span>
-                      {' · '}{formatBillDateTime(bill)}
-                      {' · '}{bill.bill_type === 'supplier' ? 'Saudia' : 'Sale'}
-                    </div>
+                    <div className="bills-card-inv invoice-mono">{bill.invoice_number}</div>
+                    <div className="mobile-card-meta">{formatBillDateTime(bill)}</div>
                   </div>
-                  <div className="mobile-card-amount">{formatCurrency(currencySymbol, bill.total_amount)}</div>
+                  <div className="bills-card-money">
+                    <div className="mobile-card-amount">{formatCurrency(currencySymbol, bill.total_amount)}</div>
+                    {(paidAmt > 0 || due > 0) && (
+                      <div className="bills-card-balance">
+                        {due > 0
+                          ? `Due ${formatCurrency(currencySymbol, due)}`
+                          : 'Cleared'}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                {isCancelled(bill) ? (
-                  <StatusBadge status="cancelled" />
-                ) : (
-                  <StatusSelect
-                    block
-                    value={bill.status}
-                    onChange={(next) => handleUpdateStatus(bill.id, next)}
-                  />
-                )}
-                <div className="mobile-card-actions">
-                  <div className="mobile-card-actions-main">
-                    <button className="btn-secondary" onClick={() => onViewBill(bill)}>
+                <div className="bills-card-chips">
+                  {isCancelled(bill) ? (
+                    <StatusBadge status="cancelled" />
+                  ) : (
+                    <StatusSelect
+                      block
+                      value={bill.status}
+                      onChange={(next) => handleUpdateStatus(bill.id, next)}
+                    />
+                  )}
+                  {!isCancelled(bill) && (
+                    <TypeSelect
+                      block
+                      value={bill.bill_type}
+                      onChange={(next) => handleUpdateType(bill, next)}
+                    />
+                  )}
+                </div>
+                <div className="bills-card-actions">
+                  <div className="bills-card-primary">
+                    <button type="button" className="btn-secondary" onClick={() => onViewBill(bill)}>
                       <Eye size={14} /> View
                     </button>
                     {!isCancelled(bill) && (
                       <button
+                        type="button"
                         className="btn-secondary"
                         onClick={() => openPayModal(bill)}
-                        disabled={!canTakePayment(bill)}
-                        style={{ opacity: canTakePayment(bill) ? 1 : 0.45 }}
-                        title={canTakePayment(bill) ? 'Record payment' : 'Fully paid — Pay locked'}
+                        disabled={!canPay}
+                        title={
+                          canPay
+                            ? isHelpBill(bill) ? 'Record repayment' : 'Record payment'
+                            : 'Fully paid — Pay locked'
+                        }
                       >
                         <Banknote size={14} /> Pay
                       </button>
                     )}
-                    {canTakePayment(bill) &&
-                      bill.bill_type !== 'supplier' && (
-                      <>
-                        <button
-                          className="btn-secondary"
-                          style={{ color: '#25D366' }}
-                          onClick={() => handleRemind(bill, 'whatsapp')}
-                          title="WhatsApp payment reminder"
-                        >
-                          <MessageSquare size={14} />
-                        </button>
-                        <button
-                          className="btn-secondary"
-                          onClick={() => handleRemind(bill, 'sms')}
-                          title="SMS payment reminder"
-                        >
-                          <Smartphone size={14} />
-                        </button>
-                      </>
-                    )}
-                    {!isCancelled(bill) && (
-                      <button className="btn-secondary" onClick={() => handleOpenEditModal(bill)}>
-                        <Edit3 size={14} /> Edit
-                      </button>
-                    )}
-                    {onDuplicateBill && (
-                      <button className="btn-secondary" onClick={() => onDuplicateBill(bill)} title="Duplicate bill">
-                        <Copy size={14} />
-                      </button>
-                    )}
                   </div>
-                  <div className="mobile-card-actions-foot">
-                    {!isCancelled(bill) && (
-                      <button className="btn-secondary" onClick={() => openAdjust(bill)}>
-                        <Undo2 size={14} /> Return
-                      </button>
+                  <div className="bills-card-menus">
+                    {canRemind && (
+                      <BillsCardMenu
+                        id={`${bill.id}:share`}
+                        openId={cardMenu}
+                        setOpenId={setCardMenu}
+                        label="Share"
+                        icon={MessageSquare}
+                      >
+                        <BillsCardMenuItem
+                          icon={MessageSquare}
+                          label="WhatsApp"
+                          onClick={() => {
+                            setCardMenu(null);
+                            handleRemind(bill, 'whatsapp');
+                          }}
+                        />
+                        <BillsCardMenuItem
+                          icon={Smartphone}
+                          label="SMS"
+                          onClick={() => {
+                            setCardMenu(null);
+                            handleRemind(bill, 'sms');
+                          }}
+                        />
+                      </BillsCardMenu>
                     )}
-                    <button className="btn-danger" onClick={() => askDeleteBill(bill)} title="Delete bill permanently">
-                      <Trash2 size={14} /> Delete
-                    </button>
+                    <BillsCardMenu
+                      id={`${bill.id}:manage`}
+                      openId={cardMenu}
+                      setOpenId={setCardMenu}
+                      label="Manage"
+                      icon={Copy}
+                      danger
+                    >
+                      {!isCancelled(bill) && (
+                        <BillsCardMenuItem
+                          icon={Edit3}
+                          label="Edit"
+                          onClick={() => {
+                            setCardMenu(null);
+                            handleOpenEditModal(bill);
+                          }}
+                        />
+                      )}
+                      {onDuplicateBill && (
+                        <BillsCardMenuItem
+                          icon={Copy}
+                          label="Duplicate"
+                          onClick={() => {
+                            setCardMenu(null);
+                            onDuplicateBill(bill);
+                          }}
+                        />
+                      )}
+                      {!isCancelled(bill) && (
+                        <BillsCardMenuItem
+                          icon={Undo2}
+                          label="Return / Cancel"
+                          onClick={() => {
+                            setCardMenu(null);
+                            openAdjust(bill);
+                          }}
+                        />
+                      )}
+                      <BillsCardMenuItem
+                        icon={Trash2}
+                        label="Delete bill"
+                        danger
+                        onClick={() => {
+                          setCardMenu(null);
+                          askDeleteBill(bill);
+                        }}
+                      />
+                    </BillsCardMenu>
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              className="btn-secondary bills-load-more"
+              onClick={() => setVisibleCount((n) => n + BILLS_PAGE_SIZE)}
+            >
+              Load more ({hiddenCount} left)
+            </button>
+          )}
         </div>
       )}
 
-      {/* FULL EDIT BILL INTERACTIVE MODAL */}
-      {editingBill && (
-        <div className="modal-sheet" style={{ position: 'fixed', inset: 0, background: 'rgba(7,41,41,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
-          <form onSubmit={handleSaveBillEdits} className="glass-panel" style={{ width: '100%', maxWidth: '750px', maxHeight: '90vh', overflowY: 'auto', padding: '1.75rem' }}>
+      {/* FULL EDIT BILL INTERACTIVE MODAL — portaled so tab transforms cannot park it at page end */}
+      {editingBill && createPortal(
+        <div
+          className="modal-sheet modal-sheet--portal"
+          role="presentation"
+          onClick={() => setEditingBill(null)}
+        >
+          <form
+            ref={editFormRef}
+            onSubmit={handleSaveBillEdits}
+            className="glass-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-bill-title"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
               <div>
-                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>Edit Bill #{editingBill.invoice_number}</h3>
+                <h3 id="edit-bill-title" style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>Edit Bill #{editingBill.invoice_number}</h3>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Modify party, items, quantities, and rates</p>
               </div>
               <button type="button" className="btn-secondary" style={{ padding: '0.4rem 0.6rem', width: 'auto' }} onClick={() => setEditingBill(null)}>
@@ -799,11 +1037,18 @@ export default function BillsDatabase({
                 <label className="form-label">Bill Category *</label>
                 <AppSelect
                   value={editType}
-                  onChange={setEditType}
+                  onChange={(next) => {
+                    const type = normalizeBillType(next);
+                    setEditType(type);
+                    if (type === 'help' && !editDueDate) {
+                      setEditDueDate(addDaysToDateString(editBillDate || pakistanToday(), 30));
+                    }
+                  }}
                   aria-label="Bill category"
                   options={[
-                    { value: 'customer', label: 'Customer Sale Invoice' },
-                    { value: 'supplier', label: 'Saudia Purchase / Payment Advice' },
+                    { value: 'customer', label: billTypeFullLabel('customer') },
+                    { value: 'supplier', label: billTypeFullLabel('supplier') },
+                    { value: 'help', label: billTypeFullLabel('help') },
                   ]}
                 />
               </div>
@@ -823,7 +1068,7 @@ export default function BillsDatabase({
 
               <div className="form-group">
                 <label className="form-label">
-                  {editType === 'supplier' ? 'Supplier / Pay To *' : 'Customer / Party Name *'}
+                  {editType === 'supplier' ? 'Supplier / Pay To *' : editType === 'help' ? 'Person *' : 'Customer / Party Name *'}
                 </label>
                 <input type="text" className="form-input" value={editCustomerName} onChange={(e) => setEditCustomerName(e.target.value)} required />
               </div>
@@ -831,6 +1076,27 @@ export default function BillsDatabase({
               <div className="form-group">
                 <label className="form-label">Bill Date *</label>
                 <input type="date" className="form-input" value={editBillDate} onChange={(e) => setEditBillDate(e.target.value)} required />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">{editType === 'help' ? 'Return by' : 'Due Date'}</label>
+                <input type="date" className="form-input" value={editDueDate} onChange={(e) => setEditDueDate(e.target.value)} />
+                {editType === 'help' && (
+                  <div className="cash-chip-row" style={{ marginTop: '0.45rem' }}>
+                    {HELP_PERIODS.map((p) => (
+                      <button
+                        key={p.days}
+                        type="button"
+                        className="cash-chip"
+                        onClick={() =>
+                          setEditDueDate(addDaysToDateString(editBillDate || pakistanToday(), p.days))
+                        }
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="form-group">
@@ -897,15 +1163,29 @@ export default function BillsDatabase({
               </button>
             </div>
           </form>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {payBill && (
-        <div className="modal-sheet" style={{ position: 'fixed', inset: 0, background: 'rgba(7,41,41,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
-          <form onSubmit={handleRecordPayment} className="glass-panel pay-modal" style={{ width: '100%', maxWidth: '400px', padding: '1.35rem 1.4rem' }}>
+      {payBill && createPortal(
+        <div
+          className="modal-sheet modal-sheet--portal"
+          role="presentation"
+          onClick={() => setPayBill(null)}
+        >
+          <form
+            ref={payFormRef}
+            onSubmit={handleRecordPayment}
+            className="glass-panel pay-modal"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
               <div>
-                <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>Record payment</h3>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>
+                  {isHelpBill(payBill) ? 'Record repayment' : 'Record payment'}
+                </h3>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0' }}>
                   {payBill.invoice_number} · {payBill.customer_name}
                 </p>
@@ -1049,7 +1329,8 @@ export default function BillsDatabase({
               </button>
             </div>
           </form>
-        </div>
+        </div>,
+        document.body
       )}
 
       <BillAdjustSheet

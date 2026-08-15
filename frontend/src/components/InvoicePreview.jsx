@@ -27,6 +27,7 @@ import ConfirmDialog from './ConfirmDialog';
 import AppSelect from './AppSelect';
 import { isCancelled, remainingQty } from '../utils/billAdjust';
 import { formatCurrency, formatBillDateTime } from '../utils/pakistan';
+import { isHelpBill, isSupplierBill } from '../utils/billTypes';
 import { paymentSummaryText } from '../utils/billPayments';
 import { getPaymentMethods, paymentMethodLines, compactPaymentInstructions } from '../utils/paymentMethods';
 import { apiFetch } from '../api/client';
@@ -34,6 +35,7 @@ import { useToast } from '../toast/ToastContext';
 import { downloadBlob, saveOrShareBlob } from '../utils/downloadFile';
 import { elementToJpegBlob, elementToPdfBlob } from '../utils/invoiceExport';
 import { compressImageToDataUrl } from '../utils/imageCompress';
+import { persistPaymentProof, readPaymentProof, paymentProofPreview, paymentHasProof } from '../utils/paymentProof';
 import { loadBillSendPrefs, resolveBillExportOptions } from '../utils/billSendPrefs';
 import {
   buildPaymentReminderText,
@@ -139,9 +141,9 @@ function InvMenuItem({ icon: Icon, label, onClick, disabled, danger = false, bus
   );
 }
 
-export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdated, currencySymbol = 'Rs.', urduLabels = false }) {
+export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdated, currencySymbol = 'Rs.', urduLabels = false, settings: settingsProp = {} }) {
   const toast = useToast();
-  const [settings, setSettings] = useState({});
+  const [settings, setSettings] = useState(settingsProp || {});
   const [billView, setBillViewState] = useState(() => loadBillView());
   const [sharing, setSharing] = useState(null);
   const [liveBill, setLiveBill] = useState(bill);
@@ -185,6 +187,11 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
   }, [bill]);
 
   useEffect(() => {
+    if (settingsProp && Object.keys(settingsProp).length) {
+      setSettings(settingsProp);
+      setShowDeveloperCredit(settingsProp.show_developer_credit !== 0 && settingsProp.show_developer_credit !== false);
+      return;
+    }
     apiFetch('/api/settings')
       .then((res) => res.json())
       .then((data) => {
@@ -192,7 +199,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
         setShowDeveloperCredit(data?.show_developer_credit !== 0 && data?.show_developer_credit !== false);
       })
       .catch((err) => console.error(err));
-  }, []);
+  }, [settingsProp]);
 
   const toggleDeveloperCredit = async (checked) => {
     setShowDeveloperCredit(checked);
@@ -231,7 +238,8 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
   const payAmountNum = parseFloat(payAmount) || 0;
   const paySummary = paymentSummaryText(currencySymbol, liveBill, payAmountNum);
   const urdu = Boolean(urduLabels);
-  const isSupplier = liveBill.bill_type === 'supplier';
+  const isSupplier = isSupplierBill(liveBill);
+  const isHelp = isHelpBill(liveBill);
   const hasPayeeBank =
     Boolean(liveBill.payee_bank_name) ||
     Boolean(liveBill.payee_account_title) ||
@@ -300,7 +308,9 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
   const shareCaption = () =>
     isSupplier
       ? `Payment for purchase ${liveBill.invoice_number} to ${liveBill.customer_name}\nAmount to pay: ${formatCurrency(currencySymbol, liveBill.total_amount)}\nFrom: ${companyName}`
-      : `Invoice ${liveBill.invoice_number} — ${companyName}\nAmount: ${formatCurrency(currencySymbol, liveBill.total_amount)}\nClient: ${liveBill.customer_name}`;
+      : isHelp
+        ? `Help / loan ${liveBill.invoice_number}\nGiven to: ${liveBill.customer_name}\nAmount: ${formatCurrency(currencySymbol, liveBill.total_amount)}\nReturn by: ${liveBill.due_date || '—'}\n${companyName}`
+        : `Invoice ${liveBill.invoice_number} — ${companyName}\nAmount: ${formatCurrency(currencySymbol, liveBill.total_amount)}\nClient: ${liveBill.customer_name}`;
 
   const handleDownloadPDF = async () => {
     setSharing('pdf');
@@ -334,7 +344,11 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
       const { blob, opts, filename } = await buildBillBlob(prefs);
       const caption = shareCaption();
       const result = await saveOrShareBlob(blob, filename, opts.mime, {
-        title: isSupplier ? `Payment ${liveBill.invoice_number}` : `Invoice ${liveBill.invoice_number}`,
+        title: isSupplier
+          ? `Payment ${liveBill.invoice_number}`
+          : isHelp
+            ? `Help ${liveBill.invoice_number}`
+            : `Invoice ${liveBill.invoice_number}`,
         text: caption,
         dialogTitle: 'Send bill',
       });
@@ -369,7 +383,11 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
       const { blob, opts, filename } = await buildBillBlob({ ...usePrefs, format: usePrefs.format || 'image' });
       const caption = shareCaption();
       const result = await saveOrShareBlob(blob, filename, opts.mime, {
-        title: isSupplier ? `Payment ${liveBill.invoice_number}` : `Invoice ${liveBill.invoice_number}`,
+        title: isSupplier
+          ? `Payment ${liveBill.invoice_number}`
+          : isHelp
+            ? `Help ${liveBill.invoice_number}`
+            : `Invoice ${liveBill.invoice_number}`,
         text: caption,
         dialogTitle: 'Send via WhatsApp',
       });
@@ -418,10 +436,14 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
       });
       const subject = isSupplier
         ? `Payment advice ${liveBill.invoice_number} from ${companyName}`
-        : `Invoice ${liveBill.invoice_number} from ${companyName}`;
+        : isHelp
+          ? `Help / loan ${liveBill.invoice_number} from ${companyName}`
+          : `Invoice ${liveBill.invoice_number} from ${companyName}`;
       const body = isSupplier
         ? `Assalam o Alaikum ${liveBill.customer_name},\n\nPlease find payment advice ${liveBill.invoice_number} for our purchase.\nAmount to pay: ${formatCurrency(currencySymbol, liveBill.total_amount)}\n\nRegards,\n${companyName}`
-        : `Dear ${liveBill.customer_name},\n\nPlease find invoice ${liveBill.invoice_number}.\nTotal: ${formatCurrency(currencySymbol, liveBill.total_amount)}\n\nRegards,\n${companyName}`;
+        : isHelp
+          ? `Assalam o Alaikum ${liveBill.customer_name},\n\nHelp / loan ${liveBill.invoice_number}.\nAmount given: ${formatCurrency(currencySymbol, liveBill.total_amount)}\nReturn by: ${liveBill.due_date || '—'}\n\nRegards,\n${companyName}`
+          : `Dear ${liveBill.customer_name},\n\nPlease find invoice ${liveBill.invoice_number}.\nTotal: ${formatCurrency(currencySymbol, liveBill.total_amount)}\n\nRegards,\n${companyName}`;
       const result = await saveOrShareBlob(blob, filename, opts.mime, {
         title: subject,
         text: body,
@@ -455,13 +477,16 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
     if (!amount || amount <= 0) return;
     setPaying(true);
     try {
+      const proof = await persistPaymentProof(payScreenshot || '');
       const res = await apiFetch(`/api/bills/${liveBill.id}/payments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount,
           method: payMethod,
-          screenshot_data: payScreenshot || '',
+          screenshot_data: proof.screenshot_data,
+          screenshot_path: proof.screenshot_path,
+          screenshot_thumb: proof.screenshot_thumb,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -747,9 +772,21 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
                     {' · '}{p.method} · {p.payment_date}
                     {p.notes ? <span style={{ color: 'var(--text-muted)' }}> · {p.notes}</span> : null}
                   </div>
-                  {p.screenshot_data && (
-                    <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.25rem' }} onClick={() => setPreviewShot(p.screenshot_data)}>
-                      <img src={p.screenshot_data} alt="Proof" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
+                  {paymentHasProof(p) && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ width: 'auto', padding: '0.25rem' }}
+                      onClick={async () => {
+                        const full = await readPaymentProof(p);
+                        setPreviewShot(full || paymentProofPreview(p) || null);
+                      }}
+                    >
+                      {paymentProofPreview(p) ? (
+                        <img src={paymentProofPreview(p)} alt="Proof" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
+                      ) : (
+                        <ImagePlus size={16} />
+                      )}
                     </button>
                   )}
                 </div>
@@ -775,12 +812,17 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
                 <BiLabel en="Purchase Payment Advice" ur="خریداری ادائیگی" urdu={urdu} />
               </p>
             )}
+            {isHelp && (
+              <p className="thermal-doc-type">
+                <BiLabel en="Help / Loan" ur="مدد / قرض" urdu={urdu} />
+              </p>
+            )}
           </div>
           <div className="thermal-info">
-            <div><BiLabel en={isSupplier ? 'Advice #' : 'Receipt #'} ur={isSupplier ? 'مشورہ' : 'رسید'} urdu={urdu} />: <b>{liveBill.invoice_number}</b></div>
+            <div><BiLabel en={isSupplier ? 'Advice #' : isHelp ? 'Help #' : 'Receipt #'} ur={isSupplier ? 'مشورہ' : isHelp ? 'مدد' : 'رسید'} urdu={urdu} />: <b>{liveBill.invoice_number}</b></div>
             <div><BiLabel en="Date" ur="تاریخ" urdu={urdu} />: {formatBillDateTime(liveBill)}</div>
             <div>
-              <BiLabel en={isSupplier ? 'Pay To' : 'Client'} ur={isSupplier ? 'ادائیگی برائے' : 'گاہک'} urdu={urdu} />: <b>{liveBill.customer_name}</b>
+              <BiLabel en={isSupplier ? 'Pay To' : isHelp ? 'Person' : 'Client'} ur={isSupplier ? 'ادائیگی برائے' : isHelp ? 'شخص' : 'گاہک'} urdu={urdu} />: <b>{liveBill.customer_name}</b>
             </div>
           </div>
           <div className="thermal-lines">
@@ -797,7 +839,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
             })}
           </div>
           <div className="thermal-total">
-            <BiLabel en={isSupplier ? 'AMOUNT TO PAY' : 'TOTAL'} ur={isSupplier ? 'ادا کی جانے والی رقم' : 'کل'} urdu={urdu} />
+            <BiLabel en={isSupplier ? 'AMOUNT TO PAY' : isHelp ? 'AMOUNT GIVEN' : 'TOTAL'} ur={isSupplier ? 'ادا کی جانے والی رقم' : isHelp ? 'دی گئی رقم' : 'کل'} urdu={urdu} />
             <strong>{formatCurrency(currencySymbol, liveBill.total_amount)}</strong>
           </div>
           {paid > 0 && (
@@ -881,6 +923,8 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
               <p className="inv-doc-label">
                 {isSupplier ? (
                   <BiLabel en="Purchase Payment Advice" ur="خریداری ادائیگی" urdu={urdu} />
+                ) : isHelp ? (
+                  <BiLabel en="Help / Loan Record" ur="مدد / قرض ریکارڈ" urdu={urdu} />
                 ) : (
                   <BiLabel en="Sales Invoice" ur="سیلز انوائس" urdu={urdu} />
                 )}
@@ -893,7 +937,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
           <section className="inv-meta-grid">
             <div className="inv-meta-cell inv-party">
               <h4>
-                <BiLabel en={isSupplier ? 'Pay To' : 'Billed To'} ur={isSupplier ? 'ادائیگی برائے' : 'بل برائے'} urdu={urdu} />
+                <BiLabel en={isSupplier ? 'Pay To' : isHelp ? 'Person' : 'Billed To'} ur={isSupplier ? 'ادائیگی برائے' : isHelp ? 'شخص' : 'بل برائے'} urdu={urdu} />
               </h4>
               <strong className="inv-meta-value">{liveBill.customer_name}</strong>
               {liveBill.customer_phone && <p>{liveBill.customer_phone}</p>}
@@ -904,7 +948,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
               <strong className="inv-meta-value">{formatBillDateTime(liveBill)}</strong>
             </div>
             <div className="inv-meta-cell">
-              <span><BiLabel en="Due date" ur="آخری تاریخ" urdu={urdu} /></span>
+              <span><BiLabel en={isHelp ? 'Return by' : 'Due date'} ur={isHelp ? 'واپسی کی تاریخ' : 'آخری تاریخ'} urdu={urdu} /></span>
               <strong className="inv-meta-value">{liveBill.due_date}</strong>
             </div>
             {liveBill.payment_method && (
@@ -970,7 +1014,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
                 </div>
               )}
               <div className="inv-total-row is-grand">
-                <BiLabel en={isSupplier ? 'Amount to Pay' : 'Total'} ur={isSupplier ? 'ادا کی جانے والی رقم' : 'کل رقم'} urdu={urdu} />
+                <BiLabel en={isSupplier ? 'Amount to Pay' : isHelp ? 'Amount given' : 'Total'} ur={isSupplier ? 'ادا کی جانے والی رقم' : isHelp ? 'دی گئی رقم' : 'کل رقم'} urdu={urdu} />
                 <span className="mono">{formatCurrency(currencySymbol, liveBill.total_amount)}</span>
               </div>
               {paid > 0 && (
@@ -980,7 +1024,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
                     <span className="mono">{formatCurrency(currencySymbol, paid)}</span>
                   </div>
                   <div className="inv-total-row is-due">
-                    <BiLabel en={isSupplier ? 'Remaining' : 'Balance Due'} ur="باقی رقم" urdu={urdu} />
+                    <BiLabel en={isSupplier ? 'Remaining' : isHelp ? 'Still to return' : 'Balance Due'} ur="باقی رقم" urdu={urdu} />
                     <span className="mono">{formatCurrency(currencySymbol, balance)}</span>
                   </div>
                 </>

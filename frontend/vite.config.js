@@ -5,6 +5,18 @@ export default defineConfig({
   plugins: [react()],
   // Relative base required for Capacitor file:// / WebView loading
   base: './',
+  build: {
+    target: 'es2018',
+    cssMinify: true,
+    chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/html2canvas') || id.includes('node_modules/jspdf')) return 'export';
+        },
+      },
+    },
+  },
   server: {
     port: 10000,
     strictPort: true,

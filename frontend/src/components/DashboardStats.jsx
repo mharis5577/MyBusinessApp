@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, lazy, Suspense } from 'react';
 import {
   DollarSign,
   Clock,
@@ -13,14 +13,33 @@ import {
   Shield,
   ChevronRight,
   ChevronDown,
+  HeartHandshake,
+  Banknote,
+  MessageCircle,
 } from 'lucide-react';
 import { formatCurrency, formatBillDateTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
-import { getLastAutoBackupAt } from '../utils/backupManager';
-import CashflowPanel from './CashflowPanel';
-import OverduePanel from './OverduePanel';
-import StatusBadge from './StatusBadge';
+import { isCancelled } from '../utils/billAdjust';
+import {
+  billTypeShortLabel,
+  BILLS_TYPE_FILTER_KEY,
+  CREATE_BILL_TYPE_KEY,
+  normalizeBillType,
+} from '../utils/billTypes';
 import EmptyState from './EmptyState';
+import StatusBadge from './StatusBadge';
+import QuickPaySheet from './QuickPaySheet';
+import { getLastAutoBackupAt } from '../utils/backupManager';
+import { useToast } from '../toast/ToastContext';
+import { billBalance } from '../utils/billPayments';
+import {
+  buildPaymentReminderText,
+  normalizeWhatsAppPhone,
+  openWhatsAppReminder,
+} from '../utils/paymentReminder';
+
+const CashflowPanel = lazy(() => import('./CashflowPanel'));
+const OverduePanel = lazy(() => import('./OverduePanel'));
 
 function StatCard({ label, value, hint, icon: Icon }) {
   return (
@@ -69,18 +88,37 @@ function DashDropdown({ id, openId, onOpenChange, title, hint, icon: Icon, accen
   );
 }
 
-export default function DashboardStats({ onNavigate, onViewBill, currencySymbol = 'Rs.', settings = {} }) {
+function formatHelpReturn(iso) {
+  const [y, m, d] = String(iso || '').split('-').map(Number);
+  if (!y || !m || !d) return '—';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${d} ${months[m - 1]}`;
+}
+
+export default function DashboardStats({ onNavigate, onViewBill, currencySymbol = 'Rs.', settings = {}, active = true }) {
+  const toast = useToast();
   const [stats, setStats] = useState(null);
+  const [helpBills, setHelpBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openSection, setOpenSection] = useState('overview');
+  const [payBill, setPayBill] = useState(null);
   const seededOpenRef = useRef(false);
 
-  const fetchStats = async () => {
-    setLoading(true);
+  const fetchStats = async (soft = false) => {
+    if (!soft) setLoading(true);
     try {
-      const res = await apiFetch('/api/stats');
-      const data = await res.json();
-      setStats(data);
+      const statsRes = await apiFetch('/api/stats');
+      const data = await statsRes.json();
+      setStats(data && !data.error ? data : {});
+      const fromStats = Array.isArray(data?.help_bills) ? data.help_bills : [];
+      const rows = fromStats.filter((b) => !isCancelled(b) && normalizeBillType(b.bill_type) === 'help');
+      rows.sort((a, b) => {
+        const aDue = Math.max(0, (Number(a.total_amount) || 0) - (Number(a.amount_paid) || 0));
+        const bDue = Math.max(0, (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0));
+        if ((aDue > 0) !== (bDue > 0)) return aDue > 0 ? -1 : 1;
+        return String(a.due_date || '').localeCompare(String(b.due_date || ''));
+      });
+      setHelpBills(rows);
     } catch (err) {
       console.error('Failed to fetch stats:', err);
     } finally {
@@ -92,12 +130,77 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     fetchStats();
   }, []);
 
+  const didMountRef = useRef(false);
   useEffect(() => {
-    if (!stats || seededOpenRef.current) return;
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    if (active) fetchStats(true);
+  }, [active]);
+
+  const liveHelpGiven = helpBills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+  const liveHelpRepaid = helpBills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
+  const liveHelpOut = Math.round(Math.max(0, liveHelpGiven - liveHelpRepaid) * 100) / 100;
+
+  useEffect(() => {
+    if (loading) return;
+    if (seededOpenRef.current) return;
     seededOpenRef.current = true;
-    const overdue = Number(stats.total_overdue) || 0;
-    setOpenSection(overdue > 0 ? 'overdue' : 'overview');
-  }, [stats]);
+    const overdue = Number(stats?.total_overdue) || 0;
+    if (overdue > 0) setOpenSection('overdue');
+    else if (helpBills.length > 0) setOpenSection('help');
+    else setOpenSection('overview');
+  }, [loading, stats, helpBills.length]);
+
+  const loadFullHelp = async (row) => {
+    try {
+      const res = await apiFetch(`/api/bills/${row.id}`);
+      const bill = await res.json();
+      if (res.ok && bill?.id) return bill;
+    } catch {
+      /* use row */
+    }
+    return row;
+  };
+
+  const openHelpBill = async (row) => {
+    if (!onViewBill && onNavigate) {
+      onNavigate('database');
+      return;
+    }
+    const bill = await loadFullHelp(row);
+    onViewBill(bill);
+  };
+
+  const remindHelp = async (row) => {
+    const bill = await loadFullHelp(row);
+    const due = billBalance(bill);
+    if (due <= 0) {
+      toast.info('Already returned.');
+      return;
+    }
+    if (!normalizeWhatsAppPhone(bill.customer_phone)) {
+      toast.error('No phone on this person — add it on the bill first.');
+      return;
+    }
+    const text = buildPaymentReminderText({
+      bill: { ...bill, balance_due: due },
+      settings,
+      currencySymbol,
+      urdu: Boolean(settings.urdu_labels),
+    });
+    openWhatsAppReminder(bill.customer_phone, text);
+  };
+
+  const payHelp = async (row) => {
+    const bill = await loadFullHelp(row);
+    if (billBalance(bill) <= 0) {
+      toast.info('Already returned.');
+      return;
+    }
+    setPayBill(bill);
+  };
 
   if (loading) {
     return (
@@ -122,8 +225,30 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     profit_month = 0,
   } = stats || {};
 
+  const help_given = liveHelpGiven || Number(stats?.help_given) || 0;
+  const help_repaid = liveHelpRepaid || Number(stats?.help_repaid) || 0;
+  const help_outstanding = helpBills.length ? liveHelpOut : Number(stats?.help_outstanding) || 0;
+  const help_count = helpBills.length || Number(stats?.help_count) || 0;
+  const help_rows = helpBills;
+
   const lastBackup = getLastAutoBackupAt();
   const money = (n) => formatCurrency(currencySymbol, n, { maximumFractionDigits: 0 });
+  const goGiveHelp = () => {
+    try {
+      sessionStorage.setItem(CREATE_BILL_TYPE_KEY, 'help');
+    } catch {
+      /* ignore */
+    }
+    onNavigate('create');
+  };
+  const goHelpBills = () => {
+    try {
+      sessionStorage.setItem(BILLS_TYPE_FILTER_KEY, 'help');
+    } catch {
+      /* ignore */
+    }
+    onNavigate('database');
+  };
 
   return (
     <div className="dashboard-page">
@@ -131,7 +256,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
         <div className="dashboard-hero-copy">
           <p className="dashboard-hero-eyebrow">Shop floor</p>
           <h2 className="dashboard-hero-title">Today at the counter</h2>
-          <p className="dashboard-hero-sub">Create a bill or open dues — extras stay in the lists below.</p>
+          <p className="dashboard-hero-sub">Create a bill, chase dues, or check help money given.</p>
         </div>
         <div className="hero-actions">
           <button type="button" className="btn-primary btn-hero" onClick={() => onNavigate('create')}>
@@ -141,6 +266,9 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
             <button type="button" className="btn-secondary" onClick={() => onNavigate('database')}>
               <FileText size={16} /> Bills
             </button>
+            <button type="button" className="btn-secondary" onClick={() => setOpenSection('help')}>
+              <HeartHandshake size={16} /> Help
+            </button>
             <button type="button" className="btn-secondary" onClick={() => onNavigate('aging')}>
               <CalendarDays size={16} /> Collections
             </button>
@@ -149,18 +277,30 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
       </div>
 
       <div className="dashboard-peek" aria-label="Key figures">
-        <div className="dashboard-peek-item">
+        <button type="button" className="dashboard-peek-item" onClick={() => setOpenSection('overview')}>
           <span className="dashboard-peek-label">Profit today</span>
           <span className="dashboard-peek-value">{money(profit_today)}</span>
-        </div>
-        <div className="dashboard-peek-item">
+        </button>
+        <button type="button" className="dashboard-peek-item" onClick={() => setOpenSection('overview')}>
           <span className="dashboard-peek-label">Due</span>
           <span className="dashboard-peek-value">{money(total_pending)}</span>
-        </div>
-        <div className={`dashboard-peek-item${total_overdue > 0 ? ' is-alert' : ''}`}>
+        </button>
+        <button
+          type="button"
+          className={`dashboard-peek-item${total_overdue > 0 ? ' is-alert' : ''}`}
+          onClick={() => setOpenSection('overdue')}
+        >
           <span className="dashboard-peek-label">Overdue</span>
           <span className="dashboard-peek-value">{money(total_overdue)}</span>
-        </div>
+        </button>
+        <button
+          type="button"
+          className={`dashboard-peek-item${help_outstanding > 0 ? ' is-help' : ''}`}
+          onClick={() => setOpenSection('help')}
+        >
+          <span className="dashboard-peek-label">{help_outstanding > 0 ? 'Help out' : 'Help given'}</span>
+          <span className="dashboard-peek-value">{money(help_outstanding > 0 ? help_outstanding : help_given)}</span>
+        </button>
       </div>
 
       <div className="dashboard-dropdowns">
@@ -169,7 +309,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
           openId={openSection}
           onOpenChange={setOpenSection}
           title="Overview"
-          hint={`${total_bills} bills · collected ${money(total_revenue)}`}
+          hint={`${total_bills} bills · help ${money(help_given)}${help_outstanding > 0 ? ` · out ${money(help_outstanding)}` : ''}`}
           icon={TrendingUp}
         >
           <div className="stats-grid stats-grid-quiet">
@@ -203,6 +343,12 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
               icon={AlertTriangle}
             />
             <StatCard label="Bills" value={String(total_bills)} hint="In database" icon={FileText} />
+            <StatCard
+              label="Help given"
+              value={money(help_given)}
+              hint={`${help_count} ${help_count === 1 ? 'person' : 'people'} · still out ${money(help_outstanding)}`}
+              icon={HeartHandshake}
+            />
           </div>
         </DashDropdown>
 
@@ -216,16 +362,19 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
           accent={total_overdue > 0 ? 'alert' : ''}
         >
           <div className="dash-dropdown-toolbar">
-            <span>Quick follow-ups</span>
+            <span>Sales overdue — help is below</span>
             <button type="button" className="dashboard-recent-all" onClick={() => onNavigate('aging')}>
               Full report
               <ChevronRight size={15} aria-hidden />
             </button>
           </div>
+          <Suspense fallback={<p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading…</p>}>
           <OverduePanel
             embedded
+            excludeHelp
             currencySymbol={currencySymbol}
             settings={settings}
+            onPaid={() => fetchStats(true)}
             onViewBill={async (row) => {
               try {
                 const res = await apiFetch(`/api/bills/${row.id}`);
@@ -237,6 +386,100 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
               }
             }}
           />
+          </Suspense>
+        </DashDropdown>
+
+        <DashDropdown
+          id="help"
+          openId={openSection}
+          onOpenChange={setOpenSection}
+          title="Help given"
+          hint={
+            help_count
+              ? `${help_count} · out ${money(help_outstanding)}`
+              : 'None yet'
+          }
+          icon={HeartHandshake}
+          accent={help_outstanding > 0 ? 'help' : ''}
+        >
+          <div className="dashboard-help-toolbar">
+            <p className="dashboard-help-summary">
+              {help_count
+                ? `Given ${money(help_given)} · returned ${money(help_repaid)}`
+                : 'Money lent to people'}
+            </p>
+            <div className="dashboard-help-toolbar-actions">
+              <button type="button" className="btn-secondary dashboard-help-link" onClick={goGiveHelp}>
+                Give
+              </button>
+              <button type="button" className="btn-secondary dashboard-help-link" onClick={goHelpBills}>
+                Bills
+              </button>
+            </div>
+          </div>
+          {help_rows.length === 0 ? (
+            <EmptyState
+              title="No help given yet"
+              body="Record money you give someone for a period. It won’t count as a sale."
+              actionLabel="Give help"
+              onAction={goGiveHelp}
+              icon={HeartHandshake}
+            />
+          ) : (
+            <div className="dashboard-help-list">
+              {help_rows.map((bill) => {
+                const statusKey = String(bill.status || 'pending').toLowerCase();
+                const stillOut = Math.max(0, Number(bill.balance_due ?? (Number(bill.total_amount) || 0) - (Number(bill.amount_paid) || 0)));
+                const dueLabel = formatHelpReturn(bill.due_date);
+                return (
+                  <div className={`dashboard-help-card is-${statusKey}${stillOut <= 0 ? ' is-clear' : ''}`} key={bill.id}>
+                    <button
+                      type="button"
+                      className="dashboard-help-main"
+                      onClick={() => openHelpBill(bill)}
+                    >
+                      <span className="dashboard-help-top">
+                        <span className="dashboard-help-name">{bill.customer_name}</span>
+                        <StatusBadge status={bill.status} />
+                      </span>
+                      <span className="dashboard-help-out">
+                        <small>{stillOut > 0 ? 'Still out' : 'Returned'}</small>
+                        <strong>
+                          {formatCurrency(currencySymbol, stillOut > 0 ? stillOut : bill.total_amount, { maximumFractionDigits: 0 })}
+                        </strong>
+                      </span>
+                      <span className="dashboard-help-foot">
+                        <span className="dashboard-help-inv">{bill.invoice_number}</span>
+                        <span>Return {dueLabel}</span>
+                        {stillOut > 0 ? <span>Given {money(bill.total_amount)}</span> : null}
+                      </span>
+                    </button>
+                    {stillOut > 0 ? (
+                      <div className="dashboard-help-actions">
+                        <button
+                          type="button"
+                          className="dashboard-help-pay"
+                          onClick={() => payHelp(bill)}
+                        >
+                          <Banknote size={16} />
+                          Pay
+                        </button>
+                        <button
+                          type="button"
+                          className="dashboard-help-wa"
+                          onClick={() => remindHelp(bill)}
+                          title={bill.customer_phone ? 'WhatsApp return reminder' : 'No phone'}
+                        >
+                          <MessageCircle size={16} />
+                          WA
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </DashDropdown>
 
         <DashDropdown
@@ -244,10 +487,23 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
           openId={openSection}
           onOpenChange={setOpenSection}
           title="Cashflow"
-          hint="Sales in vs Saudia buying"
+          hint={
+            help_outstanding > 0
+              ? `Help out ${money(help_outstanding)}`
+              : 'Sales in vs Saudia buying'
+          }
           icon={ArrowDownUp}
         >
-          <CashflowPanel embedded currencySymbol={currencySymbol} compact onNavigate={onNavigate} />
+          <Suspense fallback={<p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading…</p>}>
+          <CashflowPanel
+            embedded
+            currencySymbol={currencySymbol}
+            compact
+            onNavigate={onNavigate}
+            helpGiven={help_given}
+            helpOutstanding={help_outstanding}
+          />
+          </Suspense>
         </DashDropdown>
 
         <DashDropdown
@@ -303,12 +559,8 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
                             <span className="dashboard-recent-inv">{bill.invoice_number}</span>
                             <span className="dashboard-recent-dot" aria-hidden />
                             <span>{formatBillDateTime(bill)}</span>
-                            {bill.bill_type === 'supplier' ? (
-                              <>
-                                <span className="dashboard-recent-dot" aria-hidden />
-                                <span>Purchase</span>
-                              </>
-                            ) : null}
+                            <span className="dashboard-recent-dot" aria-hidden />
+                            <span>{billTypeShortLabel(bill)}</span>
                           </span>
                           <StatusBadge status={bill.status} />
                         </span>
@@ -347,6 +599,14 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
           </div>
         </DashDropdown>
       </div>
+
+      <QuickPaySheet
+        open={Boolean(payBill)}
+        bill={payBill}
+        onClose={() => setPayBill(null)}
+        onSaved={() => fetchStats(true)}
+        currencySymbol={currencySymbol}
+      />
     </div>
   );
 }

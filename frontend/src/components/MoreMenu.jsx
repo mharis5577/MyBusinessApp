@@ -31,7 +31,7 @@ export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, acti
           <ArrowDownUp size={20} />
           <span>
             <strong>Cashflow</strong>
-            <small>Sales vs Saudia buying</small>
+            <small>Sales vs Saudia · Help separate</small>
           </span>
         </button>
 

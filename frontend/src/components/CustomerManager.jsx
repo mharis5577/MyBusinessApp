@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Users, Plus, Trash2, Mail, Phone, Tag, Check, PackagePlus, BookOpen, GitMerge, MessageCircle, Bell } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Users, Plus, Trash2, Mail, Phone, Tag, Check, PackagePlus, BookOpen, GitMerge, MessageCircle, Bell, ChevronDown, HeartHandshake } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
@@ -9,11 +9,18 @@ import {
   openWhatsAppReminder,
   normalizeWhatsAppPhone,
 } from '../utils/paymentReminder';
+import {
+  billTypeBadgeClass,
+  billTypeShortLabel,
+  isHelpBill,
+} from '../utils/billTypes';
 import EmptyState from './EmptyState';
 import ConfirmDialog from './ConfirmDialog';
 import AppSelect from './AppSelect';
+import PayeeBankSelect from './PayeeBankSelect';
+import { getPaymentMethods } from '../utils/paymentMethods';
 
-export default function CustomerManager({ currencySymbol = 'Rs.' }) {
+export default function CustomerManager({ currencySymbol = 'Rs.', settings = {} }) {
   const toast = useToast();
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
@@ -21,7 +28,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
   const [customerRates, setCustomerRates] = useState([]);
   const [ledger, setLedger] = useState(null);
   const [partyFilter, setPartyFilter] = useState('all');
-  const [shopSettings, setShopSettings] = useState({});
+  const [shopSettings, setShopSettings] = useState(settings || {});
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -36,6 +43,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
   const [payeeAccountTitle, setPayeeAccountTitle] = useState('');
   const [payeeAccountNumber, setPayeeAccountNumber] = useState('');
   const [payeePaymentNotes, setPayeePaymentNotes] = useState('');
+  const addDropRef = useRef(null);
 
   // Merge tool
   const [mergePrimary, setMergePrimary] = useState('');
@@ -97,12 +105,12 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
   };
 
   useEffect(() => {
+    setShopSettings(settings || {});
+  }, [settings]);
+
+  useEffect(() => {
     apiFetchCustomers();
     apiFetchProducts();
-    apiFetch('/api/settings')
-      .then((res) => res.json())
-      .then((data) => setShopSettings(data || {}))
-      .catch(() => {});
   }, []);
 
   const openCall = (c, e) => {
@@ -200,6 +208,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
         setPayeePaymentNotes('');
         toast.success('Client profile saved');
         apiFetchCustomers();
+        if (addDropRef.current) addDropRef.current.open = false;
       } else {
         const err = await res.json().catch(() => ({}));
         toast.error(err.error || 'Could not save client');
@@ -236,9 +245,25 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
   };
 
   const filteredCustomers = useMemo(() => {
-    if (partyFilter === 'all') return customers;
-    return customers.filter((c) => (c.party_type === 'supplier' ? 'supplier' : 'customer') === partyFilter);
+    const rows =
+      partyFilter === 'all'
+        ? customers
+        : customers.filter((c) => (c.party_type === 'supplier' ? 'supplier' : 'customer') === partyFilter);
+    return [...rows].sort((a, b) => {
+      const aOut = (Number(a.sales_outstanding) || 0) + (Number(a.help_outstanding) || 0) + (Number(a.buying_outstanding) || 0);
+      const bOut = (Number(b.sales_outstanding) || 0) + (Number(b.help_outstanding) || 0) + (Number(b.buying_outstanding) || 0);
+      if (aOut !== bOut) return bOut - aOut;
+      return String(a.name).localeCompare(String(b.name));
+    });
   }, [customers, partyFilter]);
+
+  const extraPayeeBanks = useMemo(
+    () => [
+      ...getPaymentMethods(shopSettings).map((m) => m.bank_name),
+      ...customers.map((c) => c.payee_bank_name),
+    ],
+    [shopSettings, customers]
+  );
 
   const mergeSuggestions = useMemo(() => {
     const map = new Map();
@@ -386,71 +411,85 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       <div className="responsive-grid" style={{ gap: '1.5rem' }}>
-        {/* Add Customer Form */}
-        <form onSubmit={handleAddCustomer} className="glass-panel" style={{ padding: '1.5rem' }}>
-          <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Users size={18} style={{ color: 'var(--accent-teal)' }} /> Add Client Profile
-          </h3>
+        {/* Add Customer Form — collapsed until the header is tapped */}
+        <form onSubmit={handleAddCustomer} className="glass-panel client-add-panel">
+          <details className="client-add-drop" ref={addDropRef}>
+            <summary className="client-add-summary">
+              <span className="client-add-summary-lead">
+                <Users size={18} />
+                <span>
+                  <strong>Add Client Profile</strong>
+                  <span className="client-add-hint">Tap to enter name, phone, bank…</span>
+                </span>
+              </span>
+              <ChevronDown size={18} className="client-add-chevron" aria-hidden />
+            </summary>
+            <div className="client-add-body">
+              <div className="form-group">
+                <label className="form-label">Client / Company Name *</label>
+                <input className="form-input" type="text" placeholder="e.g. Peshawar Retail Client" value={name} onChange={(e) => setName(e.target.value)} required />
+              </div>
 
-          <div className="form-group">
-            <label className="form-label">Client / Company Name *</label>
-            <input className="form-input" type="text" placeholder="e.g. Peshawar Retail Client" value={name} onChange={(e) => setName(e.target.value)} required />
-          </div>
+              <div className="form-group">
+                <label className="form-label">Party type</label>
+                <AppSelect
+                  value={partyType}
+                  onChange={setPartyType}
+                  aria-label="Party type"
+                  options={[
+                    { value: 'customer', label: 'Customer (sale / retail)' },
+                    { value: 'supplier', label: 'Supplier (Saudia / buying)' },
+                  ]}
+                />
+              </div>
 
-          <div className="form-group">
-            <label className="form-label">Party type</label>
-            <AppSelect
-              value={partyType}
-              onChange={setPartyType}
-              aria-label="Party type"
-              options={[
-                { value: 'customer', label: 'Customer (sale / retail)' },
-                { value: 'supplier', label: 'Supplier (Saudia / buying)' },
-              ]}
-            />
-          </div>
+              <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Phone</label>
+                  <input className="form-input" type="text" placeholder="+92 300 0000000" value={phone} onChange={(e) => setPhone(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Email</label>
+                  <input className="form-input" type="email" placeholder="client@domain.pk" value={email} onChange={(e) => setEmail(e.target.value)} />
+                </div>
+              </div>
 
-          <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-            <div className="form-group">
-              <label className="form-label">Phone</label>
-              <input className="form-input" type="text" placeholder="+92 300 0000000" value={phone} onChange={(e) => setPhone(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Email</label>
-              <input className="form-input" type="email" placeholder="client@domain.pk" value={email} onChange={(e) => setEmail(e.target.value)} />
-            </div>
-          </div>
+              <div className="form-group">
+                <label className="form-label">Address</label>
+                <textarea className="form-textarea" rows={2} placeholder="City, Location" value={address} onChange={(e) => setAddress(e.target.value)} />
+              </div>
 
-          <div className="form-group">
-            <label className="form-label">Address</label>
-            <textarea className="form-textarea" rows={2} placeholder="City, Location" value={address} onChange={(e) => setAddress(e.target.value)} />
-          </div>
+              <div className="client-add-bank">
+                <p className="client-add-bank-title">
+                  Supplier Pay To bank (optional — for Saudia / buying bills)
+                </p>
+                <div className="form-group">
+                  <label className="form-label">Payee Bank Name</label>
+                  <PayeeBankSelect
+                    value={payeeBankName}
+                    onChange={setPayeeBankName}
+                    extraBanks={extraPayeeBanks}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Payee Account Title</label>
+                  <input className="form-input" type="text" placeholder="Account holder name" value={payeeAccountTitle} onChange={(e) => setPayeeAccountTitle(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">IBAN / Account Number</label>
+                  <input className="form-input" type="text" placeholder="SA…" value={payeeAccountNumber} onChange={(e) => setPayeeAccountNumber(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Payment Notes (SWIFT, etc.)</label>
+                  <input className="form-input" type="text" placeholder="SWIFT / remittance notes" value={payeePaymentNotes} onChange={(e) => setPayeePaymentNotes(e.target.value)} />
+                </div>
+              </div>
 
-          <div style={{ marginTop: '0.25rem', marginBottom: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)' }}>
-            <p style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.65rem' }}>
-              Supplier Pay To bank (optional — for Saudia / buying bills)
-            </p>
-            <div className="form-group">
-              <label className="form-label">Payee Bank Name</label>
-              <input className="form-input" type="text" placeholder="e.g. Al Rajhi Bank" value={payeeBankName} onChange={(e) => setPayeeBankName(e.target.value)} />
+              <button type="submit" className="btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>
+                <Plus size={16} /> Save Client Profile
+              </button>
             </div>
-            <div className="form-group">
-              <label className="form-label">Payee Account Title</label>
-              <input className="form-input" type="text" placeholder="Account holder name" value={payeeAccountTitle} onChange={(e) => setPayeeAccountTitle(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">IBAN / Account Number</label>
-              <input className="form-input" type="text" placeholder="SA…" value={payeeAccountNumber} onChange={(e) => setPayeeAccountNumber(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Payment Notes (SWIFT, etc.)</label>
-              <input className="form-input" type="text" placeholder="SWIFT / remittance notes" value={payeePaymentNotes} onChange={(e) => setPayeePaymentNotes(e.target.value)} />
-            </div>
-          </div>
-
-          <button type="submit" className="btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>
-            <Plus size={16} /> Save Client Profile
-          </button>
+          </details>
         </form>
 
         <div className="glass-panel" style={{ padding: '1.5rem' }}>
@@ -502,6 +541,21 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
                       </h4>
                       {c.phone && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}><Phone size={12} /> {c.phone}</div>}
                       {c.email && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}><Mail size={12} /> {c.email}</div>}
+                      {(Number(c.sales_outstanding) > 0 || Number(c.help_outstanding) > 0 || Number(c.buying_outstanding) > 0) && (
+                        <div className="client-out-line">
+                          {Number(c.sales_outstanding) > 0 ? (
+                            <span>Sales due {formatCurrency(currencySymbol, c.sales_outstanding)}</span>
+                          ) : null}
+                          {Number(c.help_outstanding) > 0 ? (
+                            <span className="is-help">
+                              <HeartHandshake size={12} /> Help out {formatCurrency(currencySymbol, c.help_outstanding)}
+                            </span>
+                          ) : null}
+                          {Number(c.buying_outstanding) > 0 ? (
+                            <span>Buying due {formatCurrency(currencySymbol, c.buying_outstanding)}</span>
+                          ) : null}
+                        </div>
+                      )}
                       {c.payee_account_number && (
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
                           Pay To: {c.payee_bank_name || 'Bank'} · {c.payee_account_number}
@@ -625,31 +679,62 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
                 <h4 style={{ fontSize: '0.95rem', fontWeight: 800, marginBottom: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                   <BookOpen size={16} /> Client ledger — {ledger.customer_name}
                 </h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.65rem', marginBottom: '0.85rem' }}>
+                <div className="client-ledger-stats">
                   <div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Billed</div>
-                    <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, ledger.totals.billed)}</div>
+                    <div className="client-ledger-label">Sales due</div>
+                    <div className="client-ledger-value" style={{ color: (ledger.totals.sales_outstanding || ledger.totals.outstanding) > 0 ? 'var(--status-due)' : undefined }}>
+                      {formatCurrency(currencySymbol, ledger.totals.sales_outstanding ?? ledger.totals.outstanding)}
+                    </div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Paid</div>
-                    <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--success)' }}>{formatCurrency(currencySymbol, ledger.totals.paid)}</div>
+                    <div className="client-ledger-label">Help out</div>
+                    <div className="client-ledger-value" style={{ color: (ledger.totals.help_outstanding || 0) > 0 ? 'var(--status-due)' : undefined }}>
+                      {formatCurrency(currencySymbol, ledger.totals.help_outstanding || 0)}
+                    </div>
+                  </div>
+                  {(ledger.totals.buying_outstanding || 0) > 0 ? (
+                    <div>
+                      <div className="client-ledger-label">Buying due</div>
+                      <div className="client-ledger-value">{formatCurrency(currencySymbol, ledger.totals.buying_outstanding)}</div>
+                    </div>
+                  ) : null}
+                  <div>
+                    <div className="client-ledger-label">Paid</div>
+                    <div className="client-ledger-value" style={{ color: 'var(--status-paid)' }}>
+                      {formatCurrency(currencySymbol, ledger.totals.paid)}
+                    </div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Outstanding</div>
-                    <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--warning)' }}>{formatCurrency(currencySymbol, ledger.totals.outstanding)}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Bills</div>
-                    <div style={{ fontWeight: 800 }}>{ledger.totals.bill_count}</div>
+                    <div className="client-ledger-label">Bills</div>
+                    <div className="client-ledger-value">{ledger.totals.bill_count}</div>
                   </div>
                 </div>
-                <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                  {(ledger.bills || []).slice(0, 12).map((b) => (
-                    <div key={b.id} style={{ fontSize: '0.78rem', display: 'flex', justifyContent: 'space-between', gap: '0.5rem', color: 'var(--text-secondary)' }}>
-                      <span><span className="invoice-mono">{b.invoice_number}</span> · {b.bill_date} · {b.status}</span>
-                      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', fontWeight: 700 }}>{formatCurrency(currencySymbol, b.total_amount)}</span>
-                    </div>
-                  ))}
+                {(ledger.totals.help_given || 0) > 0 && (
+                  <p className="client-ledger-help-note">
+                    Help given {formatCurrency(currencySymbol, ledger.totals.help_given)} · returned {formatCurrency(currencySymbol, ledger.totals.help_repaid || 0)}
+                  </p>
+                )}
+                <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                  {(ledger.bills || []).slice(0, 16).map((b) => {
+                    const due = Math.max(0, Number(b.balance_due ?? (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0)));
+                    const help = isHelpBill(b);
+                    return (
+                      <div key={b.id} className="client-ledger-row">
+                        <span>
+                          <span className={`type-badge ${billTypeBadgeClass(b)}`}>{billTypeShortLabel(b)}</span>
+                          {' '}
+                          <span className="invoice-mono">{b.invoice_number}</span>
+                          {' · '}
+                          {help ? `Return ${b.due_date || '—'}` : b.bill_date}
+                        </span>
+                        <span className="client-ledger-row-amt">
+                          {due > 0
+                            ? formatCurrency(currencySymbol, due)
+                            : formatCurrency(currencySymbol, b.total_amount)}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

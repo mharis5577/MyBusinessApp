@@ -6,9 +6,11 @@ import { openDB } from 'idb';
 import { pakistanToday, pakistanYearMonth, pakistanNowTime } from '../utils/pakistan';
 import { allItemsReturned, isCancelled, recalcBillTotals, remainingQty } from '../utils/billAdjust';
 import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from '../utils/paymentMethods';
+import { normalizeBillType, invoicePrefixForType, partyTypeForBill, outstandingByPartyName } from '../utils/billTypes';
+import { deletePaymentProofFile } from '../utils/paymentProof';
 
 const DB_NAME = 'elite-chocolate-pos';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 function normalizePartyType(value) {
   return value === 'supplier' ? 'supplier' : 'customer';
@@ -91,7 +93,7 @@ function enrichBill(bill) {
 
 async function getDb() {
   return openDB(DB_NAME, DB_VERSION, {
-    upgrade(db) {
+    upgrade(db, _oldVersion, _newVersion, transaction) {
       const stores = [
         'settings',
         'customers',
@@ -108,6 +110,13 @@ async function getDb() {
           db.createObjectStore(name, { keyPath: 'id', autoIncrement: true });
         }
       }
+      const ensureBillIdIndex = (storeName) => {
+        if (!db.objectStoreNames.contains(storeName)) return;
+        const store = transaction.objectStore(storeName);
+        if (!store.indexNames.contains('bill_id')) store.createIndex('bill_id', 'bill_id');
+      };
+      ensureBillIdIndex('bill_items');
+      ensureBillIdIndex('bill_payments');
     },
   });
 }
@@ -140,7 +149,7 @@ async function nextId(db, store) {
 async function generateNextInvoiceNumber(bType = 'customer', yearOverride = null) {
   const db = await ensureSeeded();
   const year = yearOverride || Number(String(pakistanToday()).slice(0, 4)) || new Date().getFullYear();
-  const prefix = bType === 'supplier' ? 'SAU' : 'INV';
+  const prefix = invoicePrefixForType(bType);
   const bills = await db.getAll('bills');
   let maxNum = 0;
   const re = new RegExp(`^${prefix}-${year}-(\\d+)$`);
@@ -188,35 +197,68 @@ function groupRowsByBillId(rows) {
 
 function paymentsWithoutScreenshots(payments) {
   return (payments || []).map((p) => {
-    if (!p?.screenshot_data) return p;
+    if (!p) return p;
+    const has = Boolean(p.screenshot_data || p.screenshot_path || p.screenshot_thumb);
+    const keepFull = p.screenshot_data && !p.screenshot_path && !p.screenshot_thumb;
+    if (keepFull) return { ...p, has_screenshot: true };
+    if (!p.screenshot_data) return has ? { ...p, has_screenshot: true } : p;
     const { screenshot_data, ...rest } = p;
     return { ...rest, has_screenshot: true };
   });
 }
 
+async function rowsForBill(db, storeName, billId) {
+  const num = Number(billId);
+  const str = String(billId ?? '');
+  const fromIndex = async (key) => {
+    try {
+      const rows = await db.getAllFromIndex(storeName, 'bill_id', key);
+      return Array.isArray(rows) ? rows : [];
+    } catch {
+      return null;
+    }
+  };
+  let rows = Number.isFinite(num) ? await fromIndex(num) : [];
+  if (!rows?.length) {
+    const alt = await fromIndex(str);
+    if (alt?.length) rows = alt;
+  }
+  if (rows?.length) return rows;
+  try {
+    return (await db.getAll(storeName)).filter(
+      (row) => Number(row.bill_id) === num || String(row.bill_id) === str
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function deleteRowsForBill(db, storeName, billId) {
+  const rows = await rowsForBill(db, storeName, billId);
+  for (const row of rows) await db.delete(storeName, row.id);
+  return rows;
+}
+
 async function attachBillRelations(db, bill, opts = {}) {
-  const includeScreenshots = opts.includeScreenshots !== false;
   const includePayments = opts.includePayments !== false;
-  const items =
-    opts.itemsByBill?.get(Number(bill.id)) ||
-    (await db.getAll('bill_items')).filter((i) => i.bill_id === bill.id);
+  const items = Array.isArray(
+    opts.itemsByBill?.get(Number(bill.id))
+  )
+    ? opts.itemsByBill.get(Number(bill.id))
+    : await rowsForBill(db, 'bill_items', bill.id);
   let payments = [];
   if (includePayments) {
-    payments =
-      opts.paymentsByBill?.get(Number(bill.id)) ||
-      (await db.getAll('bill_payments'))
-        .filter((p) => p.bill_id === bill.id)
-        .sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
-    if (opts.paymentsByBill) {
-      payments = [...payments].sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
-    }
-    if (!includeScreenshots) payments = paymentsWithoutScreenshots(payments);
+    const fromMap = opts.paymentsByBill?.get(Number(bill.id));
+    payments = Array.isArray(fromMap) ? [...fromMap] : await rowsForBill(db, 'bill_payments', bill.id);
+    payments.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+    payments = paymentsWithoutScreenshots(payments);
   }
-  return enrichBill({ ...bill, items, payments });
+  return enrichBill({ ...bill, items: items || [], payments });
 }
 
 async function restoreStockForQtys(db, bill, items, qtyByItemId, reason) {
-  const bType = bill.bill_type === 'supplier' ? 'supplier' : 'customer';
+  const bType = normalizeBillType(bill.bill_type);
+  if (bType === 'help') return;
   for (const it of items) {
     const qty = Number(qtyByItemId.get(Number(it.id)) || 0);
     if (!qty || !it.product_id) continue;
@@ -241,7 +283,7 @@ async function refreshBillPaidStatus(db, billId) {
   const bill = await db.get('bills', billId);
   if (!bill) return null;
   if (isCancelled(bill)) return attachBillRelations(db, bill);
-  const payments = (await db.getAll('bill_payments')).filter((p) => p.bill_id === billId);
+  const payments = await rowsForBill(db, 'bill_payments', billId);
   const paid = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const total = Number(bill.total_amount) || 0;
   let status = bill.status;
@@ -545,7 +587,19 @@ async function handleLocalRequestInner(url, options = {}) {
         customers = customers.filter((c) => normalizePartyType(c.party_type) === type);
       }
       customers.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-      return jsonOk(customers);
+      const bills = await db.getAll('bills');
+      const byName = outstandingByPartyName(bills);
+      return jsonOk(
+        customers.map((c) => {
+          const rec = byName[String(c.name || '').trim().toLowerCase()] || {};
+          return {
+            ...c,
+            sales_outstanding: rec.sales_outstanding || 0,
+            help_outstanding: rec.help_outstanding || 0,
+            buying_outstanding: rec.buying_outstanding || 0,
+          };
+        })
+      );
     }
     if (parts.length === 2 && method === 'POST') {
       if (!body.name) return jsonErr('Customer name is required');
@@ -754,7 +808,7 @@ async function handleLocalRequestInner(url, options = {}) {
   // BILLS
   if (parts[1] === 'bills') {
     if (parts[2] === 'next-number' && method === 'GET') {
-      const type = search.get('type') === 'supplier' ? 'supplier' : 'customer';
+      const type = normalizeBillType(search.get('type'));
       const invoice_number = await generateNextInvoiceNumber(type);
       return jsonOk({ invoice_number });
     }
@@ -764,7 +818,10 @@ async function handleLocalRequestInner(url, options = {}) {
       const type = search.get('type');
       const status = search.get('status');
       const q = (search.get('search') || '').trim().toLowerCase();
-      if (type && type !== 'all') bills = bills.filter((b) => b.bill_type === type);
+      if (type && type !== 'all') {
+        const t = normalizeBillType(type);
+        bills = bills.filter((b) => normalizeBillType(b.bill_type) === t);
+      }
       if (status && status !== 'all') bills = bills.filter((b) => b.status === status);
       if (q) {
         bills = bills.filter(
@@ -775,20 +832,14 @@ async function handleLocalRequestInner(url, options = {}) {
         );
       }
       bills.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
-      // One pass over items (no payment screenshots) — list used to freeze phones.
-      const itemsByBill = groupRowsByBillId(await db.getAll('bill_items'));
-      const out = bills.map((bill) =>
-        enrichBill({
-          ...bill,
-          items: itemsByBill.get(Number(bill.id)) || [],
-        })
-      );
+      // List rows stay lean (no line items). Edit / View / Duplicate load /api/bills/:id.
+      const out = bills.map((bill) => enrichBill(bill));
       return jsonOk(out);
     }
 
     if (parts.length === 2 && method === 'POST') {
       if (!body.customer_name || !String(body.customer_name).trim()) {
-        return jsonErr('Customer or Supplier name is required');
+        return jsonErr('Name is required');
       }
       if (!body.items || !Array.isArray(body.items) || body.items.length === 0) {
         return jsonErr('At least one line item is required');
@@ -797,7 +848,7 @@ async function handleLocalRequestInner(url, options = {}) {
         return jsonErr('Every line item needs a description');
       }
 
-      const bType = body.bill_type === 'supplier' ? 'supplier' : 'customer';
+      const bType = normalizeBillType(body.bill_type);
       let invNum;
       try {
         invNum = await allocateUniqueInvoiceNumber(
@@ -867,6 +918,9 @@ async function handleLocalRequestInner(url, options = {}) {
       const custName = String(body.customer_name).trim().toLowerCase();
       const allCustomers = await db.getAll('customers');
       const existingCust = allCustomers.find((c) => String(c.name || '').toLowerCase() === custName);
+      const partyType = bType === 'help'
+        ? normalizePartyType(existingCust?.party_type)
+        : partyTypeForBill(bType);
       if (!existingCust) {
         const cid = await allocateUniqueId(db, 'customers');
         try {
@@ -877,7 +931,7 @@ async function handleLocalRequestInner(url, options = {}) {
             phone: body.customer_phone || '',
             address: body.customer_address || '',
             tax_id: '',
-            party_type: bType,
+            party_type: partyType,
             payee_bank_name: body.payee_bank_name || '',
             payee_account_title: body.payee_account_title || '',
             payee_account_number: body.payee_account_number || '',
@@ -890,7 +944,7 @@ async function handleLocalRequestInner(url, options = {}) {
       } else {
         await db.put('customers', {
           ...existingCust,
-          party_type: bType,
+          party_type: partyType,
           payee_bank_name: body.payee_bank_name || existingCust.payee_bank_name || '',
           payee_account_title: body.payee_account_title || existingCust.payee_account_title || '',
           payee_account_number: body.payee_account_number || existingCust.payee_account_number || '',
@@ -956,7 +1010,7 @@ async function handleLocalRequestInner(url, options = {}) {
       if (isCancelled(existing)) return jsonErr('Cancelled bills cannot be edited');
       const updated = {
         ...existing,
-        bill_type: body.bill_type === 'supplier' ? 'supplier' : body.bill_type || existing.bill_type,
+        bill_type: body.bill_type ? normalizeBillType(body.bill_type) : existing.bill_type,
         invoice_number: body.invoice_number ?? existing.invoice_number,
         customer_name: body.customer_name ?? existing.customer_name,
         customer_email: body.customer_email ?? existing.customer_email ?? '',
@@ -992,10 +1046,7 @@ async function handleLocalRequestInner(url, options = {}) {
       await db.put('bills', updated);
 
       if (Array.isArray(body.items)) {
-        const items = await db.getAll('bill_items');
-        for (const it of items) {
-          if (it.bill_id === id) await db.delete('bill_items', it.id);
-        }
+        await deleteRowsForBill(db, 'bill_items', id);
         for (const item of body.items) {
           const qty = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
           const price = Number(item.unit_price) || 0;
@@ -1018,17 +1069,14 @@ async function handleLocalRequestInner(url, options = {}) {
       const id = Number(parts[2]);
       const bill = await db.get('bills', id);
       if (!bill) return jsonErr('Bill not found', 404);
-      const items = (await db.getAll('bill_items')).filter((it) => it.bill_id === id);
+      const items = await rowsForBill(db, 'bill_items', id);
       if (!isCancelled(bill)) {
         const qtyByItemId = new Map(items.map((it) => [Number(it.id), remainingQty(it)]));
         await restoreStockForQtys(db, bill, items, qtyByItemId, 'bill delete');
       }
-      for (const store of ['bill_payments', 'bill_items']) {
-        const rows = await db.getAll(store);
-        for (const r of rows) {
-          if (r.bill_id === id) await db.delete(store, r.id);
-        }
-      }
+      const payRows = await deleteRowsForBill(db, 'bill_payments', id);
+      for (const p of payRows) await deletePaymentProofFile(p);
+      await deleteRowsForBill(db, 'bill_items', id);
       await db.delete('bills', id);
       return jsonOk({ success: true, message: 'Bill deleted successfully' });
     }
@@ -1041,7 +1089,7 @@ async function handleLocalRequestInner(url, options = {}) {
       if (!bill) return jsonErr('Bill not found', 404);
       if (isCancelled(bill)) return jsonErr('Cancelled bills cannot change status');
       const total = Number(bill.total_amount) || 0;
-      const payments = (await db.getAll('bill_payments')).filter((p) => p.bill_id === id);
+      const payments = await rowsForBill(db, 'bill_payments', id);
       let paidFromPayments = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
 
       if (status === 'paid') {
@@ -1083,7 +1131,7 @@ async function handleLocalRequestInner(url, options = {}) {
       const bill = await db.get('bills', id);
       if (!bill) return jsonErr('Bill not found', 404);
       if (isCancelled(bill)) return jsonErr('Bill is already cancelled');
-      const items = (await db.getAll('bill_items')).filter((it) => it.bill_id === id);
+      const items = await rowsForBill(db, 'bill_items', id);
       const qtyByItemId = new Map(items.map((it) => [Number(it.id), remainingQty(it)]));
       await restoreStockForQtys(db, bill, items, qtyByItemId, 'bill cancel');
       const reason = String(body.reason || '').trim();
@@ -1104,7 +1152,7 @@ async function handleLocalRequestInner(url, options = {}) {
       const bill = await db.get('bills', id);
       if (!bill) return jsonErr('Bill not found', 404);
       if (isCancelled(bill)) return jsonErr('Cancelled bills cannot be returned');
-      const items = (await db.getAll('bill_items')).filter((it) => it.bill_id === id);
+      const items = await rowsForBill(db, 'bill_items', id);
       const requested = Array.isArray(body.items) ? body.items : [];
       const qtyByItemId = new Map();
       for (const row of requested) {
@@ -1125,7 +1173,7 @@ async function handleLocalRequestInner(url, options = {}) {
         const next = { ...it, returned_qty, total: Math.round((Number(it.quantity) - returned_qty) * (Number(it.unit_price) || 0) * 100) / 100 };
         await db.put('bill_items', next);
       }
-      const freshItems = (await db.getAll('bill_items')).filter((it) => it.bill_id === id);
+      const freshItems = await rowsForBill(db, 'bill_items', id);
       const totals = recalcBillTotals(bill, freshItems);
       const reason = String(body.reason || '').trim();
       const summary = [...qtyByItemId.entries()]
@@ -1172,6 +1220,8 @@ async function handleLocalRequestInner(url, options = {}) {
         payment_date: body.payment_date || pakistanToday(),
         notes: body.notes || '',
         screenshot_data: body.screenshot_data || '',
+        screenshot_path: body.screenshot_path || '',
+        screenshot_thumb: body.screenshot_thumb || '',
         created_at: new Date().toISOString(),
       });
       return jsonOk(await refreshBillPaidStatus(db, id), 201);
@@ -1179,10 +1229,10 @@ async function handleLocalRequestInner(url, options = {}) {
 
     if (parts[3] === 'payments' && method === 'GET') {
       const id = Number(parts[2]);
-      const payments = (await db.getAll('bill_payments'))
-        .filter((p) => p.bill_id === id)
-        .sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
-      return jsonOk(payments);
+      const payments = (await rowsForBill(db, 'bill_payments', id)).sort(
+        (a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)
+      );
+      return jsonOk(paymentsWithoutScreenshots(payments));
     }
   }
 
@@ -1193,8 +1243,8 @@ async function handleLocalRequestInner(url, options = {}) {
     const threshold = Number(settings.low_stock_threshold) || 5;
     const products = await db.getAll('products');
     const paid = bills.filter((b) => b.status === 'paid');
-    const pending = bills.filter((b) => b.status === 'pending');
-    const overdue = bills.filter((b) => b.status === 'overdue');
+    const pending = bills.filter((b) => b.status === 'pending' && normalizeBillType(b.bill_type) !== 'help');
+    const overdue = bills.filter((b) => b.status === 'overdue' && normalizeBillType(b.bill_type) !== 'help');
     const outstandingOf = (list) =>
       list.reduce((s, b) => {
         const due = Math.max(0, (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0));
@@ -1203,12 +1253,24 @@ async function handleLocalRequestInner(url, options = {}) {
     const recent = [...bills].sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)).slice(0, 5);
     const today = pakistanToday();
     const monthPrefix = pakistanYearMonth(today);
-    const items = await db.getAll('bill_items');
     const productById = new Map(products.map((p) => [Number(p.id), p]));
-    const activeSales = bills.filter((b) => b.bill_type !== 'supplier' && !isCancelled(b));
+    const activeSales = bills.filter((b) => normalizeBillType(b.bill_type) === 'customer' && !isCancelled(b));
     const todaySales = activeSales.filter((b) => String(b.bill_date) === today);
     const monthSales = activeSales.filter((b) => String(b.bill_date || '').startsWith(monthPrefix));
-    const itemsByBill = groupRowsByBillId(items);
+    const costIds = new Set([...todaySales, ...monthSales].map((b) => Number(b.id)));
+    let itemsByBill = new Map();
+    if (costIds.size && costIds.size <= 80) {
+      for (const bid of costIds) {
+        itemsByBill.set(Number(bid), await rowsForBill(db, 'bill_items', bid));
+      }
+    } else if (costIds.size) {
+      try {
+        const items = await db.getAll('bill_items');
+        itemsByBill = groupRowsByBillId(items.filter((it) => costIds.has(Number(it.bill_id))));
+      } catch {
+        itemsByBill = new Map();
+      }
+    }
     const sumSaleCost = (list) => {
       let sales = 0;
       let cost = 0;
@@ -1227,9 +1289,21 @@ async function handleLocalRequestInner(url, options = {}) {
     };
     const todayTotals = sumSaleCost(todaySales);
     const monthTotals = sumSaleCost(monthSales);
+    const helpBills = bills
+      .filter((b) => normalizeBillType(b.bill_type) === 'help' && !isCancelled(b))
+      .map(enrichBill)
+      .sort((a, b) => {
+        const aDue = Number(a.balance_due) > 0 ? 0 : 1;
+        const bDue = Number(b.balance_due) > 0 ? 0 : 1;
+        if (aDue !== bDue) return aDue - bDue;
+        return String(a.due_date || '').localeCompare(String(b.due_date || ''));
+      });
+    const help_given = helpBills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const help_repaid = helpBills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
+    const help_outstanding = Math.round(Math.max(0, help_given - help_repaid) * 100) / 100;
     return jsonOk({
       total_revenue: bills
-        .filter((b) => b.bill_type !== 'supplier' && !isCancelled(b))
+        .filter((b) => normalizeBillType(b.bill_type) === 'customer' && !isCancelled(b))
         .reduce((s, b) => s + (Number(b.amount_paid) || 0), 0),
       total_pending: outstandingOf(pending),
       total_overdue: outstandingOf(overdue),
@@ -1249,6 +1323,24 @@ async function handleLocalRequestInner(url, options = {}) {
       sales_month: monthTotals.sales,
       cost_month: monthTotals.cost,
       profit_month: monthTotals.profit,
+      help_given: Math.round(help_given * 100) / 100,
+      help_repaid: Math.round(help_repaid * 100) / 100,
+      help_outstanding,
+      help_count: helpBills.length,
+      help_bills: helpBills.map((b) => ({
+        id: b.id,
+        invoice_number: b.invoice_number,
+        customer_name: b.customer_name,
+        customer_phone: b.customer_phone,
+        bill_date: b.bill_date,
+        due_date: b.due_date,
+        bill_time: b.bill_time,
+        total_amount: b.total_amount,
+        amount_paid: b.amount_paid,
+        balance_due: b.balance_due,
+        status: b.status,
+        bill_type: b.bill_type,
+      })),
     });
   }
 
@@ -1274,6 +1366,14 @@ async function handleLocalRequestInner(url, options = {}) {
     const totalPaid = active.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
     const totalAdvance = advances.reduce((s, b) => s + (Number(b.amount) || 0), 0);
     const availableAdvance = advances.reduce((s, b) => s + (Number(b.remaining) || 0), 0);
+    const sales = active.filter((b) => normalizeBillType(b.bill_type) === 'customer');
+    const helpBills = active.filter((b) => normalizeBillType(b.bill_type) === 'help');
+    const buying = active.filter((b) => normalizeBillType(b.bill_type) === 'supplier');
+    const sumDue = (list) =>
+      Math.round(list.reduce((s, b) => s + Math.max(0, Number(b.balance_due) || 0), 0) * 100) / 100;
+    const salesOutstanding = sumDue(sales);
+    const helpGiven = helpBills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const helpRepaid = helpBills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
     return jsonOk({
       customer_name: name,
       bills: enriched,
@@ -1283,7 +1383,12 @@ async function handleLocalRequestInner(url, options = {}) {
         paid: totalPaid,
         advances: totalAdvance,
         available_advance: availableAdvance,
-        outstanding: Math.max(0, totalBilled - totalPaid),
+        outstanding: salesOutstanding,
+        sales_outstanding: salesOutstanding,
+        help_given: Math.round(helpGiven * 100) / 100,
+        help_repaid: Math.round(helpRepaid * 100) / 100,
+        help_outstanding: sumDue(helpBills),
+        buying_outstanding: sumDue(buying),
         bill_count: bills.length,
       },
     });
@@ -1298,11 +1403,14 @@ async function handleLocalRequestInner(url, options = {}) {
     const bills = (await db.getAll('bills'))
       .filter((b) => String(b.bill_date || '').startsWith(prefix) && !isCancelled(b))
       .map(enrichBill);
-    const sales = bills.filter((b) => b.bill_type !== 'supplier');
-    const buying = bills.filter((b) => b.bill_type === 'supplier');
+    const sales = bills.filter((b) => normalizeBillType(b.bill_type) === 'customer');
+    const buying = bills.filter((b) => normalizeBillType(b.bill_type) === 'supplier');
+    const helpBills = bills.filter((b) => normalizeBillType(b.bill_type) === 'help');
     const salesTotal = sales.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
     const salesPaid = sales.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
     const buyingTotal = buying.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const helpGiven = helpBills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const helpRepaid = helpBills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
     return jsonOk({
       year,
       month,
@@ -1314,6 +1422,10 @@ async function handleLocalRequestInner(url, options = {}) {
       sales_outstanding: Math.max(0, salesTotal - salesPaid),
       buying_total: buyingTotal,
       estimated_profit: salesTotal - buyingTotal,
+      help_count: helpBills.length,
+      help_given: Math.round(helpGiven * 100) / 100,
+      help_repaid: Math.round(helpRepaid * 100) / 100,
+      help_outstanding: Math.round(Math.max(0, helpGiven - helpRepaid) * 100) / 100,
       bills,
     });
   }
@@ -1377,7 +1489,7 @@ async function handleLocalRequestInner(url, options = {}) {
       products: await db.getAll('products'),
       bills: await db.getAll('bills'),
       bill_items: await db.getAll('bill_items'),
-      bill_payments: await db.getAll('bill_payments'),
+      bill_payments: paymentsWithoutScreenshots(await db.getAll('bill_payments')),
       advances: await db.getAll('advances'),
       customer_product_rates: await db.getAll('rates'),
       stock_adjustments: await db.getAll('stock_adjustments'),
@@ -1463,10 +1575,14 @@ async function handleLocalRequestInner(url, options = {}) {
     const advances = (await db.getAll('advances')).sort(
       (a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)
     );
-    const sales = bills.filter((b) => b.bill_type !== 'supplier' && !isCancelled(b));
-    const buying = bills.filter((b) => b.bill_type === 'supplier' && !isCancelled(b));
+    const sales = bills.filter((b) => normalizeBillType(b.bill_type) === 'customer' && !isCancelled(b));
+    const buying = bills.filter((b) => normalizeBillType(b.bill_type) === 'supplier' && !isCancelled(b));
+    const helpBills = bills.filter((b) => normalizeBillType(b.bill_type) === 'help' && !isCancelled(b));
     const total_sales = sales.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
     const buying_cost = buying.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const help_given = helpBills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const help_repaid = helpBills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
+    const help_outstanding = Math.round(Math.max(0, help_given - help_repaid) * 100) / 100;
     const paid_sales = sales
       .filter((b) => b.status === 'paid')
       .reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
@@ -1489,18 +1605,21 @@ async function handleLocalRequestInner(url, options = {}) {
         .slice(0, 40);
 
       money_flow = recent.map((b) => {
-        const isSupplier = b.bill_type === 'supplier';
+        const t = normalizeBillType(b.bill_type);
         const amount = isCancelled(b) ? 0 : Number(b.total_amount) || 0;
+        const isSupplier = t === 'supplier';
+        const isHelp = t === 'help';
+        const kind = isHelp ? 'Help' : isSupplier ? 'Buying' : 'Sale';
         return {
           id: b.id,
           date: b.bill_date,
           invoice_number: b.invoice_number,
-          selling: isSupplier ? 0 : amount,
+          selling: isSupplier || isHelp ? 0 : amount,
           buying: isSupplier ? amount : 0,
-          expenditure: 0,
-          profit: isSupplier ? -amount : amount,
-          comment: `${isSupplier ? 'Buying' : 'Sale'} · ${b.customer_name}${b.notes ? ` · ${b.notes}` : ''} (${b.status})`,
-          bill_type: b.bill_type || 'customer',
+          expenditure: isHelp ? amount : 0,
+          profit: isHelp ? 0 : isSupplier ? -amount : amount,
+          comment: `${kind} · ${b.customer_name}${b.notes ? ` · ${b.notes}` : ''} (${b.status})`,
+          bill_type: t,
           status: b.status,
         };
       });
@@ -1509,7 +1628,10 @@ async function handleLocalRequestInner(url, options = {}) {
     return jsonOk({
       total_sales,
       buying_cost,
-      expenditure: 0,
+      expenditure: help_outstanding,
+      help_given,
+      help_repaid,
+      help_outstanding,
       net_profit,
       total_advance,
       net_balance,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import {
   LayoutDashboard,
   PlusCircle,
@@ -16,21 +16,17 @@ import {
   Clock,
 } from 'lucide-react';
 import DashboardStats from './components/DashboardStats';
-import SmartBillForm from './components/SmartBillForm';
-import InvoicePreview from './components/InvoicePreview';
-import BillsDatabase from './components/BillsDatabase';
-import CustomerManager from './components/CustomerManager';
-import SettingsManager from './components/SettingsManager';
-import CashflowPanel from './components/CashflowPanel';
-import AgingReport from './components/AgingReport';
 import MoreMenu from './components/MoreMenu';
 import SplashScreen from './components/SplashScreen';
 import BrandMark, { BrandWordmark } from './components/BrandMark';
 import DataSafetySheet, { hasSeenDataSafety } from './components/DataSafetySheet';
+import ErrorBoundary from './components/ErrorBoundary';
 import { apiFetch } from './api/client';
 import { useToast } from './toast/ToastContext';
 import { maybeAutoBackup } from './utils/backupManager';
 import { dueRemindersEnabled, syncDueReminders } from './utils/dueReminders';
+import { loadFullBill } from './utils/loadBill';
+import { ensureUrduFont } from './utils/webFonts';
 import {
   authenticateBiometric,
   biometricEnabled,
@@ -38,6 +34,14 @@ import {
   lockRequired,
   pinEnabled,
 } from './utils/appSecurity';
+
+const SmartBillForm = lazy(() => import('./components/SmartBillForm'));
+const InvoicePreview = lazy(() => import('./components/InvoicePreview'));
+const BillsDatabase = lazy(() => import('./components/BillsDatabase'));
+const CustomerManager = lazy(() => import('./components/CustomerManager'));
+const SettingsManager = lazy(() => import('./components/SettingsManager'));
+const CashflowPanel = lazy(() => import('./components/CashflowPanel'));
+const AgingReport = lazy(() => import('./components/AgingReport'));
 
 const THEME_KEY = 'elite-chocolate-theme';
 const PIN_UNLOCK_KEY = 'elite-chocolate-pin-ok';
@@ -54,6 +58,8 @@ const TAB_ORDER = [
   'preview',
 ];
 
+const KEEP_ALIVE_TABS = ['dashboard', 'create', 'database'];
+
 function getInitialTheme() {
   try {
     const saved = localStorage.getItem(THEME_KEY);
@@ -62,6 +68,14 @@ function getInitialTheme() {
     /* ignore */
   }
   return 'light';
+}
+
+function TabFallback() {
+  return (
+    <div className="tab-fallback" aria-busy="true">
+      Loading…
+    </div>
+  );
 }
 
 export default function App() {
@@ -95,6 +109,7 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [showDataSafety, setShowDataSafety] = useState(false);
   const [focusBackup, setFocusBackup] = useState(false);
+  const [aliveTabs, setAliveTabs] = useState({ dashboard: true });
   const hideAtRef = React.useRef(null);
 
   const finishSplash = useCallback(() => setShowSplash(false), []);
@@ -104,7 +119,19 @@ export default function App() {
     const from = TAB_ORDER.indexOf(currentTab);
     const to = TAB_ORDER.indexOf(tab);
     setTabDir(from >= 0 && to >= 0 && to < from ? 'back' : 'forward');
+    if (KEEP_ALIVE_TABS.includes(tab)) {
+      setAliveTabs((prev) => (prev[tab] ? prev : { ...prev, [tab]: true }));
+    }
     setCurrentTab(tab);
+    requestAnimationFrame(() => {
+      try {
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+      } catch {
+        /* ignore */
+      }
+    });
   }, [currentTab]);
 
   const openBackupSettings = useCallback(() => {
@@ -121,6 +148,10 @@ export default function App() {
       /* ignore */
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (settings.urdu_labels) ensureUrduFont();
+  }, [settings.urdu_labels]);
 
   const fetchSettings = useCallback(() => {
     apiFetch('/api/settings')
@@ -272,14 +303,32 @@ export default function App() {
     goToTab('preview');
   };
 
-  const handleViewBill = (bill) => {
-    setSelectedBill(bill);
-    goToTab('preview');
+  const handleViewBill = async (bill) => {
+    try {
+      const full = await loadFullBill(bill);
+      if (!full?.id) {
+        toast.error('Could not open this bill');
+        return;
+      }
+      setSelectedBill(full);
+      goToTab('preview');
+    } catch (err) {
+      toast.error(err?.message || 'Could not open this bill');
+    }
   };
 
-  const handleDuplicateBill = (bill) => {
-    setDraftBill(bill);
-    goToTab('create');
+  const handleDuplicateBill = async (bill) => {
+    try {
+      const full = await loadFullBill(bill);
+      if (!full?.id) {
+        toast.error('Could not duplicate this bill');
+        return;
+      }
+      setDraftBill(full);
+      goToTab('create');
+    } catch (err) {
+      toast.error(err?.message || 'Could not duplicate this bill');
+    }
   };
 
   const toggleTheme = () => {
@@ -299,7 +348,7 @@ export default function App() {
   const moreActive = currentTab === 'cashflow' || currentTab === 'aging' || currentTab === 'settings';
 
   if (showSplash) {
-    return <SplashScreen onDone={finishSplash} />;
+    return <SplashScreen onDone={finishSplash} minMs={700} />;
   }
 
   if (needsLock) {
@@ -439,92 +488,127 @@ export default function App() {
       </header>
 
       <main className="app-container">
-        <div key={currentTab} className={`tab-page tab-page--${tabDir}`}>
-          {currentTab === 'dashboard' && (
-            <DashboardStats
-              onNavigate={(tab) => {
-                if (tab === 'backup') {
-                  openBackupSettings();
-                  return;
-                }
-                goToTab(tab);
-              }}
-              onViewBill={(bill) => {
-                setSelectedBill(bill);
-                goToTab('preview');
-              }}
-              currencySymbol={settings.currency_symbol || 'Rs.'}
-              settings={settings}
-            />
-          )}
-
-          {currentTab === 'create' && (
-            <SmartBillForm
-              onBillGenerated={handleBillGenerated}
-              currencySymbol={settings.currency_symbol || 'Rs.'}
-              defaultTaxRate={settings.default_tax_rate ?? 0}
-              draftBill={draftBill}
-              onDraftConsumed={() => setDraftBill(null)}
-            />
-          )}
-
-          {currentTab === 'preview' && (
-            <InvoicePreview
-              bill={selectedBill}
-              onBack={() => goToTab('database')}
-              onDuplicate={handleDuplicateBill}
-              onBillUpdated={setSelectedBill}
-              currencySymbol={settings.currency_symbol || 'Rs.'}
-              urduLabels={Boolean(settings.urdu_labels)}
-            />
-          )}
-
-          {currentTab === 'database' && (
-            <BillsDatabase
-              onViewBill={handleViewBill}
-              onDuplicateBill={handleDuplicateBill}
-              onNavigate={(tab) => goToTab(tab)}
-              currencySymbol={settings.currency_symbol || 'Rs.'}
-              urduLabels={Boolean(settings.urdu_labels)}
-              settings={settings}
-            />
-          )}
-
-          {currentTab === 'customers' && <CustomerManager currencySymbol={settings.currency_symbol || 'Rs.'} />}
-
-          {currentTab === 'cashflow' && (
-            <CashflowPanel currencySymbol={settings.currency_symbol || 'Rs.'} onNavigate={(tab) => goToTab(tab)} />
-          )}
-
-          {currentTab === 'aging' && (
-            <AgingReport
-              currencySymbol={settings.currency_symbol || 'Rs.'}
-              settings={settings}
-              onOpenBill={async (row) => {
-                try {
-                  const res = await apiFetch(`/api/bills/${row.id}`);
-                  const bill = await res.json();
-                  if (res.ok && bill?.id) {
-                    setSelectedBill(bill);
-                    goToTab('preview');
+        {aliveTabs.dashboard && (
+          <div
+            className={`tab-page${currentTab === 'dashboard' ? ` tab-page--${tabDir}` : ''}`}
+            hidden={currentTab !== 'dashboard'}
+          >
+            <ErrorBoundary label="Home">
+              <DashboardStats
+                active={currentTab === 'dashboard'}
+                onNavigate={(tab) => {
+                  if (tab === 'backup') {
+                    openBackupSettings();
                     return;
                   }
-                } catch (_) {
-                  /* fall through */
-                }
-                goToTab('database');
-              }}
-            />
-          )}
+                  goToTab(tab);
+                }}
+                onViewBill={handleViewBill}
+                currencySymbol={settings.currency_symbol || 'Rs.'}
+                settings={settings}
+              />
+            </ErrorBoundary>
+          </div>
+        )}
 
-          {currentTab === 'settings' && (
-            <SettingsManager
-              onSettingsUpdated={fetchSettings}
-              focusBackup={focusBackup}
-              onFocusHandled={() => setFocusBackup(false)}
-            />
-          )}
-        </div>
+        {aliveTabs.create && (
+          <div
+            className={`tab-page${currentTab === 'create' ? ` tab-page--${tabDir}` : ''}`}
+            hidden={currentTab !== 'create'}
+          >
+            <ErrorBoundary label="New bill">
+              <Suspense fallback={<TabFallback />}>
+                <SmartBillForm
+                  active={currentTab === 'create'}
+                  onBillGenerated={handleBillGenerated}
+                  currencySymbol={settings.currency_symbol || 'Rs.'}
+                  defaultTaxRate={settings.default_tax_rate ?? 0}
+                  draftBill={draftBill}
+                  onDraftConsumed={() => setDraftBill(null)}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {aliveTabs.database && (
+          <div
+            className={`tab-page${currentTab === 'database' ? ` tab-page--${tabDir}` : ''}`}
+            hidden={currentTab !== 'database'}
+          >
+            <ErrorBoundary label="Bills">
+              <Suspense fallback={<TabFallback />}>
+                <BillsDatabase
+                  active={currentTab === 'database'}
+                  onViewBill={handleViewBill}
+                  onDuplicateBill={handleDuplicateBill}
+                  onNavigate={(tab) => goToTab(tab)}
+                  currencySymbol={settings.currency_symbol || 'Rs.'}
+                  urduLabels={Boolean(settings.urdu_labels)}
+                  settings={settings}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {!KEEP_ALIVE_TABS.includes(currentTab) && (
+          <div key={currentTab} className={`tab-page tab-page--${tabDir}`}>
+            <ErrorBoundary label="Screen" onReset={() => goToTab('dashboard')}>
+              <Suspense fallback={<TabFallback />}>
+              {currentTab === 'preview' && (
+                <InvoicePreview
+                  bill={selectedBill}
+                  onBack={() => goToTab('database')}
+                  onDuplicate={handleDuplicateBill}
+                  onBillUpdated={setSelectedBill}
+                  currencySymbol={settings.currency_symbol || 'Rs.'}
+                  urduLabels={Boolean(settings.urdu_labels)}
+                  settings={settings}
+                />
+              )}
+
+              {currentTab === 'customers' && (
+                <CustomerManager currencySymbol={settings.currency_symbol || 'Rs.'} settings={settings} />
+              )}
+
+              {currentTab === 'cashflow' && (
+                <CashflowPanel currencySymbol={settings.currency_symbol || 'Rs.'} onNavigate={(tab) => goToTab(tab)} />
+              )}
+
+              {currentTab === 'aging' && (
+                <AgingReport
+                  currencySymbol={settings.currency_symbol || 'Rs.'}
+                  settings={settings}
+                  onOpenBill={async (row) => {
+                    try {
+                      const res = await apiFetch(`/api/bills/${row.id}`);
+                      const bill = await res.json();
+                      if (res.ok && bill?.id) {
+                        setSelectedBill(bill);
+                        goToTab('preview');
+                        return;
+                      }
+                    } catch (_) {
+                      /* fall through */
+                    }
+                    goToTab('database');
+                  }}
+                />
+              )}
+
+              {currentTab === 'settings' && (
+                <SettingsManager
+                  appSettings={settings}
+                  onSettingsUpdated={fetchSettings}
+                  focusBackup={focusBackup}
+                  onFocusHandled={() => setFocusBackup(false)}
+                />
+              )}
+            </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
       </main>
 
       <MoreMenu

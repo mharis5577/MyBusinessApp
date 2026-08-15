@@ -3,6 +3,7 @@ import cors from 'cors';
 import db, { dbAll, dbGet, dbRun } from './db.js';
 import { pakistanToday, pakistanYearMonth, pakistanNowTime } from './pakistan.js';
 import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from './utils/paymentMethods.js';
+import { normalizeBillType, invoicePrefixForType, partyTypeForBill, outstandingByPartyName } from './utils/billTypes.js';
 
 const app = express();
 const PORT = process.env.PORT || 11000;
@@ -68,7 +69,8 @@ function enrichBill(bill) {
 }
 
 async function restoreStockForQtys(bill, items, qtyByItemId, reason) {
-  const bType = bill.bill_type === 'supplier' ? 'supplier' : 'customer';
+  const bType = normalizeBillType(bill.bill_type);
+  if (bType === 'help') return;
   for (const it of items) {
     const qty = Number(qtyByItemId.get(Number(it.id)) || 0);
     if (!qty || !it.product_id) continue;
@@ -259,6 +261,19 @@ app.get('/api/customers', async (req, res) => {
     } else {
       customers = await dbAll('SELECT * FROM customers ORDER BY name ASC');
     }
+    const bills = await dbAll(
+      `SELECT customer_name, bill_type, status, total_amount, amount_paid FROM bills`
+    );
+    const byName = outstandingByPartyName(bills);
+    customers = customers.map((c) => {
+      const rec = byName[String(c.name || '').trim().toLowerCase()] || {};
+      return {
+        ...c,
+        sales_outstanding: rec.sales_outstanding || 0,
+        help_outstanding: rec.help_outstanding || 0,
+        buying_outstanding: rec.buying_outstanding || 0,
+      };
+    });
     res.json(customers);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -714,7 +729,7 @@ app.delete('/api/products/:id', async (req, res) => {
 // Helper: next invoice number for a bill type
 async function generateNextInvoiceNumber(bType = 'customer') {
   const year = new Date().getFullYear();
-  const prefix = bType === 'supplier' ? 'SAU' : 'INV';
+  const prefix = invoicePrefixForType(bType);
   const lastBill = await dbGet(
     'SELECT invoice_number FROM bills WHERE invoice_number LIKE ? ORDER BY id DESC LIMIT 1',
     [`${prefix}-${year}-%`]
@@ -735,7 +750,7 @@ async function generateNextInvoiceNumber(bType = 'customer') {
 app.get('/api/bills/next-number', async (req, res) => {
   try {
     const { type } = req.query;
-    const formattedNum = await generateNextInvoiceNumber(type === 'supplier' ? 'supplier' : 'customer');
+    const formattedNum = await generateNextInvoiceNumber(normalizeBillType(type));
     res.json({ invoice_number: formattedNum });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -750,8 +765,13 @@ app.get('/api/bills', async (req, res) => {
     const params = [];
 
     if (type && type !== 'all') {
-      query += ' AND bill_type = ?';
-      params.push(type);
+      const t = normalizeBillType(type);
+      if (t === 'help') {
+        query += " AND (bill_type = 'help' OR bill_type = 'loan')";
+      } else {
+        query += ' AND bill_type = ?';
+        params.push(t);
+      }
     }
 
     if (status && status !== 'all') {
@@ -769,11 +789,8 @@ app.get('/api/bills', async (req, res) => {
 
     const bills = await dbAll(query, params);
 
-    // Attach items + payment balance to each bill
-    for (let bill of bills) {
-      bill.items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [bill.id]);
-      enrichBill(bill);
-    }
+    // Attach payment balance only — line items load on Edit / View / Duplicate
+    for (const bill of bills) enrichBill(bill);
 
     res.json(bills);
   } catch (err) {
@@ -828,7 +845,7 @@ app.post('/api/bills', async (req, res) => {
     } = req.body;
 
     if (!customer_name || !String(customer_name).trim()) {
-      return res.status(400).json({ error: 'Customer or Supplier name is required' });
+      return res.status(400).json({ error: 'Name is required' });
     }
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'At least one line item is required' });
@@ -837,7 +854,7 @@ app.post('/api/bills', async (req, res) => {
       return res.status(400).json({ error: 'Every line item needs a description' });
     }
 
-    const bType = bill_type === 'supplier' ? 'supplier' : 'customer';
+    const bType = normalizeBillType(bill_type);
     let invNum = invoice_number && String(invoice_number).trim()
       ? String(invoice_number).trim()
       : await generateNextInvoiceNumber(bType);
@@ -908,7 +925,7 @@ app.post('/api/bills', async (req, res) => {
           [billId, item.product_id || null, String(item.description).trim(), qty, price, itemTotal]
         );
 
-        if (item.product_id) {
+        if (item.product_id && bType !== 'help') {
           if (bType === 'supplier') {
             await dbRun('UPDATE products SET stock = stock + ? WHERE id = ?', [qty, item.product_id]);
           } else {
@@ -920,6 +937,9 @@ app.post('/api/bills', async (req, res) => {
       const existing = await dbGet('SELECT * FROM customers WHERE LOWER(name) = LOWER(?)', [
         customer_name.trim(),
       ]);
+      const partyType = bType === 'help'
+        ? normalizePartyType(existing?.party_type)
+        : partyTypeForBill(bType);
       if (!existing) {
         await dbRun(
           `INSERT INTO customers (
@@ -931,7 +951,7 @@ app.post('/api/bills', async (req, res) => {
             customer_email || '',
             customer_phone || '',
             customer_address || '',
-            bType,
+            partyType,
             payee_bank_name || '',
             payee_account_title || '',
             payee_account_number || '',
@@ -948,7 +968,7 @@ app.post('/api/bills', async (req, res) => {
             payee_payment_notes = COALESCE(NULLIF(?, ''), payee_payment_notes)
            WHERE id = ?`,
           [
-            bType,
+            partyType,
             payee_bank_name || '',
             payee_account_title || '',
             payee_account_number || '',
@@ -1029,7 +1049,7 @@ app.put('/api/bills/:id', async (req, res) => {
         payee_bank_name = ?, payee_account_title = ?, payee_account_number = ?, payee_payment_notes = ?
        WHERE id = ?`,
       [
-        bill_type || existingBill.bill_type || 'customer',
+        bill_type ? normalizeBillType(bill_type) : existingBill.bill_type || 'customer',
         invoice_number || existingBill.invoice_number,
         customer_name || existingBill.customer_name,
         customer_email ?? existingBill.customer_email ?? '',
@@ -1167,8 +1187,17 @@ app.post('/api/bills/:id/payments', async (req, res) => {
     }
 
     await dbRun(
-      'INSERT INTO bill_payments (bill_id, amount, method, payment_date, notes, screenshot_data) VALUES (?, ?, ?, ?, ?, ?)',
-      [bill.id, amount, method, payment_date, notes, req.body.screenshot_data || '']
+      'INSERT INTO bill_payments (bill_id, amount, method, payment_date, notes, screenshot_data, screenshot_path, screenshot_thumb) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        bill.id,
+        amount,
+        method,
+        payment_date,
+        notes,
+        req.body.screenshot_data || '',
+        req.body.screenshot_path || '',
+        req.body.screenshot_thumb || '',
+      ]
     );
     const updated = await refreshBillPaidStatus(bill.id);
     res.status(201).json(updated);
@@ -1306,7 +1335,7 @@ app.delete('/api/bills/:id', async (req, res) => {
 app.get('/api/stats', async (req, res) => {
   try {
     const totalRevenueRow = await dbGet(
-      "SELECT SUM(COALESCE(amount_paid, 0)) as total FROM bills WHERE status != 'cancelled' AND bill_type != 'supplier'"
+      "SELECT SUM(COALESCE(amount_paid, 0)) as total FROM bills WHERE status != 'cancelled' AND COALESCE(bill_type, 'customer') = 'customer'"
     );
     const totalPendingRow = await dbGet(
       `SELECT SUM(CASE
@@ -1314,7 +1343,7 @@ app.get('/api/stats', async (req, res) => {
          THEN (COALESCE(total_amount, 0) - COALESCE(amount_paid, 0))
          ELSE 0 END) as total
        FROM bills
-       WHERE status = 'pending'`
+       WHERE status = 'pending' AND COALESCE(bill_type, 'customer') NOT IN ('help', 'loan')`
     );
     const totalOverdueRow = await dbGet(
       `SELECT SUM(CASE
@@ -1322,7 +1351,7 @@ app.get('/api/stats', async (req, res) => {
          THEN (COALESCE(total_amount, 0) - COALESCE(amount_paid, 0))
          ELSE 0 END) as total
        FROM bills
-       WHERE status = 'overdue'`
+       WHERE status = 'overdue' AND COALESCE(bill_type, 'customer') NOT IN ('help', 'loan')`
     );
     const totalCountRow = await dbGet('SELECT COUNT(*) as count FROM bills');
     const paidCountRow = await dbGet("SELECT COUNT(*) as count FROM bills WHERE status = 'paid'");
@@ -1360,15 +1389,25 @@ app.get('/api/stats', async (req, res) => {
       };
     };
     const todaySales = await dbAll(
-      "SELECT * FROM bills WHERE bill_type != 'supplier' AND status != 'cancelled' AND bill_date = ?",
+      "SELECT * FROM bills WHERE COALESCE(bill_type, 'customer') = 'customer' AND status != 'cancelled' AND bill_date = ?",
       [today]
     );
     const monthSales = await dbAll(
-      "SELECT * FROM bills WHERE bill_type != 'supplier' AND status != 'cancelled' AND bill_date LIKE ?",
+      "SELECT * FROM bills WHERE COALESCE(bill_type, 'customer') = 'customer' AND status != 'cancelled' AND bill_date LIKE ?",
       [`${monthPrefix}%`]
     );
     const todayTotals = await sumSaleCost(todaySales);
     const monthTotals = await sumSaleCost(monthSales);
+
+    const helpBills = await dbAll(
+      `SELECT * FROM bills
+       WHERE (bill_type = 'help' OR bill_type = 'loan') AND status != 'cancelled'
+       ORDER BY due_date ASC, id DESC`
+    );
+    helpBills.forEach(enrichBill);
+    const help_given = helpBills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const help_repaid = helpBills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
+    const help_outstanding = Math.round(Math.max(0, help_given - help_repaid) * 100) / 100;
 
     res.json({
       total_revenue: totalRevenueRow.total || 0,
@@ -1387,6 +1426,24 @@ app.get('/api/stats', async (req, res) => {
       sales_month: monthTotals.sales,
       cost_month: monthTotals.cost,
       profit_month: monthTotals.profit,
+      help_given: Math.round(help_given * 100) / 100,
+      help_repaid: Math.round(help_repaid * 100) / 100,
+      help_outstanding,
+      help_count: helpBills.length,
+      help_bills: helpBills.map((b) => ({
+        id: b.id,
+        invoice_number: b.invoice_number,
+        customer_name: b.customer_name,
+        customer_phone: b.customer_phone,
+        bill_date: b.bill_date,
+        due_date: b.due_date,
+        bill_time: b.bill_time,
+        total_amount: b.total_amount,
+        amount_paid: b.amount_paid,
+        balance_due: b.balance_due,
+        status: b.status,
+        bill_type: b.bill_type,
+      })),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1420,7 +1477,18 @@ app.get('/api/ledger', async (req, res) => {
       const rem = b.remaining == null ? Number(b.amount) || 0 : Number(b.remaining) || 0;
       return s + rem;
     }, 0);
-    const outstanding = Math.max(0, totalBilled - totalPaid);
+    const sales = active.filter((b) => normalizeBillType(b.bill_type) === 'customer');
+    const helpBills = active.filter((b) => normalizeBillType(b.bill_type) === 'help');
+    const buying = active.filter((b) => normalizeBillType(b.bill_type) === 'supplier');
+    const sumDue = (list) =>
+      Math.round(
+        list.reduce((s, b) => s + Math.max(0, Number(b.balance_due) || 0), 0) * 100
+      ) / 100;
+    const salesOutstanding = sumDue(sales);
+    const helpGiven = helpBills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const helpRepaid = helpBills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
+    const helpOutstanding = sumDue(helpBills);
+    const buyingOutstanding = sumDue(buying);
 
     res.json({
       customer_name: name,
@@ -1434,7 +1502,12 @@ app.get('/api/ledger', async (req, res) => {
         paid: totalPaid,
         advances: totalAdvance,
         available_advance: availableAdvance,
-        outstanding,
+        outstanding: salesOutstanding,
+        sales_outstanding: salesOutstanding,
+        help_given: Math.round(helpGiven * 100) / 100,
+        help_repaid: Math.round(helpRepaid * 100) / 100,
+        help_outstanding: helpOutstanding,
+        buying_outstanding: buyingOutstanding,
         bill_count: bills.length,
       },
     });
@@ -1460,8 +1533,11 @@ app.get('/api/reports/monthly', async (req, res) => {
     );
     bills.forEach(enrichBill);
 
-    const sales = bills.filter((b) => b.bill_type !== 'supplier');
-    const buying = bills.filter((b) => b.bill_type === 'supplier');
+    const sales = bills.filter((b) => normalizeBillType(b.bill_type) === 'customer');
+    const buying = bills.filter((b) => normalizeBillType(b.bill_type) === 'supplier');
+    const helpBills = bills.filter((b) => normalizeBillType(b.bill_type) === 'help');
+    const helpGiven = helpBills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+    const helpRepaid = helpBills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
     const salesTotal = sales.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
     const salesPaid = sales.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
     const buyingTotal = buying.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
@@ -1477,6 +1553,10 @@ app.get('/api/reports/monthly', async (req, res) => {
       sales_outstanding: Math.max(0, salesTotal - salesPaid),
       buying_total: buyingTotal,
       estimated_profit: salesTotal - buyingTotal,
+      help_count: helpBills.length,
+      help_given: Math.round(helpGiven * 100) / 100,
+      help_repaid: Math.round(helpRepaid * 100) / 100,
+      help_outstanding: Math.round(Math.max(0, helpGiven - helpRepaid) * 100) / 100,
       bills,
     });
   } catch (err) {
@@ -1496,7 +1576,11 @@ app.get('/api/backup', async (req, res) => {
       products: await dbAll('SELECT * FROM products'),
       bills: await dbAll('SELECT * FROM bills'),
       bill_items: await dbAll('SELECT * FROM bill_items'),
-      bill_payments: await dbAll('SELECT * FROM bill_payments'),
+      bill_payments: (await dbAll('SELECT * FROM bill_payments')).map((p) => {
+        if (!p?.screenshot_data) return p;
+        const { screenshot_data, ...rest } = p;
+        return { ...rest, has_screenshot: true };
+      }),
       advances: await dbAll('SELECT * FROM advance_payments'),
       customer_product_rates: await dbAll('SELECT * FROM customer_product_rates'),
       stock_adjustments: await dbAll('SELECT * FROM stock_adjustments'),
@@ -1586,7 +1670,7 @@ app.post('/api/restore', async (req, res) => {
       }
       for (const p of data.bill_payments || []) {
         await dbRun(
-          'INSERT INTO bill_payments (id, bill_id, amount, method, payment_date, notes, screenshot_data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO bill_payments (id, bill_id, amount, method, payment_date, notes, screenshot_data, screenshot_path, screenshot_thumb, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             p.id,
             p.bill_id,
@@ -1595,6 +1679,8 @@ app.post('/api/restore', async (req, res) => {
             p.payment_date,
             p.notes || '',
             p.screenshot_data || '',
+            p.screenshot_path || '',
+            p.screenshot_thumb || '',
             p.created_at || null,
           ]
         );
@@ -1830,7 +1916,7 @@ app.get('/api/cashflow', async (req, res) => {
     const compact = String(req.query.compact || '') === '1';
     const salesRow = await dbGet(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
-       WHERE COALESCE(bill_type, 'customer') != 'supplier' AND status != 'cancelled'`
+       WHERE COALESCE(bill_type, 'customer') = 'customer' AND status != 'cancelled'`
     );
     const buyingRow = await dbGet(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
@@ -1838,11 +1924,19 @@ app.get('/api/cashflow', async (req, res) => {
     );
     const paidSalesRow = await dbGet(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
-       WHERE COALESCE(bill_type, 'customer') != 'supplier' AND status = 'paid'`
+       WHERE COALESCE(bill_type, 'customer') = 'customer' AND status = 'paid'`
     );
     const pendingSalesRow = await dbGet(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
-       WHERE COALESCE(bill_type, 'customer') != 'supplier' AND status = 'pending'`
+       WHERE COALESCE(bill_type, 'customer') = 'customer' AND status = 'pending'`
+    );
+    const helpGivenRow = await dbGet(
+      `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
+       WHERE (bill_type = 'help' OR bill_type = 'loan') AND status != 'cancelled'`
+    );
+    const helpRepaidRow = await dbGet(
+      `SELECT COALESCE(SUM(COALESCE(amount_paid, 0)), 0) as total FROM bills
+       WHERE (bill_type = 'help' OR bill_type = 'loan') AND status != 'cancelled'`
     );
     const advanceRow = await dbGet('SELECT COALESCE(SUM(amount), 0) as total FROM advance_payments');
     const advances = compact
@@ -1857,18 +1951,21 @@ app.get('/api/cashflow', async (req, res) => {
       );
 
       money_flow = recentBills.map((b) => {
-        const isSupplier = b.bill_type === 'supplier';
+        const t = normalizeBillType(b.bill_type);
         const amount = isCancelled(b) ? 0 : Number(b.total_amount) || 0;
+        const isSupplier = t === 'supplier';
+        const isHelp = t === 'help';
+        const kind = isHelp ? 'Help' : isSupplier ? 'Buying' : 'Sale';
         return {
           id: b.id,
           date: b.bill_date,
           invoice_number: b.invoice_number,
-          selling: isSupplier ? 0 : amount,
+          selling: isSupplier || isHelp ? 0 : amount,
           buying: isSupplier ? amount : 0,
-          expenditure: 0,
-          profit: isSupplier ? -amount : amount,
-          comment: `${isSupplier ? 'Buying' : 'Sale'} · ${b.customer_name}${b.notes ? ` · ${b.notes}` : ''} (${b.status})`,
-          bill_type: b.bill_type || 'customer',
+          expenditure: isHelp ? amount : 0,
+          profit: isHelp ? 0 : isSupplier ? -amount : amount,
+          comment: `${kind} · ${b.customer_name}${b.notes ? ` · ${b.notes}` : ''} (${b.status})`,
+          bill_type: t,
           status: b.status,
         };
       });
@@ -1876,6 +1973,9 @@ app.get('/api/cashflow', async (req, res) => {
 
     const total_sales = Number(salesRow.total) || 0;
     const buying_cost = Number(buyingRow.total) || 0;
+    const help_given = Number(helpGivenRow.total) || 0;
+    const help_repaid = Number(helpRepaidRow.total) || 0;
+    const help_outstanding = Math.round(Math.max(0, help_given - help_repaid) * 100) / 100;
     const total_advance = Number(advanceRow.total) || 0;
     const net_profit = total_sales - buying_cost;
     const net_balance = net_profit - total_advance;
@@ -1883,7 +1983,10 @@ app.get('/api/cashflow', async (req, res) => {
     res.json({
       total_sales,
       buying_cost,
-      expenditure: 0,
+      expenditure: help_outstanding,
+      help_given,
+      help_repaid,
+      help_outstanding,
       net_profit,
       total_advance,
       net_balance,

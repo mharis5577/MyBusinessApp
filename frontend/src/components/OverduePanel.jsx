@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, MessageCircle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Banknote, MessageCircle, RefreshCw } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
@@ -9,16 +9,21 @@ import {
   normalizeWhatsAppPhone,
 } from '../utils/paymentReminder';
 import StatusBadge from './StatusBadge';
+import QuickPaySheet from './QuickPaySheet';
+import { isHelpBill } from '../utils/billTypes';
 
 export default function OverduePanel({
   currencySymbol = 'Rs.',
   settings = {},
   onViewBill,
   embedded = false,
+  excludeHelp = false,
+  onPaid,
 }) {
   const toast = useToast();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [payBill, setPayBill] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -28,6 +33,7 @@ export default function OverduePanel({
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       const overdue = (data.rows || [])
         .filter((r) => (Number(r.days_overdue) || 0) >= 1)
+        .filter((r) => !excludeHelp || !isHelpBill(r))
         .sort((a, b) => (Number(b.days_overdue) || 0) - (Number(a.days_overdue) || 0));
       setRows(overdue);
     } catch (err) {
@@ -40,7 +46,7 @@ export default function OverduePanel({
 
   useEffect(() => {
     load();
-  }, []);
+  }, [excludeHelp]);
 
   const totalDue = useMemo(
     () => rows.reduce((s, r) => s + (Number(r.balance_due) || 0), 0),
@@ -61,6 +67,17 @@ export default function OverduePanel({
     openWhatsAppReminder(bill.customer_phone, text);
   };
 
+  const payOne = async (row) => {
+    try {
+      const res = await apiFetch(`/api/bills/${row.id}`);
+      const bill = await res.json();
+      if (res.ok && bill?.id) setPayBill(bill);
+      else setPayBill(row);
+    } catch {
+      setPayBill(row);
+    }
+  };
+
   if (loading) {
     return (
       <div className={`panel-flat${embedded ? ' is-embedded' : ''}`} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '0.75rem 0' }}>
@@ -72,7 +89,11 @@ export default function OverduePanel({
   if (rows.length === 0) {
     if (embedded) {
       return (
-        <p className="dash-dropdown-empty">No overdue bills — follow-ups will show here.</p>
+        <p className="dash-dropdown-empty">
+          {excludeHelp
+            ? 'No overdue sales — help return dates stay in Help given.'
+            : 'No overdue bills — follow-ups will show here.'}
+        </p>
       );
     }
     return null;
@@ -130,19 +151,38 @@ export default function OverduePanel({
                 <StatusBadge status="overdue" />
               </div>
             </button>
-            <button
-              type="button"
-              className="btn-secondary overdue-wa-btn"
-              style={{ color: '#25D366' }}
-              onClick={() => remindOne(r)}
-              disabled={!normalizeWhatsAppPhone(r.customer_phone)}
-              title={r.customer_phone ? 'WhatsApp reminder' : 'No phone'}
-            >
-              <MessageCircle size={16} /> WA
-            </button>
+            <div className="overdue-row-actions">
+              <button
+                type="button"
+                className="btn-secondary overdue-wa-btn"
+                onClick={() => payOne(r)}
+              >
+                <Banknote size={16} /> Pay
+              </button>
+              <button
+                type="button"
+                className="btn-secondary overdue-wa-btn"
+                style={{ color: '#25D366' }}
+                onClick={() => remindOne(r)}
+                disabled={!normalizeWhatsAppPhone(r.customer_phone)}
+                title={r.customer_phone ? 'WhatsApp reminder' : 'No phone'}
+              >
+                <MessageCircle size={16} /> WA
+              </button>
+            </div>
           </div>
         ))}
       </div>
+      <QuickPaySheet
+        open={Boolean(payBill)}
+        bill={payBill}
+        onClose={() => setPayBill(null)}
+        onSaved={() => {
+          load();
+          onPaid?.();
+        }}
+        currencySymbol={currencySymbol}
+      />
     </div>
   );
 }

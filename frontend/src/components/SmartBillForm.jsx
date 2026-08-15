@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History, ChevronDown, ChevronUp, FlaskConical, ShoppingCart, Package } from 'lucide-react';
+import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History, ChevronDown, ChevronUp, FlaskConical, ShoppingCart, Package, HeartHandshake } from 'lucide-react';
 import { parseNaturalBillText } from '../utils/naturalParser';
 import { pakistanToday, addDaysToDateString, formatCurrency, pakistanNowTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
@@ -7,15 +7,18 @@ import { useToast } from '../toast/ToastContext';
 import BarcodeScanner from './BarcodeScanner';
 import ConfirmDialog from './ConfirmDialog';
 import AppSelect from './AppSelect';
+import PayeeBankSelect from './PayeeBankSelect';
 import { clearBillDraft, draftHasContent, loadBillDraft, saveBillDraft } from '../utils/billDraft';
+import { HELP_PERIODS, normalizeBillType, CREATE_BILL_TYPE_KEY } from '../utils/billTypes';
 
-export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.', defaultTaxRate = 0, draftBill = null, onDraftConsumed }) {
+export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.', defaultTaxRate = 0, draftBill = null, onDraftConsumed, active = true }) {
   const toast = useToast();
   const savingRef = useRef(false);
   const dateTouchedRef = useRef(false);
   const draftHydratedRef = useRef(false);
   const saveAckRef = useRef({ zero: false, stock: false });
-  const [billType, setBillType] = useState('customer'); // 'customer' or 'supplier'
+  const [billType, setBillType] = useState('customer'); // 'customer' | 'supplier' | 'help'
+  const [helpPeriodDays, setHelpPeriodDays] = useState(30);
   const [naturalText, setNaturalText] = useState('');
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
@@ -59,6 +62,15 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     fetchCustomersAndProducts();
   }, [billType]);
 
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    if (active) fetchCustomersAndProducts();
+  }, [active]);
+
   useEffect(() => {
     setTaxRate(defaultTaxRate);
   }, [defaultTaxRate]);
@@ -68,7 +80,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     if (!draftBill) return;
     const b = draftBill;
     dateTouchedRef.current = false;
-    setBillType(b.bill_type === 'supplier' ? 'supplier' : 'customer');
+    setBillType(normalizeBillType(b.bill_type));
     setCustomerName(b.customer_name || '');
     setCustomerEmail(b.customer_email || '');
     setCustomerPhone(b.customer_phone || '');
@@ -77,8 +89,8 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     setDueDate(addDaysToDateString(pakistanToday(), 14));
     setTaxRate(b.tax_rate ?? defaultTaxRate);
     setDiscountRate(b.discount_rate ?? 0);
-    setPaymentMethod(b.payment_method || (b.bill_type === 'supplier' ? 'Bank Transfer / Remittance' : 'Bank Transfer / Raast'));
-    setNotes(b.notes || (b.bill_type === 'supplier' ? 'Purchase remittance / payment advice' : 'Thank you for your order!'));
+    setPaymentMethod(b.payment_method || (b.bill_type === 'supplier' ? 'Bank Transfer / Remittance' : b.bill_type === 'help' ? 'Cash' : 'Bank Transfer / Raast'));
+    setNotes(b.notes || (b.bill_type === 'supplier' ? 'Purchase remittance / payment advice' : b.bill_type === 'help' ? 'Help money — return after the agreed period' : 'Thank you for your order!'));
     setPayeeBankName(b.payee_bank_name || '');
     setPayeeAccountTitle(b.payee_account_title || '');
     setPayeeAccountNumber(b.payee_account_number || '');
@@ -93,7 +105,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         }))
       );
     }
-    fetchNextInvoiceNumber(b.bill_type === 'supplier' ? 'supplier' : 'customer');
+    fetchNextInvoiceNumber(normalizeBillType(b.bill_type));
     clearBillDraft();
     draftHydratedRef.current = true;
     if (onDraftConsumed) onDraftConsumed();
@@ -109,7 +121,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     }
     draftHydratedRef.current = true;
     dateTouchedRef.current = Boolean(saved.dateTouched);
-    setBillType(saved.billType === 'supplier' ? 'supplier' : 'customer');
+    setBillType(normalizeBillType(saved.billType));
     setNaturalText(saved.naturalText || '');
     setInvoiceNumber(saved.invoiceNumber || '');
     setCustomerName(saved.customerName || '');
@@ -124,6 +136,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     setCashTendered(saved.cashTendered || '');
     setInitialPayment(saved.initialPayment || '');
     setNotes(saved.notes || 'Thank you for your order!');
+    setHelpPeriodDays(saved.helpPeriodDays === 'custom' ? 'custom' : Number(saved.helpPeriodDays) || 30);
     setPayeeBankName(saved.payeeBankName || '');
     setPayeeAccountTitle(saved.payeeAccountTitle || '');
     setPayeeAccountNumber(saved.payeeAccountNumber || '');
@@ -142,8 +155,41 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     toast.info('Draft restored', 2200);
   }, [draftBill, defaultTaxRate, toast]);
 
+  useEffect(() => {
+    let want = '';
+    try {
+      want = sessionStorage.getItem(CREATE_BILL_TYPE_KEY) || '';
+    } catch {
+      return;
+    }
+    if (normalizeBillType(want) !== 'help') return;
+    try {
+      sessionStorage.removeItem(CREATE_BILL_TYPE_KEY);
+    } catch {
+      /* ignore */
+    }
+    if (draftBill) return;
+    setBillType('help');
+    setSelectedCustomerId(null);
+    setPaymentMethod('Cash');
+    setTaxRate(0);
+    setDiscountRate(0);
+    setHelpPeriodDays(30);
+    setDueDate(addDaysToDateString(pakistanToday(), 30));
+    setNotes('Help money — return after the agreed period');
+    setItems((prev) => {
+      const desc = String(prev[0]?.description || '').trim();
+      const emptyOrDefault = !desc || (prev.length === 1 && !prev[0].unit_price);
+      if (emptyOrDefault) {
+        return [{ product_id: null, description: 'Help / loan given', quantity: 1, unit_price: Number(prev[0]?.unit_price) || 0 }];
+      }
+      return prev;
+    });
+  }, [draftBill]);
+
   // Autosave draft while composing
   useEffect(() => {
+    if (!active) return undefined;
     if (!draftHydratedRef.current && !draftBill) return undefined;
     const t = setTimeout(() => {
       const draft = {
@@ -162,6 +208,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         cashTendered,
         initialPayment,
         notes,
+        helpPeriodDays,
         payeeBankName,
         payeeAccountTitle,
         payeeAccountNumber,
@@ -190,6 +237,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     cashTendered,
     initialPayment,
     notes,
+    helpPeriodDays,
     payeeBankName,
     payeeAccountTitle,
     payeeAccountNumber,
@@ -197,6 +245,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     selectedCustomerId,
     items,
     draftBill,
+    active,
   ]);
 
   // Refresh Pakistan date if form left open past midnight (unless user edited date)
@@ -217,6 +266,14 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
       window.removeEventListener('focus', syncDates);
     };
   }, []);
+
+  useEffect(() => {
+    if (billType !== 'help') return;
+    if (helpPeriodDays === 'custom') return;
+    const days = Number(helpPeriodDays);
+    if (!billDate || !days) return;
+    setDueDate(addDaysToDateString(billDate, days));
+  }, [billDate, billType, helpPeriodDays]);
 
   const fetchNextInvoiceNumber = async (bType = 'customer') => {
     try {
@@ -261,9 +318,15 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const filteredParties = useMemo(() => {
     return (customers || []).filter((c) => {
       const pt = c.party_type === 'supplier' ? 'supplier' : 'customer';
-      return pt === billType;
+      if (billType === 'supplier') return pt === 'supplier';
+      return pt === 'customer';
     });
   }, [customers, billType]);
+
+  const extraPayeeBanks = useMemo(
+    () => (customers || []).map((c) => c.payee_bank_name).filter(Boolean),
+    [customers]
+  );
 
   // Select Customer from Saved DB list
   const handleSelectCustomer = (e) => {
@@ -402,7 +465,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const taxAmount = (subtotal * (parseFloat(taxRate) || 0)) / 100;
   const discountAmount = (subtotal * (parseFloat(discountRate) || 0)) / 100;
   const totalAmount = Math.max(0, subtotal + taxAmount - discountAmount);
-  const isCashSale = String(paymentMethod).toLowerCase().includes('cash');
+  const isCashSale = billType !== 'help' && String(paymentMethod).toLowerCase().includes('cash');
   const tenderedNum = parseFloat(cashTendered);
   const changeDue =
     isCashSale && Number.isFinite(tenderedNum) && tenderedNum > 0
@@ -441,14 +504,30 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     setPayeeAccountNumber('');
     setPayeePaymentNotes('');
     setBillDate(pakistanToday());
-    setDueDate(addDaysToDateString(pakistanToday(), 14));
-    setTaxRate(defaultTaxRate);
+    setDueDate(addDaysToDateString(pakistanToday(), billType === 'help' ? Number(helpPeriodDays) || 30 : 14));
+    setTaxRate(billType === 'help' ? 0 : defaultTaxRate);
     setDiscountRate(0);
-    setPaymentMethod(billType === 'supplier' ? 'Bank Transfer / Remittance' : 'Bank Transfer / Raast');
+    setPaymentMethod(
+      billType === 'supplier'
+        ? 'Bank Transfer / Remittance'
+        : billType === 'help'
+          ? 'Cash'
+          : 'Bank Transfer / Raast'
+    );
     setCashTendered('');
     setInitialPayment('');
-    setNotes(billType === 'supplier' ? 'Purchase remittance / payment advice' : 'Thank you for your order!');
-    setItems([{ product_id: null, description: '', quantity: 1, unit_price: 0 }]);
+    setNotes(
+      billType === 'supplier'
+        ? 'Purchase remittance / payment advice'
+        : billType === 'help'
+          ? 'Help money — return after the agreed period'
+          : 'Thank you for your order!'
+    );
+    setItems(
+      billType === 'help'
+        ? [{ product_id: null, description: 'Help / loan given', quantity: 1, unit_price: 0 }]
+        : [{ product_id: null, description: '', quantity: 1, unit_price: 0 }]
+    );
     setSkuQuery('');
     dateTouchedRef.current = false;
     clearBillDraft();
@@ -486,6 +565,19 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         { product_id: null, description: 'Assorted Truffle Mix (kg)', quantity: 15, unit_price: 3200 },
         { product_id: null, description: 'Gift Box Packaging (set of 50)', quantity: 4, unit_price: 950 },
       ]);
+    } else if (billType === 'help') {
+      setSelectedCustomerId(null);
+      setCustomerRates([]);
+      setCustomerName('Imran Ali');
+      setCustomerEmail('');
+      setCustomerPhone('+923001112233');
+      setCustomerAddress('Street 4, Attock');
+      setPaymentMethod('Cash');
+      setNotes('Help for family expenses — return after the agreed period');
+      setHelpPeriodDays(30);
+      setDueDate(addDaysToDateString(today, 30));
+      setInitialPayment('');
+      setItems([{ product_id: null, description: 'Help / loan given', quantity: 1, unit_price: 10000 }]);
     } else {
       const existing = customers.find((c) => String(c.name || '').trim());
       if (existing) {
@@ -615,7 +707,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         }))
       );
       setBillDate(pakistanToday());
-      setDueDate(addDaysToDateString(pakistanToday(), 14));
+      setDueDate(addDaysToDateString(pakistanToday(), billType === 'help' ? Number(helpPeriodDays) || 30 : 14));
       toast.success(`Loaded items from ${match.invoice_number}`);
     } catch (err) {
       toast.error(err.message || 'Could not load last order');
@@ -725,7 +817,13 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     e.preventDefault();
     if (savingRef.current || loading) return;
     if (!customerName.trim()) {
-      toast.error(billType === 'supplier' ? 'Please enter or select a supplier / pay-to name.' : 'Please enter or select a customer name.');
+      toast.error(
+        billType === 'supplier'
+          ? 'Please enter or select a supplier / pay-to name.'
+          : billType === 'help'
+            ? 'Please enter the person’s name.'
+            : 'Please enter or select a customer name.'
+      );
       return;
     }
     if (items.length === 0 || items.some((i) => !i.description.trim())) {
@@ -782,7 +880,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
       <div className="glass-panel bill-type-panel">
         <div className="bill-type-head">
           <h3>Bill type</h3>
-          <p>Sale to a client, or stock purchase from Saudia.</p>
+          <p>Sale to a client, stock from Saudia, or help money for a period.</p>
         </div>
 
         <div className="bill-type-grid" role="radiogroup" aria-label="Bill type">
@@ -795,7 +893,10 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
               setBillType('customer');
               setSelectedCustomerId(null);
               if (customerName === 'Saudia Arabia Supplier') setCustomerName('');
-              setPaymentMethod((pm) => (pm === 'Bank Transfer / Remittance' ? 'Bank Transfer / Raast' : pm));
+              setPaymentMethod((pm) => (pm === 'Bank Transfer / Remittance' || pm === 'Cash' ? 'Bank Transfer / Raast' : pm));
+              if (!notes || notes === 'Purchase remittance / payment advice' || notes === 'Help money — return after the agreed period') {
+                setNotes('Thank you for your order!');
+              }
             }}
           >
             <span className="bill-type-icon" aria-hidden>
@@ -820,7 +921,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                 !customerName.trim() || customerName.trim() === 'Saudia Arabia Supplier';
               if (blankOrDefault) setCustomerName('Saudia Arabia Supplier');
               setPaymentMethod('Bank Transfer / Remittance');
-              if (!notes || notes === 'Thank you for your order!') {
+              if (!notes || notes === 'Thank you for your order!' || notes === 'Help money — return after the agreed period') {
                 setNotes('Purchase remittance / payment advice');
               }
             }}
@@ -834,9 +935,47 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
             </span>
             <span className="bill-type-check" aria-hidden />
           </button>
+
+          <button
+            type="button"
+            role="radio"
+            aria-checked={billType === 'help'}
+            className={`bill-type-card is-help${billType === 'help' ? ' is-active' : ''}`}
+            onClick={() => {
+              setBillType('help');
+              setSelectedCustomerId(null);
+              if (customerName === 'Saudia Arabia Supplier') setCustomerName('');
+              setPaymentMethod('Cash');
+              setTaxRate(0);
+              setDiscountRate(0);
+              setHelpPeriodDays(30);
+              setDueDate(addDaysToDateString(billDate || pakistanToday(), 30));
+              if (!notes || notes === 'Thank you for your order!' || notes === 'Purchase remittance / payment advice') {
+                setNotes('Help money — return after the agreed period');
+              }
+              setItems((prev) => {
+                const desc = String(prev[0]?.description || '').trim();
+                const emptyOrDefault = !desc || prev.length === 1 && !prev[0].unit_price;
+                if (emptyOrDefault) {
+                  return [{ product_id: null, description: 'Help / loan given', quantity: 1, unit_price: Number(prev[0]?.unit_price) || 0 }];
+                }
+                return prev;
+              });
+            }}
+          >
+            <span className="bill-type-icon" aria-hidden>
+              <HeartHandshake size={18} />
+            </span>
+            <span className="bill-type-copy">
+              <strong>Help / loan</strong>
+              <small>Give money for a period · #HLP</small>
+            </span>
+            <span className="bill-type-check" aria-hidden />
+          </button>
         </div>
       </div>
       {/* Smart Quick-Parse Banner */}
+      {billType !== 'help' && (
       <div className="glass-panel" style={{ padding: '1.25rem', border: '1px solid var(--border-color)', background: 'var(--surface-inset)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
           <Zap size={18} style={{ color: 'var(--accent-primary)' }} />
@@ -859,14 +998,21 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
           </button>
         </div>
       </div>
+      )}
 
       {/* Main Bill Generator Form */}
       <form onSubmit={handleSubmit} className="glass-panel" style={{ padding: '1.75rem' }}>
         <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
             <div>
-              <h2 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Auto Bill Generator</h2>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Fill invoice details & save directly to database</p>
+              <h2 style={{ fontSize: '1.3rem', fontWeight: 800 }}>
+                {billType === 'help' ? 'Help / loan' : 'Auto Bill Generator'}
+              </h2>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                {billType === 'help'
+                  ? 'Give money to a person and set when they should return it'
+                  : 'Fill invoice details & save directly to database'}
+              </p>
             </div>
             <button
               type="button"
@@ -911,18 +1057,31 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         {/* Customer / Supplier & Date Section */}
         <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
           <div>
-            <label className="form-label">{billType === 'supplier' ? 'Supplier / Pay To *' : 'Customer Name *'}</label>
+            <label className="form-label">
+              {billType === 'supplier' ? 'Supplier / Pay To *' : billType === 'help' ? 'Person *' : 'Customer Name *'}
+            </label>
             {filteredParties.length > 0 && (
               <AppSelect
                 className="app-select--spaced"
                 style={{ marginBottom: '0.5rem' }}
                 value={selectedCustomerId || ''}
                 onChange={(next) => handleSelectCustomer({ target: { value: next } })}
-                placeholder={billType === 'supplier' ? '-- Load Saved Supplier --' : '-- Load Saved Client --'}
+                placeholder={
+                  billType === 'supplier'
+                    ? '-- Load Saved Supplier --'
+                    : billType === 'help'
+                      ? '-- Load saved person --'
+                      : '-- Load Saved Client --'
+                }
                 options={[
                   {
                     value: '',
-                    label: billType === 'supplier' ? '-- Load Saved Supplier --' : '-- Load Saved Client --',
+                    label:
+                      billType === 'supplier'
+                        ? '-- Load Saved Supplier --'
+                        : billType === 'help'
+                          ? '-- Load saved person --'
+                          : '-- Load Saved Client --',
                   },
                   ...filteredParties.map((c) => ({ value: String(c.id), label: c.name })),
                 ]}
@@ -931,16 +1090,36 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
             <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '0.45rem' }}>
               {billType === 'supplier'
                 ? 'Showing supplier parties only — or type a new Jeddah supplier name below.'
-                : 'Showing customer parties only — or type a new retail client name below.'}
+                : billType === 'help'
+                  ? 'Type a name or load a saved person. They can return this later.'
+                  : 'Showing customer parties only — or type a new retail client name below.'}
             </p>
             <input
               type="text"
               className="form-input"
-              placeholder={billType === 'supplier' ? 'e.g. Jeddah Trading Co.' : 'e.g. Acme Corporation'}
+              placeholder={
+                billType === 'supplier'
+                  ? 'e.g. Jeddah Trading Co.'
+                  : billType === 'help'
+                    ? 'e.g. Imran Ali'
+                    : 'e.g. Acme Corporation'
+              }
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               required
             />
+            {billType === 'help' && (
+              <div className="form-group" style={{ marginTop: '0.65rem', marginBottom: 0 }}>
+                <label className="form-label">Phone (for return reminder)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="03XX-XXXXXXX"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                />
+              </div>
+            )}
             <button
               type="button"
               className="btn-secondary"
@@ -948,7 +1127,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
               disabled={repeating || !customerName.trim()}
               onClick={handleRepeatLastOrder}
             >
-              <History size={16} /> {repeating ? 'Loading…' : 'Repeat last order'}
+              <History size={16} /> {repeating ? 'Loading…' : billType === 'help' ? 'Repeat last help' : 'Repeat last order'}
             </button>
 
             <div className="grid-2-mobile-1" style={{ display: showAdvanced ? 'grid' : 'none', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem' }}>
@@ -992,12 +1171,10 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                 </p>
                 <div className="form-group">
                   <label className="form-label">Bank Name</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. Al Rajhi Bank"
+                  <PayeeBankSelect
                     value={payeeBankName}
-                    onChange={(e) => setPayeeBankName(e.target.value)}
+                    onChange={setPayeeBankName}
+                    extraBanks={extraPayeeBanks}
                   />
                 </div>
                 <div className="form-group">
@@ -1037,7 +1214,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
           <div>
             <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <div className="form-group">
-                <label className="form-label">{billType === 'supplier' ? 'Bill Date' : 'Invoice Date'}</label>
+                <label className="form-label">{billType === 'supplier' ? 'Bill Date' : billType === 'help' ? 'Given on' : 'Invoice Date'}</label>
                 <input
                   type="date"
                   className="form-input"
@@ -1049,21 +1226,44 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">Due Date</label>
+                <label className="form-label">{billType === 'help' ? 'Return by' : 'Due Date'}</label>
                 <input
                   type="date"
                   className="form-input"
                   value={dueDate}
                   onChange={(e) => {
                     dateTouchedRef.current = true;
+                    setHelpPeriodDays('custom');
                     setDueDate(e.target.value);
                   }}
                 />
               </div>
             </div>
 
+            {billType === 'help' && (
+              <div className="form-group">
+                <label className="form-label">Return after</label>
+                <div className="cash-chip-row">
+                  {HELP_PERIODS.map((p) => (
+                    <button
+                      key={p.days}
+                      type="button"
+                      className={`cash-chip${helpPeriodDays === p.days ? ' is-active' : ''}`}
+                      onClick={() => {
+                        dateTouchedRef.current = true;
+                        setHelpPeriodDays(p.days);
+                        setDueDate(addDaysToDateString(billDate || pakistanToday(), p.days));
+                      }}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="form-group">
-              <label className="form-label">Payment Method</label>
+              <label className="form-label">{billType === 'help' ? 'How you gave it' : 'Payment Method'}</label>
               <AppSelect
                 value={paymentMethod}
                 aria-label="Payment method"
@@ -1078,12 +1278,18 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                         'Bank Transfer / Raast',
                         'Cash',
                       ]
-                    : [
-                        'Bank Transfer / Raast',
-                        'JazzCash / EasyPaisa',
-                        'Cash Counter Sale',
-                        'Credit / Debit Card',
-                      ]
+                    : billType === 'help'
+                      ? [
+                          'Cash',
+                          'Bank Transfer / Raast',
+                          'JazzCash / EasyPaisa',
+                        ]
+                      : [
+                          'Bank Transfer / Raast',
+                          'JazzCash / EasyPaisa',
+                          'Cash Counter Sale',
+                          'Credit / Debit Card',
+                        ]
                 }
               />
             </div>
@@ -1150,6 +1356,59 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         </button>
 
         {/* Line Items */}
+        {billType === 'help' ? (
+          <div className="surface-block" style={{ padding: '1rem 1.05rem', marginBottom: '1.5rem' }}>
+            <h4 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>Amount given</h4>
+            <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Amount ({currencySymbol}) *</label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  className="form-input"
+                  placeholder="e.g. 5000"
+                  value={items[0]?.unit_price || ''}
+                  onChange={(e) => {
+                    const amount = parseFloat(e.target.value) || 0;
+                    setItems([
+                      {
+                        product_id: null,
+                        description: items[0]?.description || 'Help / loan given',
+                        quantity: 1,
+                        unit_price: amount,
+                      },
+                    ]);
+                  }}
+                  required
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Reason (optional)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Family need, urgent help"
+                  value={items[0]?.description === 'Help / loan given' ? '' : items[0]?.description || ''}
+                  onChange={(e) => {
+                    const desc = String(e.target.value).trim() || 'Help / loan given';
+                    setItems([
+                      {
+                        product_id: null,
+                        description: desc,
+                        quantity: 1,
+                        unit_price: Number(items[0]?.unit_price) || 0,
+                      },
+                    ]);
+                  }}
+                />
+              </div>
+            </div>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.55rem' }}>
+              This is not a sale. When they return the money, open this bill and tap Pay.
+            </p>
+          </div>
+        ) : (
         <div style={{ marginBottom: '1.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', gap: '0.5rem', flexWrap: 'wrap' }}>
             <h4 style={{ fontSize: '1rem', fontWeight: 700 }}>Line Items & Services</h4>
@@ -1353,9 +1612,11 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
             })}
           </div>
         </div>
+        )}
 
         {/* Math Summary & Submit Section */}
         <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1.25rem' }}>
+          {billType !== 'help' && (
           <div style={{ minWidth: '240px', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <div style={{ display: 'flex', gap: '1rem' }}>
               <div className="form-group" style={{ flex: 1 }}>
@@ -1382,6 +1643,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
               </div>
             </div>
           </div>
+          )}
 
           <div className="glass-panel surface-block" style={{ padding: '1.25rem', minWidth: '300px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', color: 'var(--text-secondary)' }}>
@@ -1404,20 +1666,22 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem 0 0 0', marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', fontSize: '1.2rem', fontWeight: 800 }}>
-              <span>Grand Total:</span>
+              <span>{billType === 'help' ? 'Amount given:' : 'Grand Total:'}</span>
               <span style={{ color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>
                 {currencySymbol}{totalAmount.toFixed(2)}
               </span>
             </div>
 
             <div className="form-group" style={{ marginTop: '0.85rem', marginBottom: 0 }}>
-              <label className="form-label">Amount received now (optional)</label>
+              <label className="form-label">
+                {billType === 'help' ? 'Already returned now (optional)' : 'Amount received now (optional)'}
+              </label>
               <input
                 type="number"
                 step="0.01"
                 min="0"
                 className="form-input"
-                placeholder="0 — partial or full payment"
+                placeholder={billType === 'help' ? '0 — usually empty until they repay' : '0 — partial or full payment'}
                 value={initialPayment}
                 onChange={(e) => setInitialPayment(e.target.value)}
               />

@@ -210,6 +210,8 @@ function initTables() {
       )
     `);
     db.run(`ALTER TABLE bill_payments ADD COLUMN screenshot_data TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE bill_payments ADD COLUMN screenshot_path TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE bill_payments ADD COLUMN screenshot_thumb TEXT DEFAULT ''`, () => {});
     db.run(`ALTER TABLE bill_items ADD COLUMN returned_qty INTEGER DEFAULT 0`, () => {});
 
     // Advance Payments Table

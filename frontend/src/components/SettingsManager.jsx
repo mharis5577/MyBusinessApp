@@ -41,7 +41,7 @@ import { DeveloperCredit } from './BrandMark';
 import AppSelect from './AppSelect';
 import { emptyPaymentMethod, getPaymentMethods, withPaymentMethods } from '../utils/paymentMethods';
 
-export default function SettingsManager({ onSettingsUpdated, focusBackup = false, onFocusHandled }) {
+export default function SettingsManager({ onSettingsUpdated, focusBackup = false, onFocusHandled, appSettings = null }) {
   const toast = useToast();
   const backupPanelRef = useRef(null);
   const deleteConfirmRef = useRef(null);
@@ -169,6 +169,21 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
   };
 
   useEffect(() => {
+    refreshSnapshots();
+    checkBiometricAvailable().then((r) => setBioAvailable(Boolean(r.available)));
+  }, []);
+
+  useEffect(() => {
+    if (appSettings?.company_name) {
+      const enriched = withPaymentMethods(appSettings);
+      const methods = getPaymentMethods(enriched);
+      setSettings((prev) => ({
+        ...prev,
+        ...enriched,
+        payment_methods: methods.length ? methods : [emptyPaymentMethod({ label: 'Primary' })],
+      }));
+      return;
+    }
     apiFetch('/api/settings')
       .then((res) => res.json())
       .then((data) => {
@@ -183,9 +198,7 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
         }
       })
       .catch((err) => console.error(err));
-    refreshSnapshots();
-    checkBiometricAvailable().then((r) => setBioAvailable(Boolean(r.available)));
-  }, []);
+  }, [appSettings]);
 
   useEffect(() => {
     if (!focusBackup) return undefined;
@@ -502,7 +515,7 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
       const sym = settings.currency_symbol || 'Rs.';
       await downloadTablePdf({
         title: 'Elite Chocolate — Monthly Report',
-        subtitle: `${report.period} · Sales ${sym} ${exportMoney(report.sales_total)} · Collected ${sym} ${exportMoney(report.sales_paid)} · Buying ${sym} ${exportMoney(report.buying_total)}`,
+        subtitle: `${report.period} · Sales ${sym} ${exportMoney(report.sales_total)} · Collected ${sym} ${exportMoney(report.sales_paid)} · Buying ${sym} ${exportMoney(report.buying_total)}${report.help_outstanding ? ` · Help out ${sym} ${exportMoney(report.help_outstanding)}` : ''}`,
         headers,
         rows,
         filename: `monthly-report-${report.period}.pdf`,
