@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History, ChevronDown, ChevronUp, FlaskConical, ShoppingCart, Package } from 'lucide-react';
 import { parseNaturalBillText } from '../utils/naturalParser';
 import { pakistanToday, addDaysToDateString, formatCurrency, pakistanNowTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import BarcodeScanner from './BarcodeScanner';
+import ConfirmDialog from './ConfirmDialog';
+import AppSelect from './AppSelect';
 import { clearBillDraft, draftHasContent, loadBillDraft, saveBillDraft } from '../utils/billDraft';
 
 export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.', defaultTaxRate = 0, draftBill = null, onDraftConsumed }) {
@@ -12,6 +14,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const savingRef = useRef(false);
   const dateTouchedRef = useRef(false);
   const draftHydratedRef = useRef(false);
+  const saveAckRef = useRef({ zero: false, stock: false });
   const [billType, setBillType] = useState('customer'); // 'customer' or 'supplier'
   const [naturalText, setNaturalText] = useState('');
   const [customers, setCustomers] = useState([]);
@@ -24,6 +27,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const [scanOpen, setScanOpen] = useState(false);
   const [repeating, setRepeating] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [saveConfirm, setSaveConfirm] = useState(null);
 
   // Form State
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -135,7 +139,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         }))
       );
     }
-    toast.info('Restored unsaved bill draft');
+    toast.info('Draft restored', 2200);
   }, [draftBill, defaultTaxRate, toast]);
 
   // Autosave draft while composing
@@ -451,6 +455,89 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     await fetchNextInvoiceNumber(billType);
   };
 
+  const fillDummyValues = () => {
+    const today = pakistanToday();
+    dateTouchedRef.current = false;
+    setBillDate(today);
+    setDueDate(addDaysToDateString(today, 14));
+    setTaxRate(defaultTaxRate || 0);
+    setDiscountRate(5);
+    setCashTendered('');
+    setSkuQuery('');
+    setShowAdvanced(true);
+    setNaturalText('');
+
+    if (billType === 'supplier') {
+      setSelectedCustomerId(null);
+      setCustomerRates([]);
+      setCustomerName('Al-Madina Trading Co. (Jeddah)');
+      setCustomerEmail('orders@almadina-test.example');
+      setCustomerPhone('+966501234567');
+      setCustomerAddress('Industrial Area, Jeddah, Saudi Arabia');
+      setPaymentMethod('Bank Transfer / Remittance');
+      setNotes('TEST — Purchase remittance / payment advice (dummy data)');
+      setPayeeBankName('Al Rajhi Bank');
+      setPayeeAccountTitle('Al-Madina Trading Co.');
+      setPayeeAccountNumber('SA4420000001234567891234');
+      setPayeePaymentNotes('SWIFT: RJHISARI — dummy test only');
+      setInitialPayment('5000');
+      setItems([
+        { product_id: null, description: 'Belgian Dark Chocolate 70% (carton)', quantity: 20, unit_price: 1850 },
+        { product_id: null, description: 'Assorted Truffle Mix (kg)', quantity: 15, unit_price: 3200 },
+        { product_id: null, description: 'Gift Box Packaging (set of 50)', quantity: 4, unit_price: 950 },
+      ]);
+    } else {
+      const existing = customers.find((c) => String(c.name || '').trim());
+      if (existing) {
+        setSelectedCustomerId(existing.id);
+        setCustomerName(existing.name || 'Ahmed Khan (Test)');
+        setCustomerEmail(existing.email || 'ahmed.test@example.com');
+        setCustomerPhone(existing.phone || '+923001234567');
+        setCustomerAddress(existing.address || 'Street 12, F-7, Islamabad');
+        if (existing.id) {
+          apiFetch(`/api/customers/${existing.id}/rates`)
+            .then((res) => res.json())
+            .then((rates) => setCustomerRates(Array.isArray(rates) ? rates : []))
+            .catch(() => setCustomerRates([]));
+        }
+      } else {
+        setSelectedCustomerId(null);
+        setCustomerRates([]);
+        setCustomerName('Ahmed Khan (Test)');
+        setCustomerEmail('ahmed.test@example.com');
+        setCustomerPhone('+923001234567');
+        setCustomerAddress('Street 12, F-7, Islamabad');
+      }
+      setPaymentMethod('Cash');
+      setNotes('TEST — Thank you for your order! (dummy data)');
+      setPayeeBankName('');
+      setPayeeAccountTitle('');
+      setPayeeAccountNumber('');
+      setPayeePaymentNotes('');
+      setInitialPayment('1000');
+
+      if (products.length > 0) {
+        const pick = products.slice(0, Math.min(3, products.length));
+        setItems(
+          pick.map((p, i) => ({
+            product_id: p.id,
+            description: p.name || `Test item ${i + 1}`,
+            quantity: i === 0 ? 2 : 1,
+            unit_price: Number(p.price) || 500,
+          }))
+        );
+      } else {
+        setItems([
+          { product_id: null, description: 'Ferrero Rocher 16pc', quantity: 2, unit_price: 2450 },
+          { product_id: null, description: 'Lindt Dark 100g', quantity: 3, unit_price: 850 },
+          { product_id: null, description: 'Gift Wrap Premium', quantity: 1, unit_price: 200 },
+        ]);
+      }
+    }
+
+    toast.success('Dummy test values filled — review before saving');
+  };
+
   const applySkuLookup = (rawQuery) => {
     const q = String(rawQuery ?? skuQuery).trim().toLowerCase();
     if (!q) return;
@@ -538,34 +625,8 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   };
 
   // Submit and Save to SQLite DB
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const performSave = async () => {
     if (savingRef.current || loading) return;
-    if (!customerName.trim()) {
-      toast.error(billType === 'supplier' ? 'Please enter or select a supplier / pay-to name.' : 'Please enter or select a customer name.');
-      return;
-    }
-    if (items.length === 0 || items.some((i) => !i.description.trim())) {
-      toast.error('Please ensure all item descriptions are filled out.');
-      return;
-    }
-    if (!Number.isFinite(totalAmount)) {
-      toast.error('Bill total is invalid. Check quantities and prices.');
-      return;
-    }
-    if (totalAmount <= 0) {
-      const proceed = window.confirm('Bill total is Rs. 0 (or less). Save anyway?');
-      if (!proceed) return;
-    }
-
-    const oversell = stockWarnings.filter((w) => w.includes('need'));
-    if (oversell.length > 0) {
-      const proceed = window.confirm(
-        `Stock warning:\n\n${oversell.join('\n')}\n\nSave bill anyway? Stock will not go below 0.`
-      );
-      if (!proceed) return;
-    }
-
     const mode = saveMode;
     savingRef.current = true;
     setLoading(true);
@@ -634,6 +695,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
       }
 
       clearBillDraft();
+      saveAckRef.current = { zero: false, stock: false };
 
       if (mode === 'new') {
         await resetFormForNew();
@@ -659,51 +721,98 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     }
   };
 
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (savingRef.current || loading) return;
+    if (!customerName.trim()) {
+      toast.error(billType === 'supplier' ? 'Please enter or select a supplier / pay-to name.' : 'Please enter or select a customer name.');
+      return;
+    }
+    if (items.length === 0 || items.some((i) => !i.description.trim())) {
+      toast.error('Please ensure all item descriptions are filled out.');
+      return;
+    }
+    if (!Number.isFinite(totalAmount)) {
+      toast.error('Bill total is invalid. Check quantities and prices.');
+      return;
+    }
+    if (totalAmount <= 0 && !saveAckRef.current.zero) {
+      setSaveConfirm({
+        type: 'zero',
+        title: 'Save Rs. 0 bill?',
+        message: 'Bill total is Rs. 0 (or less). Save anyway?',
+      });
+      return;
+    }
+
+    const oversell = stockWarnings.filter((w) => w.includes('need'));
+    if (oversell.length > 0 && !saveAckRef.current.stock) {
+      setSaveConfirm({
+        type: 'stock',
+        title: 'Stock warning',
+        message: `${oversell.join(' · ')}. Save anyway? Stock will not go below 0.`,
+      });
+      return;
+    }
+
+    await performSave();
+  };
+
+  const confirmSaveWarning = async () => {
+    if (!saveConfirm) return;
+    if (saveConfirm.type === 'zero') saveAckRef.current.zero = true;
+    if (saveConfirm.type === 'stock') saveAckRef.current.stock = true;
+    setSaveConfirm(null);
+
+    const oversell = stockWarnings.filter((w) => w.includes('need'));
+    if (saveConfirm.type === 'zero' && oversell.length > 0 && !saveAckRef.current.stock) {
+      setSaveConfirm({
+        type: 'stock',
+        title: 'Stock warning',
+        message: `${oversell.join(' · ')}. Save anyway? Stock will not go below 0.`,
+      });
+      return;
+    }
+
+    await performSave();
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Prominent 2-Option Bill Category Selector */}
-      <div className="glass-panel panel-hero" style={{ padding: '1.5rem' }}>
-        <div style={{ marginBottom: '1rem' }}>
-          <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '0.2rem' }}>SELECT BILL TYPE</h3>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            Choose whether this bill is a <b>Customer Sale Invoice</b> or a <b>Saudia Arabia Stock Buying Cost Bill</b>:
-          </p>
+      <div className="glass-panel bill-type-panel">
+        <div className="bill-type-head">
+          <h3>Bill type</h3>
+          <p>Sale to a client, or stock purchase from Saudia.</p>
         </div>
 
-          <div className="responsive-grid grid-2-mobile-1" style={{ gap: '1rem' }}>
-          {/* Option 1: Customer Bill */}
-          <div
+        <div className="bill-type-grid" role="radiogroup" aria-label="Bill type">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={billType === 'customer'}
+            className={`bill-type-card${billType === 'customer' ? ' is-active' : ''}`}
             onClick={() => {
               setBillType('customer');
               setSelectedCustomerId(null);
               if (customerName === 'Saudia Arabia Supplier') setCustomerName('');
               setPaymentMethod((pm) => (pm === 'Bank Transfer / Remittance' ? 'Bank Transfer / Raast' : pm));
             }}
-            style={{
-              padding: '1.2rem',
-              borderRadius: 'var(--radius-md)',
-              border: billType === 'customer' ? '2px solid var(--accent-teal)' : '1px solid var(--border-color)',
-              background: billType === 'customer' ? 'var(--surface-muted)' : 'var(--bg-card)',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.85rem',
-            }}
           >
-            <div style={{ fontSize: '1.8rem' }}>🛒</div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '1rem', color: billType === 'customer' ? 'var(--accent-teal)' : 'var(--text-primary)' }}>
-                1. Customer Bill (Sale)
-              </div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                Selling invoice for clients in Peshawar, Lahore, Islamabad, etc. (#INV)
-              </div>
-            </div>
-          </div>
+            <span className="bill-type-icon" aria-hidden>
+              <ShoppingCart size={18} />
+            </span>
+            <span className="bill-type-copy">
+              <strong>Customer sale</strong>
+              <small>Local clients · #INV</small>
+            </span>
+            <span className="bill-type-check" aria-hidden />
+          </button>
 
-          {/* Option 2: Saudia Arabia Bill */}
-          <div
+          <button
+            type="button"
+            role="radio"
+            aria-checked={billType === 'supplier'}
+            className={`bill-type-card is-saudia${billType === 'supplier' ? ' is-active' : ''}`}
             onClick={() => {
               setBillType('supplier');
               setSelectedCustomerId(null);
@@ -715,28 +824,16 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                 setNotes('Purchase remittance / payment advice');
               }
             }}
-            style={{
-              padding: '1.2rem',
-              borderRadius: 'var(--radius-md)',
-              border: billType === 'supplier' ? '2px solid var(--accent-purple)' : '1px solid var(--border-color)',
-              background: billType === 'supplier' ? 'var(--surface-muted)' : 'var(--bg-card)',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.85rem',
-            }}
           >
-            <div style={{ fontSize: '1.8rem' }}>🇸🇦</div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '1rem', color: billType === 'supplier' ? 'var(--accent-purple)' : 'var(--text-primary)' }}>
-                2. Saudia Arabia Bill (Buying Cost)
-              </div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                Supplier inventory bill representing stock purchase cost (#SAU)
-              </div>
-            </div>
-          </div>
+            <span className="bill-type-icon" aria-hidden>
+              <Package size={18} />
+            </span>
+            <span className="bill-type-copy">
+              <strong>Saudia purchase</strong>
+              <small>Stock buying cost · #SAU</small>
+            </span>
+            <span className="bill-type-check" aria-hidden />
+          </button>
         </div>
       </div>
       {/* Smart Quick-Parse Banner */}
@@ -771,6 +868,15 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
               <h2 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Auto Bill Generator</h2>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Fill invoice details & save directly to database</p>
             </div>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={fillDummyValues}
+              title="Fill dummy values for testing"
+              style={{ width: 'auto', whiteSpace: 'nowrap' }}
+            >
+              <FlaskConical size={16} /> Fill test data
+            </button>
           </div>
 
           <div className="surface-block" style={{ marginTop: '1rem', padding: '0.9rem 1rem', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '0.75rem' }}>
@@ -807,17 +913,20 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
           <div>
             <label className="form-label">{billType === 'supplier' ? 'Supplier / Pay To *' : 'Customer Name *'}</label>
             {filteredParties.length > 0 && (
-              <select
-                className="form-select"
+              <AppSelect
+                className="app-select--spaced"
                 style={{ marginBottom: '0.5rem' }}
                 value={selectedCustomerId || ''}
-                onChange={handleSelectCustomer}
-              >
-                <option value="">{billType === 'supplier' ? '-- Load Saved Supplier --' : '-- Load Saved Client --'}</option>
-                {filteredParties.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+                onChange={(next) => handleSelectCustomer({ target: { value: next } })}
+                placeholder={billType === 'supplier' ? '-- Load Saved Supplier --' : '-- Load Saved Client --'}
+                options={[
+                  {
+                    value: '',
+                    label: billType === 'supplier' ? '-- Load Saved Supplier --' : '-- Load Saved Client --',
+                  },
+                  ...filteredParties.map((c) => ({ value: String(c.id), label: c.name })),
+                ]}
+              />
             )}
             <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '0.45rem' }}>
               {billType === 'supplier'
@@ -955,29 +1064,28 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
 
             <div className="form-group">
               <label className="form-label">Payment Method</label>
-              <select
-                className="form-select"
+              <AppSelect
                 value={paymentMethod}
-                onChange={(e) => {
-                  setPaymentMethod(e.target.value);
-                  if (!String(e.target.value).toLowerCase().includes('cash')) setCashTendered('');
+                aria-label="Payment method"
+                onChange={(next) => {
+                  setPaymentMethod(next);
+                  if (!String(next).toLowerCase().includes('cash')) setCashTendered('');
                 }}
-              >
-                {billType === 'supplier' ? (
-                  <>
-                    <option value="Bank Transfer / Remittance">Bank Transfer / Remittance</option>
-                    <option value="Bank Transfer / Raast">Bank Transfer / Raast</option>
-                    <option value="Cash">Cash</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="Bank Transfer / Raast">Bank Transfer / Raast</option>
-                    <option value="JazzCash / EasyPaisa">JazzCash / EasyPaisa</option>
-                    <option value="Cash Counter Sale">Cash Counter Sale</option>
-                    <option value="Credit / Debit Card">Credit / Debit Card</option>
-                  </>
-                )}
-              </select>
+                options={
+                  billType === 'supplier'
+                    ? [
+                        'Bank Transfer / Remittance',
+                        'Bank Transfer / Raast',
+                        'Cash',
+                      ]
+                    : [
+                        'Bank Transfer / Raast',
+                        'JazzCash / EasyPaisa',
+                        'Cash Counter Sale',
+                        'Credit / Debit Card',
+                      ]
+                }
+              />
             </div>
 
             {isCashSale && (
@@ -1073,6 +1181,15 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
             </button>
           </div>
 
+          <BarcodeScanner
+            open={scanOpen}
+            onClose={() => setScanOpen(false)}
+            onDetected={(code) => {
+              setSkuQuery(code);
+              applySkuLookup(code);
+            }}
+          />
+
           {/* Desktop table */}
           <div className="table-container desktop-only-table">
             <table className="data-table">
@@ -1093,18 +1210,19 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                       <td>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
                           {products.length > 0 && (
-                            <select
-                              className="form-select"
-                              style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem', marginBottom: '0.2rem' }}
-                              onChange={(e) => handleSelectProduct(index, e.target.value)}
-                            >
-                              <option value="">-- Load Preset Item --</option>
-                              {products.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.sku ? `[${p.sku}] ` : ''}{p.name} ({currencySymbol}{p.price}) · stock {p.stock ?? '?'}
-                                </option>
-                              ))}
-                            </select>
+                            <AppSelect
+                              style={{ padding: 0, fontSize: '0.75rem', marginBottom: '0.2rem' }}
+                              value=""
+                              placeholder="-- Load Preset Item --"
+                              onChange={(next) => handleSelectProduct(index, next)}
+                              options={[
+                                { value: '', label: '-- Load Preset Item --' },
+                                ...products.map((p) => ({
+                                  value: String(p.id),
+                                  label: `${p.sku ? `[${p.sku}] ` : ''}${p.name} (${currencySymbol}${p.price}) · stock ${p.stock ?? '?'}`,
+                                })),
+                              ]}
+                            />
                           )}
                           <input
                             type="text"
@@ -1177,18 +1295,19 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                     </button>
                   </div>
                   {products.length > 0 && (
-                    <select
-                      className="form-select"
+                    <AppSelect
                       style={{ marginBottom: '0.45rem' }}
-                      onChange={(e) => handleSelectProduct(index, e.target.value)}
-                    >
-                      <option value="">-- Load Preset Item --</option>
-                      {products.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({currencySymbol}{p.price}) · stock {p.stock ?? '?'}
-                        </option>
-                      ))}
-                    </select>
+                      value=""
+                      placeholder="-- Load Preset Item --"
+                      onChange={(next) => handleSelectProduct(index, next)}
+                      options={[
+                        { value: '', label: '-- Load Preset Item --' },
+                        ...products.map((p) => ({
+                          value: String(p.id),
+                          label: `${p.name} (${currencySymbol}${p.price}) · stock ${p.stock ?? '?'}`,
+                        })),
+                      ]}
+                    />
                   )}
                   <input
                     type="text"
@@ -1343,13 +1462,19 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         </div>
       </form>
 
-      <BarcodeScanner
-        open={scanOpen}
-        onClose={() => setScanOpen(false)}
-        onDetected={(code) => {
-          setSkuQuery(code);
-          applySkuLookup(code);
+      <ConfirmDialog
+        open={Boolean(saveConfirm)}
+        title={saveConfirm?.title || 'Confirm'}
+        message={saveConfirm?.message || ''}
+        confirmLabel="Save anyway"
+        cancelLabel="Go back"
+        danger={false}
+        busy={loading}
+        onCancel={() => {
+          saveAckRef.current = { zero: false, stock: false };
+          setSaveConfirm(null);
         }}
+        onConfirm={confirmSaveWarning}
       />
     </div>
   );

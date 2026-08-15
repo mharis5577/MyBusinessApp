@@ -14,6 +14,7 @@ export default function OverduePanel({
   currencySymbol = 'Rs.',
   settings = {},
   onViewBill,
+  embedded = false,
 }) {
   const toast = useToast();
   const [rows, setRows] = useState([]);
@@ -62,29 +63,49 @@ export default function OverduePanel({
 
   if (loading) {
     return (
-      <div className="panel-flat" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '0.75rem 0' }}>
+      <div className={`panel-flat${embedded ? ' is-embedded' : ''}`} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '0.75rem 0' }}>
         <RefreshCw className="spin" size={18} /> Checking overdue…
       </div>
     );
   }
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    if (embedded) {
+      return (
+        <p className="dash-dropdown-empty">No overdue bills — follow-ups will show here.</p>
+      );
+    }
+    return null;
+  }
 
   return (
-    <div className="panel-flat overdue-panel">
-      <div className="panel-flat-head">
-        <div>
-          <h3 className="panel-flat-title" style={{ color: 'var(--status-overdue)' }}>
-            <AlertTriangle size={17} /> Overdue
-          </h3>
-          <p className="panel-flat-sub">
-            {rows.length} bill{rows.length === 1 ? '' : 's'} · {formatCurrency(currencySymbol, totalDue)}
-          </p>
+    <div className={`panel-flat overdue-panel${embedded ? ' is-embedded' : ''}`}>
+      {!embedded && (
+        <div className="panel-flat-head">
+          <div>
+            <h3 className="panel-flat-title" style={{ color: 'var(--status-overdue)' }}>
+              <AlertTriangle size={17} /> Overdue
+            </h3>
+            <p className="panel-flat-sub">
+              {rows.length} bill{rows.length === 1 ? '' : 's'} · {formatCurrency(currencySymbol, totalDue)}
+            </p>
+          </div>
+          <button type="button" className="btn-secondary" style={{ width: 'auto', minHeight: 36, padding: '0.35rem 0.7rem', fontSize: '0.75rem' }} onClick={load}>
+            <RefreshCw size={14} /> Refresh
+          </button>
         </div>
-        <button type="button" className="btn-secondary" style={{ width: 'auto', minHeight: 36, padding: '0.35rem 0.7rem', fontSize: '0.75rem' }} onClick={load}>
-          <RefreshCw size={14} /> Refresh
-        </button>
-      </div>
+      )}
+
+      {embedded && (
+        <div className="dash-dropdown-toolbar">
+          <span>
+            {rows.length} bill{rows.length === 1 ? '' : 's'} · {formatCurrency(currencySymbol, totalDue)}
+          </span>
+          <button type="button" className="btn-secondary" style={{ width: 'auto', minHeight: 32, padding: '0.3rem 0.65rem', fontSize: '0.72rem' }} onClick={load}>
+            <RefreshCw size={13} /> Refresh
+          </button>
+        </div>
+      )}
 
       <div className="mobile-card-list" style={{ maxHeight: 280, overflowY: 'auto' }}>
         {rows.slice(0, 12).map((r) => (

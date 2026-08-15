@@ -4,6 +4,7 @@ import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { buildPaymentReminderText, openWhatsAppReminder, normalizeWhatsAppPhone } from '../utils/paymentReminder';
+import ConfirmDialog from './ConfirmDialog';
 
 const BUCKETS = [
   { key: 'all', label: 'All open' },
@@ -24,6 +25,7 @@ export default function AgingReport({
   const [bucket, setBucket] = useState('d30');
   const [loading, setLoading] = useState(true);
   const [reminding, setReminding] = useState(false);
+  const [remindFlow, setRemindFlow] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -54,45 +56,104 @@ export default function AgingReport({
     return (report.rows || []).filter((r) => (Number(r.days_overdue) || 0) >= 1);
   }, [report]);
 
-  const remindAllOverdue = async () => {
+  const startRemindAll = () => {
     const list = overdueForRemind.filter((r) => normalizeWhatsAppPhone(r.customer_phone));
     const skippedNoPhone = overdueForRemind.length - list.length;
     if (!list.length) {
       toast.info(`No overdue bills with phone numbers (${skippedNoPhone} skipped).`);
       return;
     }
-    if (!window.confirm(`Open WhatsApp for ${list.length} overdue bill(s)? You will confirm each one.`)) {
+    setRemindFlow({
+      phase: 'batch',
+      list,
+      skippedNoPhone,
+      index: 0,
+      sent: 0,
+      cancelled: 0,
+    });
+  };
+
+  const finishRemindFlow = (flow) => {
+    setReminding(false);
+    setRemindFlow(null);
+    toast.success(
+      `Reminders: ${flow.sent} opened, ${flow.skippedNoPhone} no phone, ${flow.cancelled} skipped.`
+    );
+  };
+
+  const openCurrentReminder = async (flow) => {
+    const bill = flow.list[flow.index];
+    if (!bill) {
+      finishRemindFlow(flow);
       return;
     }
-    setReminding(true);
-    let sent = 0;
-    let cancelled = 0;
-    try {
-      for (let i = 0; i < list.length; i++) {
-        const bill = list[i];
-        const text = buildPaymentReminderText({
-          bill,
-          settings,
-          currencySymbol,
-          urdu: Boolean(settings.urdu_labels),
-        });
-        const ok = window.confirm(
-          `Remind ${i + 1}/${list.length}: ${bill.customer_name} · ${bill.invoice_number}\nBalance ${formatCurrency(currencySymbol, bill.balance_due)}\n\nOpen WhatsApp?`
-        );
-        if (!ok) {
-          cancelled += 1;
-          continue;
-        }
-        openWhatsAppReminder(bill.customer_phone, text);
-        sent += 1;
-        // Brief pause so mobile can hand off to WhatsApp
-        await new Promise((r) => setTimeout(r, 600));
-      }
-      toast.success(`Reminders: ${sent} opened, ${skippedNoPhone} no phone, ${cancelled} skipped.`);
-    } finally {
-      setReminding(false);
+    const text = buildPaymentReminderText({
+      bill,
+      settings,
+      currencySymbol,
+      urdu: Boolean(settings.urdu_labels),
+    });
+    openWhatsAppReminder(bill.customer_phone, text);
+    const next = {
+      ...flow,
+      sent: flow.sent + 1,
+      index: flow.index + 1,
+    };
+    await new Promise((r) => setTimeout(r, 600));
+    if (next.index >= next.list.length) {
+      finishRemindFlow(next);
+      return;
     }
+    setRemindFlow({ ...next, phase: 'one' });
   };
+
+  const confirmRemindStep = async () => {
+    if (!remindFlow) return;
+    if (remindFlow.phase === 'batch') {
+      setReminding(true);
+      setRemindFlow({ ...remindFlow, phase: 'one' });
+      return;
+    }
+    await openCurrentReminder(remindFlow);
+  };
+
+  const cancelRemindStep = async () => {
+    if (!remindFlow) return;
+    if (remindFlow.phase === 'batch') {
+      setRemindFlow(null);
+      return;
+    }
+    const next = {
+      ...remindFlow,
+      cancelled: remindFlow.cancelled + 1,
+      index: remindFlow.index + 1,
+    };
+    if (next.index >= next.list.length) {
+      finishRemindFlow(next);
+      return;
+    }
+    setRemindFlow({ ...next, phase: 'one' });
+  };
+
+  const remindDialog =
+    remindFlow == null
+      ? null
+      : remindFlow.phase === 'batch'
+        ? {
+            title: `Remind ${remindFlow.list.length} overdue?`,
+            message: `WhatsApp will open one by one. You can skip any bill. ${remindFlow.skippedNoPhone} without phone are already skipped.`,
+            confirmLabel: 'Start',
+            cancelLabel: 'Cancel',
+          }
+        : (() => {
+            const bill = remindFlow.list[remindFlow.index];
+            return {
+              title: `Remind ${remindFlow.index + 1}/${remindFlow.list.length}`,
+              message: `${bill?.customer_name || 'Customer'} · ${bill?.invoice_number || ''} · balance ${formatCurrency(currencySymbol, bill?.balance_due)}. Open WhatsApp?`,
+              confirmLabel: 'Open WhatsApp',
+              cancelLabel: 'Skip',
+            };
+          })();
 
   if (loading && !report) {
     return (
@@ -124,7 +185,7 @@ export default function AgingReport({
             className="btn-primary"
             style={{ width: 'auto' }}
             disabled={reminding || overdueForRemind.length === 0}
-            onClick={remindAllOverdue}
+            onClick={startRemindAll}
           >
             <MessageCircle size={14} /> Remind all overdue
           </button>
@@ -195,6 +256,18 @@ export default function AgingReport({
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={Boolean(remindDialog)}
+        title={remindDialog?.title || ''}
+        message={remindDialog?.message || ''}
+        confirmLabel={remindDialog?.confirmLabel || 'OK'}
+        cancelLabel={remindDialog?.cancelLabel || 'Cancel'}
+        danger={false}
+        busy={false}
+        onCancel={cancelRemindStep}
+        onConfirm={confirmRemindStep}
+      />
     </div>
   );
 }

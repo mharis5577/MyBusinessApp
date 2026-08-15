@@ -10,6 +10,8 @@ import {
   normalizeWhatsAppPhone,
 } from '../utils/paymentReminder';
 import EmptyState from './EmptyState';
+import ConfirmDialog from './ConfirmDialog';
+import AppSelect from './AppSelect';
 
 export default function CustomerManager({ currencySymbol = 'Rs.' }) {
   const toast = useToast();
@@ -20,6 +22,8 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
   const [ledger, setLedger] = useState(null);
   const [partyFilter, setPartyFilter] = useState('all');
   const [shopSettings, setShopSettings] = useState({});
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Form State for new customer
   const [name, setName] = useState('');
@@ -205,17 +209,29 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
     }
   };
 
-  const handleDeleteCustomer = async (id) => {
-    if (!window.confirm('Delete this client profile?')) return;
+  const askDeleteCustomer = (customer) => {
+    setDeleteTarget(customer);
+  };
+
+  const confirmDeleteCustomer = async () => {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
+    setDeleting(true);
     try {
       const res = await apiFetch(`/api/customers/${id}`, { method: 'DELETE' });
       if (res.ok) {
         if (selectedCustomer?.id === id) setSelectedCustomer(null);
         toast.success('Client deleted');
+        setDeleteTarget(null);
         apiFetchCustomers();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || 'Could not delete client');
       }
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -383,10 +399,15 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
 
           <div className="form-group">
             <label className="form-label">Party type</label>
-            <select className="form-select" value={partyType} onChange={(e) => setPartyType(e.target.value)}>
-              <option value="customer">Customer (sale / retail)</option>
-              <option value="supplier">Supplier (Saudia / buying)</option>
-            </select>
+            <AppSelect
+              value={partyType}
+              onChange={setPartyType}
+              aria-label="Party type"
+              options={[
+                { value: 'customer', label: 'Customer (sale / retail)' },
+                { value: 'supplier', label: 'Supplier (Saudia / buying)' },
+              ]}
+            />
           </div>
 
           <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -511,7 +532,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
                         className="btn-danger"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleDeleteCustomer(c.id);
+                          askDeleteCustomer(c);
                         }}
                       >
                         <Trash2 size={14} />
@@ -540,12 +561,15 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
           <div className="form-group">
             <label className="form-label">Primary (keep)</label>
-            <select className="form-select" value={mergePrimary} onChange={(e) => setMergePrimary(e.target.value)}>
-              <option value="">— Select —</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+            <AppSelect
+              value={mergePrimary}
+              onChange={setMergePrimary}
+              placeholder="— Select —"
+              options={[
+                { value: '', label: '— Select —' },
+                ...customers.map((c) => ({ value: String(c.id), label: c.name })),
+              ]}
+            />
           </div>
           <div className="form-group">
             <label className="form-label">Duplicates (remove)</label>
@@ -638,14 +662,19 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
 
                 <div className="form-group">
                   <label className="form-label">Select Catalog Product *</label>
-                  <select className="form-select" value={rateProductId} onChange={(e) => setRateProductId(e.target.value)} required>
-                    <option value="">-- Choose Product --</option>
-                    {products.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} (Standard Price: {currencySymbol}{p.price})
-                      </option>
-                    ))}
-                  </select>
+                  <AppSelect
+                    value={rateProductId}
+                    onChange={setRateProductId}
+                    required
+                    placeholder="-- Choose Product --"
+                    options={[
+                      { value: '', label: '-- Choose Product --' },
+                      ...products.map((p) => ({
+                        value: String(p.id),
+                        label: `${p.name} (Standard Price: ${currencySymbol}${p.price})`,
+                      })),
+                    ]}
+                  />
                 </div>
 
                 <div className="form-group">
@@ -762,6 +791,18 @@ export default function CustomerManager({ currencySymbol = 'Rs.' }) {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={`Delete ${deleteTarget?.name || 'client'}?`}
+        message="This removes the client profile. Past bills stay in history."
+        confirmLabel={deleting ? 'Deleting…' : 'Delete'}
+        busy={deleting}
+        onCancel={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+        onConfirm={confirmDeleteCustomer}
+      />
     </div>
   );
 }

@@ -56,6 +56,8 @@ function initTables() {
       { name: 'low_stock_threshold', type: 'INTEGER DEFAULT 5' },
       { name: 'biometric_lock', type: 'INTEGER DEFAULT 0' },
       { name: 'due_reminders', type: 'INTEGER DEFAULT 0' },
+      { name: 'payment_methods', type: 'TEXT DEFAULT "[]"' },
+      { name: 'show_developer_credit', type: 'INTEGER DEFAULT 1' },
     ];
 
     columnsToAdd.forEach((col) => {

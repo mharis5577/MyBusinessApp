@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Printer,
   Download,
   ArrowLeft,
   MessageSquare,
   Mail,
-  ToggleLeft,
   Image as ImageIcon,
   Loader2,
   Copy,
@@ -14,17 +13,28 @@ import {
   Bell,
   ImagePlus,
   Undo2,
+  Trash2,
+  Share2,
+  Monitor,
+  Receipt,
+  ChevronDown,
 } from 'lucide-react';
 import BillAdjustSheet from './BillAdjustSheet';
-import BrandMark from './BrandMark';
+import SendBillSheet from './SendBillSheet';
+import BrandMark, { DeveloperCredit } from './BrandMark';
+import StatusBadge from './StatusBadge';
+import ConfirmDialog from './ConfirmDialog';
+import AppSelect from './AppSelect';
 import { isCancelled, remainingQty } from '../utils/billAdjust';
 import { formatCurrency, formatBillDateTime } from '../utils/pakistan';
 import { paymentSummaryText } from '../utils/billPayments';
+import { getPaymentMethods, paymentMethodLines, compactPaymentInstructions } from '../utils/paymentMethods';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { downloadBlob, saveOrShareBlob } from '../utils/downloadFile';
 import { elementToJpegBlob, elementToPdfBlob } from '../utils/invoiceExport';
 import { compressImageToDataUrl } from '../utils/imageCompress';
+import { loadBillSendPrefs, resolveBillExportOptions } from '../utils/billSendPrefs';
 import {
   buildPaymentReminderText,
   openWhatsAppReminder,
@@ -33,6 +43,26 @@ import {
 
 function sanitizeFilename(name) {
   return String(name || 'Invoice').replace(/[^\w.-]+/g, '_');
+}
+
+const BILL_VIEW_KEY = 'cocoadesk-bill-view';
+
+function loadBillView() {
+  try {
+    const v = localStorage.getItem(BILL_VIEW_KEY);
+    if (v === 'mobile' || v === 'desktop' || v === 'thermal') return v;
+  } catch {
+    /* ignore */
+  }
+  return 'desktop';
+}
+
+function saveBillView(view) {
+  try {
+    localStorage.setItem(BILL_VIEW_KEY, view);
+  } catch {
+    /* ignore */
+  }
 }
 
 function BiLabel({ en, ur, urdu, className, style }) {
@@ -45,10 +75,74 @@ function BiLabel({ en, ur, urdu, className, style }) {
   );
 }
 
+function InvDropdown({ id, openId, setOpenId, label, icon: Icon, disabled, children, danger = false }) {
+  const ref = useRef(null);
+  const open = openId === id;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => {
+      if (!ref.current?.contains(e.target)) setOpenId(null);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') setOpenId(null);
+    };
+    const onScroll = (e) => {
+      if (ref.current?.contains(e.target)) return;
+      setOpenId(null);
+    };
+    document.addEventListener('pointerdown', onDoc);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('pointerdown', onDoc);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [open, setOpenId]);
+
+  return (
+    <div className={`inv-dd${danger ? ' inv-dd--danger' : ''}`} ref={ref}>
+      <button
+        type="button"
+        className={`btn-secondary inv-dd-trigger${open ? ' is-open' : ''}${danger ? ' inv-dd-trigger--danger' : ''}`}
+        disabled={disabled}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpenId(open ? null : id)}
+      >
+        {Icon ? <Icon size={15} /> : null}
+        <span>{label}</span>
+        <ChevronDown size={14} className={`inv-dd-chevron${open ? ' is-open' : ''}`} />
+      </button>
+      {open ? (
+        <div className="inv-dd-menu" role="menu">
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function InvMenuItem({ icon: Icon, label, onClick, disabled, danger = false, busy = false }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className={`inv-dd-item${danger ? ' is-danger' : ''}`}
+      disabled={disabled || busy}
+      onClick={onClick}
+    >
+      {busy ? <Loader2 size={15} className="spin" /> : Icon ? <Icon size={15} /> : null}
+      <span>{label}</span>
+    </button>
+  );
+}
+
 export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdated, currencySymbol = 'Rs.', urduLabels = false }) {
   const toast = useToast();
   const [settings, setSettings] = useState({});
-  const [posMode, setPosMode] = useState(false);
+  const [billView, setBillViewState] = useState(() => loadBillView());
   const [sharing, setSharing] = useState(null);
   const [liveBill, setLiveBill] = useState(bill);
   const [payAmount, setPayAmount] = useState('');
@@ -57,6 +151,26 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
   const [payScreenshot, setPayScreenshot] = useState('');
   const [previewShot, setPreviewShot] = useState(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showDeveloperCredit, setShowDeveloperCredit] = useState(true);
+
+  const setBillView = useCallback((view) => {
+    const next = view === 'mobile' || view === 'thermal' ? view : 'desktop';
+    setBillViewState(next);
+    saveBillView(next);
+  }, []);
+
+  const handleTargetPreview = useCallback(
+    (target) => {
+      // While Send sheet is open, mirror Desktop/Mobile choice in the live preview
+      if (target === 'mobile') setBillView('mobile');
+      else if (target === 'desktop') setBillView('desktop');
+    },
+    [setBillView]
+  );
 
   useEffect(() => {
     setLiveBill(bill);
@@ -73,9 +187,30 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
   useEffect(() => {
     apiFetch('/api/settings')
       .then((res) => res.json())
-      .then((data) => setSettings(data || {}))
+      .then((data) => {
+        setSettings(data || {});
+        setShowDeveloperCredit(data?.show_developer_credit !== 0 && data?.show_developer_credit !== false);
+      })
       .catch((err) => console.error(err));
   }, []);
+
+  const toggleDeveloperCredit = async (checked) => {
+    setShowDeveloperCredit(checked);
+    try {
+      const res = await apiFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...settings,
+          show_developer_credit: checked ? 1 : 0,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setSettings(data);
+    } catch (err) {
+      console.warn(err);
+    }
+  };
 
   if (!liveBill) {
     return (
@@ -102,6 +237,15 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
     Boolean(liveBill.payee_account_title) ||
     Boolean(liveBill.payee_account_number) ||
     Boolean(liveBill.payee_payment_notes);
+  const shopPaymentMethods = getPaymentMethods(settings);
+  const paymentInstructions = compactPaymentInstructions(settings.payment_instructions, shopPaymentMethods);
+  const hasShopPayment =
+    shopPaymentMethods.length > 0 || Boolean(paymentInstructions);
+  const primaryWallet =
+    shopPaymentMethods.find((m) => m.mobile_wallet)?.mobile_wallet ||
+    shopPaymentMethods.find((m) => m.account_number)?.account_number ||
+    settings.mobile_wallet ||
+    '';
 
   const getInvoiceElement = () => {
     const el = document.getElementById('printable-invoice');
@@ -109,18 +253,61 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
     return el;
   };
 
-  const buildPdfBlob = async () => {
-    const element = getInvoiceElement();
-    return elementToPdfBlob(element, { filename: `${baseName}_Invoice.pdf` });
+  const exportOptsFromPrefs = (prefs) => resolveBillExportOptions(prefs || loadBillSendPrefs());
+
+  const buildBillBlob = async (prefs) => {
+    const opts = exportOptsFromPrefs(prefs);
+    const prevView = billView;
+
+    // Switch visible layout so capture matches Desktop (A4) vs Mobile (phone card)
+    setBillView(opts.target === 'mobile' ? 'mobile' : 'desktop');
+
+    try {
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      await new Promise((r) => setTimeout(r, 80));
+
+      const element = getInvoiceElement();
+      const exportArgs = {
+        scale: opts.scale,
+        maxWidth: opts.maxWidth,
+        layoutWidth: opts.layoutWidth,
+        jpegQuality: opts.jpegQuality,
+        pdfJpegQuality: opts.pdfJpegQuality,
+        layout: opts.layout,
+      };
+
+      if (opts.format === 'pdf') {
+        const blob = await elementToPdfBlob(element, {
+          filename: `${baseName}_Invoice.pdf`,
+          ...exportArgs,
+        });
+        return { blob, opts, filename: `${baseName}_Invoice.pdf` };
+      }
+      const blob = await elementToJpegBlob(element, exportArgs);
+      return { blob, opts, filename: `${baseName}_Invoice.jpg` };
+    } catch (err) {
+      const msg = String(err?.message || err || '');
+      if (/illegal invocation/i.test(msg)) {
+        throw new Error('Could not render bill on this browser. Try Save, or refresh the page and retry.');
+      }
+      throw err;
+    } finally {
+      if (!sendOpen) setBillView(prevView);
+      else setBillView(opts.target === 'mobile' ? 'mobile' : 'desktop');
+    }
   };
 
-  const buildImageBlob = async () => elementToJpegBlob(getInvoiceElement());
+  const shareCaption = () =>
+    isSupplier
+      ? `Payment for purchase ${liveBill.invoice_number} to ${liveBill.customer_name}\nAmount to pay: ${formatCurrency(currencySymbol, liveBill.total_amount)}\nFrom: ${companyName}`
+      : `Invoice ${liveBill.invoice_number} — ${companyName}\nAmount: ${formatCurrency(currencySymbol, liveBill.total_amount)}\nClient: ${liveBill.customer_name}`;
 
   const handleDownloadPDF = async () => {
     setSharing('pdf');
     try {
-      const blob = await buildPdfBlob();
-      await downloadBlob(blob, `${baseName}_Invoice.pdf`, 'application/pdf');
+      const { blob, filename } = await buildBillBlob({ ...loadBillSendPrefs(), format: 'pdf' });
+      await downloadBlob(blob, filename, 'application/pdf');
+      toast.success('PDF saved');
     } catch (err) {
       if (err?.name !== 'AbortError') toast.error('Could not create PDF: ' + (err.message || err));
     } finally {
@@ -131,8 +318,9 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
   const handleDownloadImage = async () => {
     setSharing('image');
     try {
-      const blob = await buildImageBlob();
-      await downloadBlob(blob, `${baseName}_Invoice.jpg`, 'image/jpeg');
+      const { blob, filename } = await buildBillBlob({ ...loadBillSendPrefs(), format: 'image' });
+      await downloadBlob(blob, filename, 'image/jpeg');
+      toast.success('Image saved');
     } catch (err) {
       if (err?.name !== 'AbortError') toast.error('Could not create image: ' + (err.message || err));
     } finally {
@@ -140,16 +328,50 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
     }
   };
 
-  const handleWhatsAppShare = async () => {
-    setSharing('whatsapp');
+  const handleSendBill = async (prefs) => {
+    setSharing('send');
     try {
-      const blob = await buildImageBlob();
-      const caption = isSupplier
-        ? `Payment for purchase ${liveBill.invoice_number} to ${liveBill.customer_name}\nAmount to pay: ${formatCurrency(currencySymbol, liveBill.total_amount)}\nFrom: ${companyName}`
-        : `Invoice ${liveBill.invoice_number} — ${companyName}\nAmount: ${formatCurrency(currencySymbol, liveBill.total_amount)}\nClient: ${liveBill.customer_name}`;
-      const result = await saveOrShareBlob(blob, `${baseName}_Invoice.jpg`, 'image/jpeg', {
+      const { blob, opts, filename } = await buildBillBlob(prefs);
+      const caption = shareCaption();
+      const result = await saveOrShareBlob(blob, filename, opts.mime, {
         title: isSupplier ? `Payment ${liveBill.invoice_number}` : `Invoice ${liveBill.invoice_number}`,
         text: caption,
+        dialogTitle: 'Send bill',
+      });
+      if (result === 'shared') toast.success('Bill ready to send');
+      else toast.success('Bill downloaded — attach it in your app');
+      setSendOpen(false);
+    } catch (err) {
+      if (err?.name !== 'AbortError') toast.error('Could not send bill: ' + (err.message || err));
+    } finally {
+      setSharing(null);
+    }
+  };
+
+  const handleSaveBill = async (prefs) => {
+    setSharing('save');
+    try {
+      const { blob, opts, filename } = await buildBillBlob(prefs);
+      await downloadBlob(blob, filename, opts.mime);
+      toast.success(opts.format === 'pdf' ? 'PDF saved' : 'Image saved');
+      setSendOpen(false);
+    } catch (err) {
+      if (err?.name !== 'AbortError') toast.error('Could not save bill: ' + (err.message || err));
+    } finally {
+      setSharing(null);
+    }
+  };
+
+  const handleWhatsAppShare = async (prefs) => {
+    setSharing('whatsapp');
+    try {
+      const usePrefs = prefs || { ...loadBillSendPrefs(), format: 'image' };
+      const { blob, opts, filename } = await buildBillBlob({ ...usePrefs, format: usePrefs.format || 'image' });
+      const caption = shareCaption();
+      const result = await saveOrShareBlob(blob, filename, opts.mime, {
+        title: isSupplier ? `Payment ${liveBill.invoice_number}` : `Invoice ${liveBill.invoice_number}`,
+        text: caption,
+        dialogTitle: 'Send via WhatsApp',
       });
       if (result === 'downloaded') {
         const text = buildPaymentReminderText({
@@ -159,14 +381,13 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
           urdu,
         });
         openWhatsAppReminder(liveBill.customer_phone, text || caption);
-        toast.error(
-          isSupplier
-            ? 'Payment advice image downloaded. WhatsApp will open — attach the JPG if needed.'
-            : 'Invoice image downloaded. WhatsApp will open — attach the JPG if needed.'
-        );
+        toast.info('File downloaded. WhatsApp will open — attach the bill if needed.');
+      } else {
+        toast.success('Pick WhatsApp in the share sheet');
       }
+      setSendOpen(false);
     } catch (err) {
-      if (err?.name !== 'AbortError') toast.error('Could not share invoice image: ' + (err.message || err));
+      if (err?.name !== 'AbortError') toast.error('Could not share invoice: ' + (err.message || err));
     } finally {
       setSharing(null);
     }
@@ -187,25 +408,31 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
     else openWhatsAppReminder(liveBill.customer_phone, text);
   };
 
-  const handleEmailShare = async () => {
+  const handleEmailShare = async (prefs) => {
     setSharing('email');
     try {
-      const blob = await buildPdfBlob();
+      const usePrefs = prefs || { ...loadBillSendPrefs(), format: 'pdf' };
+      const { blob, opts, filename } = await buildBillBlob({
+        ...usePrefs,
+        format: usePrefs.format || 'pdf',
+      });
       const subject = isSupplier
         ? `Payment advice ${liveBill.invoice_number} from ${companyName}`
         : `Invoice ${liveBill.invoice_number} from ${companyName}`;
       const body = isSupplier
         ? `Assalam o Alaikum ${liveBill.customer_name},\n\nPlease find payment advice ${liveBill.invoice_number} for our purchase.\nAmount to pay: ${formatCurrency(currencySymbol, liveBill.total_amount)}\n\nRegards,\n${companyName}`
         : `Dear ${liveBill.customer_name},\n\nPlease find invoice ${liveBill.invoice_number}.\nTotal: ${formatCurrency(currencySymbol, liveBill.total_amount)}\n\nRegards,\n${companyName}`;
-      const result = await saveOrShareBlob(blob, `${baseName}_Invoice.pdf`, 'application/pdf', {
+      const result = await saveOrShareBlob(blob, filename, opts.mime, {
         title: subject,
         text: body,
+        dialogTitle: 'Email bill',
       });
       if (result === 'downloaded') {
-        window.location.href = `mailto:${encodeURIComponent(liveBill.customer_email || '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body + '\n\n(Attach the downloaded PDF)')}`;
+        window.location.href = `mailto:${encodeURIComponent(liveBill.customer_email || '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body + '\n\n(Attach the downloaded file)')}`;
       }
+      setSendOpen(false);
     } catch (err) {
-      if (err?.name !== 'AbortError') toast.error('Could not share invoice PDF: ' + (err.message || err));
+      if (err?.name !== 'AbortError') toast.error('Could not share invoice: ' + (err.message || err));
     } finally {
       setSharing(null);
     }
@@ -255,62 +482,174 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
     }
   };
 
-  const qrPaymentText = settings.mobile_wallet || `PAYMENT-INV:${liveBill.invoice_number}:${liveBill.total_amount}`;
+  const askDeleteBill = () => {
+    setDeleteOpen(true);
+  };
+
+  const confirmDeleteBill = async () => {
+    const label = liveBill.invoice_number || `#${liveBill.id}`;
+    setDeleting(true);
+    try {
+      const res = await apiFetch(`/api/bills/${liveBill.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      toast.success(`Deleted ${label}`);
+      setDeleteOpen(false);
+      onBack?.();
+    } catch (err) {
+      toast.error('Delete failed: ' + err.message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const qrPaymentText = primaryWallet || `PAYMENT-INV:${liveBill.invoice_number}:${liveBill.total_amount}`;
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrPaymentText)}`;
   const busy = Boolean(sharing);
   const payments = liveBill.payments || [];
   const cancelled = isCancelled(liveBill);
+  const displayStatus = cancelled
+    ? 'cancelled'
+    : balance <= 0 && (Number(liveBill.total_amount) || 0) > 0
+      ? 'paid'
+      : String(liveBill.status || '').toLowerCase() === 'overdue'
+        ? 'overdue'
+        : 'pending';
+
+  const viewLabel = billView === 'mobile' ? 'Mobile' : billView === 'thermal' ? 'Thermal' : 'Desktop';
+  const ViewIcon = billView === 'mobile' ? Smartphone : billView === 'thermal' ? Receipt : Monitor;
+  const canRemind = balance > 0 && !cancelled && liveBill.bill_type !== 'supplier';
+
+  const runMenuAction = (fn) => {
+    setMenuOpen(null);
+    fn?.();
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div className="no-print glass-panel invoice-actions" style={{ padding: '1rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-        <button className="btn-secondary" onClick={onBack} disabled={busy}>
-          <ArrowLeft size={16} /> Back
-        </button>
-        <div className="action-chip-row" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button className="btn-secondary" onClick={() => setPosMode(!posMode)} disabled={busy}>
-            <ToggleLeft size={16} /> {posMode ? 'A4 Invoice' : 'Thermal Receipt'}
+      <div className="no-print glass-panel invoice-actions">
+        <div className="invoice-actions-top">
+          <button type="button" className="btn-secondary invoice-back-btn" onClick={onBack} disabled={busy}>
+            <ArrowLeft size={16} /> <span>Back</span>
           </button>
-          {onDuplicate && (
-            <button className="btn-secondary" onClick={() => onDuplicate(liveBill)} disabled={busy}>
-              <Copy size={16} /> Duplicate
-            </button>
-          )}
-          {!cancelled && (
-            <button className="btn-secondary" onClick={() => setAdjustOpen(true)} disabled={busy}>
-              <Undo2 size={16} /> Return / Cancel
-            </button>
-          )}
-          {balance > 0 && !cancelled && liveBill.bill_type !== 'supplier' && (
-            <>
-              <button className="btn-secondary" style={{ color: '#25D366' }} onClick={() => handleRemind('whatsapp')} disabled={busy}>
-                <Bell size={16} /> Remind WA
-              </button>
-              <button className="btn-secondary" onClick={() => handleRemind('sms')} disabled={busy}>
-                <Smartphone size={16} /> SMS
-              </button>
-            </>
-          )}
-          <button className="btn-secondary" onClick={handleWhatsAppShare} style={{ color: '#25D366' }} disabled={busy}>
-            {sharing === 'whatsapp' ? <Loader2 size={16} className="spin" /> : <MessageSquare size={16} />}
-            WhatsApp
-          </button>
-          <button className="btn-secondary" onClick={handleEmailShare} disabled={busy}>
-            {sharing === 'email' ? <Loader2 size={16} className="spin" /> : <Mail size={16} />}
-            Email PDF
-          </button>
-          <button className="btn-secondary" onClick={handleDownloadImage} disabled={busy}>
-            {sharing === 'image' ? <Loader2 size={16} className="spin" /> : <ImageIcon size={16} />}
-            Image
-          </button>
-          <button className="btn-secondary" onClick={() => window.print()} disabled={busy}>
-            <Printer size={16} /> Print
-          </button>
-          <button className="btn-primary" onClick={handleDownloadPDF} disabled={busy}>
-            {sharing === 'pdf' ? <Loader2 size={16} className="spin" /> : <Download size={16} />}
-            PDF
+          <button type="button" className="btn-primary invoice-send-btn" onClick={() => setSendOpen(true)} disabled={busy}>
+            {sharing === 'send' || sharing === 'save' ? <Loader2 size={16} className="spin" /> : <Share2 size={16} />}
+            <span>Send bill</span>
           </button>
         </div>
+
+        <div className="invoice-action-grid">
+          <InvDropdown
+            id="view"
+            openId={menuOpen}
+            setOpenId={setMenuOpen}
+            label={viewLabel}
+            icon={ViewIcon}
+            disabled={busy}
+          >
+            <InvMenuItem
+              icon={Monitor}
+              label="Desktop (A4)"
+              onClick={() => runMenuAction(() => setBillView('desktop'))}
+            />
+            <InvMenuItem
+              icon={Smartphone}
+              label="Mobile card"
+              onClick={() => runMenuAction(() => setBillView('mobile'))}
+            />
+            <InvMenuItem
+              icon={Receipt}
+              label="Thermal receipt"
+              onClick={() => runMenuAction(() => setBillView('thermal'))}
+            />
+          </InvDropdown>
+
+          <button type="button" className="btn-primary invoice-send-in-grid" onClick={() => setSendOpen(true)} disabled={busy}>
+            {sharing === 'send' || sharing === 'save' ? <Loader2 size={15} className="spin" /> : <Share2 size={15} />}
+            <span>Send bill</span>
+          </button>
+
+          <InvDropdown id="share" openId={menuOpen} setOpenId={setMenuOpen} label="Share" icon={MessageSquare} disabled={busy}>
+            <InvMenuItem
+              icon={MessageSquare}
+              label="WhatsApp"
+              busy={sharing === 'whatsapp'}
+              onClick={() => runMenuAction(() => handleWhatsAppShare())}
+            />
+            <InvMenuItem
+              icon={Mail}
+              label="Email"
+              busy={sharing === 'email'}
+              onClick={() => runMenuAction(() => handleEmailShare())}
+            />
+            {canRemind && (
+              <>
+                <InvMenuItem
+                  icon={Bell}
+                  label="Remind WhatsApp"
+                  onClick={() => runMenuAction(() => handleRemind('whatsapp'))}
+                />
+                <InvMenuItem
+                  icon={Smartphone}
+                  label="Remind SMS"
+                  onClick={() => runMenuAction(() => handleRemind('sms'))}
+                />
+              </>
+            )}
+          </InvDropdown>
+
+          <InvDropdown id="export" openId={menuOpen} setOpenId={setMenuOpen} label="Export" icon={Download} disabled={busy}>
+            <InvMenuItem
+              icon={ImageIcon}
+              label="Save image"
+              busy={sharing === 'image'}
+              onClick={() => runMenuAction(() => handleDownloadImage())}
+            />
+            <InvMenuItem
+              icon={Download}
+              label="Download PDF"
+              busy={sharing === 'pdf'}
+              onClick={() => runMenuAction(() => handleDownloadPDF())}
+            />
+            <InvMenuItem
+              icon={Printer}
+              label="Print"
+              onClick={() => runMenuAction(() => window.print())}
+            />
+          </InvDropdown>
+
+          <InvDropdown id="manage" openId={menuOpen} setOpenId={setMenuOpen} label="Manage" icon={Copy} disabled={busy} danger>
+            {onDuplicate && (
+              <InvMenuItem
+                icon={Copy}
+                label="Duplicate"
+                onClick={() => runMenuAction(() => onDuplicate(liveBill))}
+              />
+            )}
+            {!cancelled && (
+              <InvMenuItem
+                icon={Undo2}
+                label="Return / Cancel"
+                onClick={() => runMenuAction(() => setAdjustOpen(true))}
+              />
+            )}
+            <InvMenuItem
+              icon={Trash2}
+              label="Delete bill"
+              danger
+              onClick={() => runMenuAction(() => askDeleteBill())}
+            />
+          </InvDropdown>
+        </div>
+
+        <label className="invoice-dev-credit-toggle">
+          <input
+            type="checkbox"
+            checked={showDeveloperCredit}
+            onChange={(e) => toggleDeveloperCredit(e.target.checked)}
+          />
+          Include developer name on this bill
+        </label>
       </div>
 
       {cancelled && (
@@ -324,36 +663,53 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
       )}
 
       {balance > 0 && !cancelled && (
-        <form className="no-print glass-panel" style={{ padding: '1rem 1.25rem' }} onSubmit={handleQuickPay}>
-          <h4 style={{ fontSize: '0.95rem', fontWeight: 800, marginBottom: '0.65rem' }}>Add payment</h4>
-          <div className="payment-summary-grid" style={{ marginBottom: '0.85rem' }}>
-            {paySummary.lines.map((line) => (
-              <div key={line.label} className="surface-block" style={{ padding: '0.55rem 0.65rem' }}>
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{line.label}</div>
-                <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', fontSize: '0.9rem', color: line.accent || 'var(--text-primary)' }}>
-                  {line.value}
-                </div>
-              </div>
-            ))}
+        <form className="no-print glass-panel pay-inline" style={{ padding: '1rem 1.25rem' }} onSubmit={handleQuickPay}>
+          <div className="pay-due-banner" style={{ marginBottom: '0.85rem' }}>
+            <span className="pay-due-label">Still due</span>
+            <strong className="pay-due-value">{formatCurrency(currencySymbol, balance)}</strong>
+            {paid > 0 && (
+              <span className="pay-due-hint">
+                Already paid {formatCurrency(currencySymbol, paid)} of {formatCurrency(currencySymbol, liveBill.total_amount)}
+              </span>
+            )}
           </div>
           <div className="payment-form-row">
-            <div style={{ flex: 1, minWidth: 120 }}>
-              <label className="form-label">Payment amount</label>
-              <input className="form-input" type="number" step="0.01" min="0.01" max={balance} placeholder="Amount to subtract" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+            <div style={{ flex: 1, minWidth: 140 }}>
+              <label className="form-label">Amount received</label>
+              <input
+                className="form-input"
+                type="number"
+                step="0.01"
+                min="0.01"
+                max={balance}
+                placeholder={String(balance)}
+                value={payAmount}
+                onChange={(e) => setPayAmount(e.target.value)}
+              />
+              {payAmountNum > 0 && (
+                <p className={`pay-left-line ${paySummary.remaining <= 0 ? 'is-clear' : ''}`}>
+                  {paySummary.remaining <= 0
+                    ? 'This clears the bill.'
+                    : `Left after save: ${paySummary.leftLabel}`}
+                </p>
+              )}
             </div>
-            <select className="form-select" style={{ minWidth: 140 }} value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
-              <option>Cash</option>
-              <option>Bank Transfer / Raast</option>
-              <option>JazzCash</option>
-              <option>EasyPaisa</option>
-            </select>
-            <label className="btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ minWidth: 140 }}>
+              <label className="form-label">How paid</label>
+              <AppSelect
+                value={payMethod}
+                onChange={setPayMethod}
+                aria-label="How paid"
+                options={['Cash', 'Bank Transfer / Raast', 'JazzCash', 'EasyPaisa']}
+              />
+            </div>
+            <label className="btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, alignSelf: 'flex-end' }}>
               <ImagePlus size={16} />
               {payScreenshot ? 'Photo ✓' : 'Screenshot'}
               <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleScreenshotPick} />
             </label>
-            <button type="submit" className="btn-primary" disabled={paying}>
-              <Banknote size={16} /> {paying ? 'Saving…' : 'Record Pay'}
+            <button type="submit" className="btn-primary" disabled={paying} style={{ alignSelf: 'flex-end' }}>
+              <Banknote size={16} /> {paying ? 'Saving…' : 'Save'}
             </button>
           </div>
           {payScreenshot && (
@@ -404,13 +760,13 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
       )}
 
       <p className="no-print" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '-0.5rem 0 0' }}>
-        Use <b>Thermal Receipt</b> for 58/80mm printers. <b>Remind WA / SMS</b> sends balance + Raast details. On phone, PDF opens a Share sheet.
+        Switch <b>Desktop</b> (A4), <b>Mobile</b> (phone card), or <b>Thermal</b> (58/80mm). Use <b>Send bill</b> to share.
       </p>
 
-      {posMode ? (
+      {billView === 'thermal' ? (
         <div id="printable-invoice" className={`thermal-sheet ${urdu ? 'invoice-bilingual' : ''} ${cancelled ? 'is-cancelled' : ''}`}>
           <div className="thermal-head">
-            <BrandMark size={16} />
+            <BrandMark size={36} />
             <h3 className="thermal-brand">{companyName}</h3>
             <p className="thermal-meta">{settings.company_phone}</p>
             <p className="thermal-meta">{settings.company_address}</p>
@@ -458,6 +814,19 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
               {liveBill.payee_payment_notes && <div>{liveBill.payee_payment_notes}</div>}
             </div>
           )}
+          {!isSupplier && hasShopPayment && (
+            <div className="thermal-bank">
+              <div className="thermal-bank-title"><BiLabel en="Payment Options" ur="ادائیگی کے طریقے" urdu={urdu} /></div>
+              {shopPaymentMethods.map((method) => (
+                <div key={method.id} className="thermal-bank-method">
+                  {paymentMethodLines(method).map((line) => (
+                    <div key={line}>{line}</div>
+                  ))}
+                </div>
+              ))}
+              {paymentInstructions && <div>{paymentInstructions}</div>}
+            </div>
+          )}
           {urdu && (
             <p className="bi-ur thermal-urdu-footer" dir="rtl" lang="ur">
               {isSupplier ? 'ادائیگی کی تصدیق محفوظ رکھیں' : 'شکریہ — بروقت ادائیگی کا شکریہ'}
@@ -470,16 +839,22 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
             </div>
           )}
           <p className="thermal-thanks">Thank you{urdu ? ' / شکریہ' : ''}</p>
+          {showDeveloperCredit ? (
+            <DeveloperCredit compact className="inv-developer-credit thermal-developer-credit" />
+          ) : null}
         </div>
       ) : (
-        <div id="printable-invoice" className={`invoice-sheet ${urdu ? 'invoice-bilingual' : ''} ${cancelled ? 'is-cancelled' : ''}`}>
+        <div
+          id="printable-invoice"
+          className={`invoice-sheet ${billView === 'mobile' ? 'invoice-sheet--phone' : ''} ${urdu ? 'invoice-bilingual' : ''} ${cancelled ? 'is-cancelled' : ''}`}
+        >
           <div className="inv-watermark" aria-hidden="true">
-            <BrandMark size={220} />
+            <BrandMark size={240} />
           </div>
           <div className="inv-topbar" />
           <header className="inv-header">
             <div className="inv-brand-block">
-              <BrandMark size={18} />
+              <BrandMark size={64} />
               <div>
                 {companyIsElite ? (
                   <>
@@ -511,40 +886,42 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
                 )}
               </p>
               <div className="inv-number">#{liveBill.invoice_number}</div>
-              <span className={`badge badge-${cancelled ? 'cancelled' : liveBill.status}`}>
-                {cancelled ? 'cancelled' : liveBill.status}
-              </span>
+              <StatusBadge status={displayStatus} />
             </div>
           </header>
 
           <section className="inv-meta-grid">
-            <div className="inv-party">
+            <div className="inv-meta-cell inv-party">
               <h4>
                 <BiLabel en={isSupplier ? 'Pay To' : 'Billed To'} ur={isSupplier ? 'ادائیگی برائے' : 'بل برائے'} urdu={urdu} />
               </h4>
-              <h3>{liveBill.customer_name}</h3>
+              <strong className="inv-meta-value">{liveBill.customer_name}</strong>
               {liveBill.customer_phone && <p>{liveBill.customer_phone}</p>}
               {liveBill.customer_address && <p>{liveBill.customer_address}</p>}
             </div>
-            <div className="inv-dates">
-              <div>
-                <span><BiLabel en="Bill date" ur="تاریخ" urdu={urdu} /></span>
-                <strong>{formatBillDateTime(liveBill)}</strong>
-              </div>
-              <div>
-                <span><BiLabel en="Due date" ur="آخری تاریخ" urdu={urdu} /></span>
-                <strong>{liveBill.due_date}</strong>
-              </div>
-              {liveBill.payment_method && (
-                <div>
-                  <span><BiLabel en="Method" ur="طریقہ" urdu={urdu} /></span>
-                  <strong>{liveBill.payment_method}</strong>
-                </div>
-              )}
+            <div className="inv-meta-cell">
+              <span><BiLabel en="Bill date" ur="تاریخ" urdu={urdu} /></span>
+              <strong className="inv-meta-value">{formatBillDateTime(liveBill)}</strong>
             </div>
+            <div className="inv-meta-cell">
+              <span><BiLabel en="Due date" ur="آخری تاریخ" urdu={urdu} /></span>
+              <strong className="inv-meta-value">{liveBill.due_date}</strong>
+            </div>
+            {liveBill.payment_method && (
+              <div className="inv-meta-cell">
+                <span><BiLabel en="Method" ur="طریقہ" urdu={urdu} /></span>
+                <strong className="inv-meta-value">{liveBill.payment_method}</strong>
+              </div>
+            )}
           </section>
 
           <table className="inv-table">
+            <colgroup>
+              <col className="col-desc" />
+              <col className="col-qty" />
+              <col className="col-price" />
+              <col className="col-total" />
+            </colgroup>
             <thead>
               <tr>
                 <th><BiLabel en="Description" ur="تفصیل" urdu={urdu} /></th>
@@ -557,6 +934,8 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
               {liveBill.items?.map((item, idx) => {
                 const rem = remainingQty(item);
                 const ret = Number(item.returned_qty) || 0;
+                const unit = Number(item.unit_price) || 0;
+                const lineTotal = rem * unit;
                 return (
                   <tr key={idx}>
                     <td>
@@ -564,8 +943,8 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
                       {ret ? <span className="inv-item-note">{ret} returned</span> : null}
                     </td>
                     <td className="num">{rem}</td>
-                    <td className="num mono">{Number(item.unit_price).toFixed(2)}</td>
-                    <td className="num mono strong">{(rem * (Number(item.unit_price) || 0)).toFixed(2)}</td>
+                    <td className="num">{unit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td className="num strong">{lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   </tr>
                 );
               })}
@@ -649,14 +1028,17 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
               </div>
             )
           ) : (
-            (settings.bank_name || settings.mobile_wallet || settings.payment_instructions || settings.account_title) && (
+            hasShopPayment && (
               <div className="inv-paybox">
                 <strong><BiLabel en="Payment Details" ur="ادائیگی تفصیلات" urdu={urdu} /></strong>
-                {settings.bank_name && <div>Bank: {settings.bank_name}</div>}
-                {settings.account_title && <div>Title: {settings.account_title}</div>}
-                {settings.account_number && <div>A/C / Raast: {settings.account_number}</div>}
-                {settings.mobile_wallet && <div>JazzCash / EasyPaisa: {settings.mobile_wallet}</div>}
-                {settings.payment_instructions && <div className="inv-paybox-note">{settings.payment_instructions}</div>}
+                {shopPaymentMethods.map((method) => (
+                  <div key={method.id} className="inv-paybox-method">
+                    {paymentMethodLines(method).map((line) => (
+                      <div key={line}>{line}</div>
+                    ))}
+                  </div>
+                ))}
+                {paymentInstructions && <div className="inv-paybox-note">{paymentInstructions}</div>}
                 {urdu && (
                   <div className="bi-ur payment-urdu-block" dir="rtl" lang="ur">
                     برائے مہربانی ادائیگی کی تصدیق واٹس ایپ پر بھیجیں
@@ -673,11 +1055,29 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
           )}
 
           <footer className="inv-footer">
-            <span>ELITE CHOCOLATE</span>
-            <span>Thank you for your business{urdu ? ' / شکریہ' : ''}</span>
+            <div className="inv-footer-brand">
+              <span>ELITE CHOCOLATE</span>
+              <span>Thank you for your business{urdu ? ' / شکریہ' : ''}</span>
+            </div>
+            {showDeveloperCredit ? (
+              <DeveloperCredit compact className="inv-developer-credit" />
+            ) : null}
           </footer>
         </div>
       )}
+
+      <SendBillSheet
+        open={sendOpen}
+        onClose={() => !sharing && setSendOpen(false)}
+        busy={sharing}
+        invoiceLabel={liveBill.invoice_number || 'Invoice'}
+        preferredTarget={billView === 'mobile' ? 'mobile' : 'desktop'}
+        onSend={handleSendBill}
+        onSave={handleSaveBill}
+        onWhatsApp={handleWhatsAppShare}
+        onEmail={handleEmailShare}
+        onTargetPreview={handleTargetPreview}
+      />
 
       <BillAdjustSheet
         bill={liveBill}
@@ -688,6 +1088,18 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
           onBillUpdated?.(updated);
         }}
         currencySymbol={currencySymbol}
+      />
+
+      <ConfirmDialog
+        open={deleteOpen}
+        title={`Delete ${liveBill.invoice_number || `#${liveBill.id}`}?`}
+        message="This cannot be undone. Stock will be put back if the bill was not already cancelled."
+        confirmLabel={deleting ? 'Deleting…' : 'Delete'}
+        busy={deleting}
+        onCancel={() => {
+          if (!deleting) setDeleteOpen(false);
+        }}
+        onConfirm={confirmDeleteBill}
       />
 
       {previewShot && (

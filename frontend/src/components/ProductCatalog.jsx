@@ -4,6 +4,7 @@ import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import EmptyState from './EmptyState';
+import ConfirmDialog from './ConfirmDialog';
 
 export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
   const toast = useToast();
@@ -18,6 +19,8 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
   const [sku, setSku] = useState('');
   const [query, setQuery] = useState('');
   const [showLog, setShowLog] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const apiFetchProducts = async () => {
     try {
@@ -81,13 +84,27 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Delete this item from catalog?')) return;
+  const askDelete = (product) => {
+    setDeleteTarget(product);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      const res = await apiFetch(`/api/products/${id}`, { method: 'DELETE' });
-      if (res.ok) apiFetchProducts();
+      const res = await apiFetch(`/api/products/${deleteTarget.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setDeleteTarget(null);
+        apiFetchProducts();
+        toast.success('Item deleted');
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'Delete failed');
+      }
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -266,7 +283,7 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
                         <Plus size={14} />
                       </button>
                     </div>
-                    <button className="btn-danger" style={{ padding: '0.35rem', width: 'auto' }} onClick={() => handleDelete(p.id)}>
+                    <button className="btn-danger" style={{ padding: '0.35rem', width: 'auto' }} onClick={() => askDelete(p)}>
                       <Trash2 size={14} />
                     </button>
                   </div>
@@ -276,6 +293,18 @@ export default function ProductCatalog({ currencySymbol = 'Rs.' }) {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={`Delete ${deleteTarget?.name || 'item'}?`}
+        message="Remove this item from the catalog. Existing bills keep their line items."
+        confirmLabel={deleting ? 'Deleting…' : 'Delete'}
+        busy={deleting}
+        onCancel={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }

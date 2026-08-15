@@ -1,20 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle } from 'lucide-react';
+import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle, FileText } from 'lucide-react';
 import BillAdjustSheet from './BillAdjustSheet';
-import StatusBadge from './StatusBadge';
+import StatusBadge, { StatusSelect } from './StatusBadge';
 import EmptyState from './EmptyState';
+import ConfirmDialog from './ConfirmDialog';
+import AppSelect from './AppSelect';
 import { isCancelled } from '../utils/billAdjust';
 import { pakistanToday, formatCurrency, formatBillDateTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { downloadBlob } from '../utils/downloadFile';
+import { downloadCsv, downloadTablePdf, exportMoney } from '../utils/tableExport';
 import { compressImageToDataUrl } from '../utils/imageCompress';
 import {
   buildPaymentReminderText,
   openWhatsAppReminder,
   openSmsReminder,
 } from '../utils/paymentReminder';
-import { paymentSummaryText } from '../utils/billPayments';
+import { paymentSummaryText, billBalance } from '../utils/billPayments';
 
 export default function BillsDatabase({
   onViewBill,
@@ -27,6 +30,8 @@ export default function BillsDatabase({
   const toast = useToast();
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [listAnimKey, setListAnimKey] = useState(0);
   const [billTypeFilter, setBillTypeFilter] = useState('all'); // 'all', 'customer', 'supplier'
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -56,6 +61,8 @@ export default function BillsDatabase({
   const [payHistory, setPayHistory] = useState([]);
   const [adjustBill, setAdjustBill] = useState(null);
   const [settings, setSettings] = useState(settingsProp || {});
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     setSettings(settingsProp || {});
@@ -76,8 +83,10 @@ export default function BillsDatabase({
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const apiFetchBills = async () => {
-    setLoading(true);
+  const apiFetchBills = async (opts = {}) => {
+    const soft = opts.soft === true;
+    if (soft) setRefreshing(true);
+    else setLoading(true);
     try {
       let url = `/api/bills?type=${billTypeFilter}&status=${statusFilter}`;
       if (debouncedSearch) {
@@ -86,10 +95,12 @@ export default function BillsDatabase({
       const res = await apiFetch(url);
       const data = await res.json();
       setBills(data || []);
+      if (soft) setListAnimKey((k) => k + 1);
     } catch (err) {
       console.error('Error apiFetching bills database:', err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -178,17 +189,53 @@ export default function BillsDatabase({
 
   // Update Status directly
   const handleUpdateStatus = async (id, newStatus) => {
+    const bill = bills.find((b) => b.id === id);
+    if (bill && newStatus !== 'paid' && billBalance(bill) <= 0) {
+      toast.info('This bill is fully paid — status stays Paid. Record a return or adjust payments if it should be due.');
+      return;
+    }
     try {
       const res = await apiFetch(`/api/bills/${id}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       });
-      if (res.ok) {
-        apiFetchBills();
-      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      apiFetchBills();
     } catch (err) {
       toast.error('Error updating status: ' + err.message);
+    }
+  };
+
+  const askDeleteBill = (bill) => {
+    setDeleteTarget(bill);
+  };
+
+  const cancelDeleteBill = () => {
+    if (deleting) return;
+    setDeleteTarget(null);
+  };
+
+  const confirmDeleteBill = async () => {
+    if (!deleteTarget) return;
+    const bill = deleteTarget;
+    const label = bill.invoice_number || `#${bill.id}`;
+    setDeleting(true);
+    try {
+      const res = await apiFetch(`/api/bills/${bill.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      toast.success(`Deleted ${label}`);
+      if (editingBill?.id === bill.id) setEditingBill(null);
+      if (payBill?.id === bill.id) setPayBill(null);
+      if (adjustBill?.id === bill.id) setAdjustBill(null);
+      setDeleteTarget(null);
+      apiFetchBills();
+    } catch (err) {
+      toast.error('Delete failed: ' + err.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -207,14 +254,20 @@ export default function BillsDatabase({
     setAdjustBill(full);
   };
 
+  const canTakePayment = (bill) => !isCancelled(bill) && billBalance(bill) > 0;
+
   const openPayModal = async (bill) => {
     if (isCancelled(bill)) {
       toast.info('Cancelled bills cannot take payment.');
       return;
     }
+    const due = billBalance(bill);
+    if (due <= 0) {
+      toast.info('This bill is fully paid — nothing left to collect.');
+      return;
+    }
     setPayBill(bill);
-    const due = Number(bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0)));
-    setPayAmount(due > 0 ? String(due) : '');
+    setPayAmount(String(due));
     setPayMethod(bill.payment_method || 'Cash');
     setPayNotes('');
     setPayTendered('');
@@ -231,9 +284,7 @@ export default function BillsDatabase({
   };
 
   const handleRemind = (bill, channel) => {
-    const due = Number(
-      bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0))
-    );
+    const due = billBalance(bill);
     if (due <= 0) {
       toast.error('No balance due on this bill.');
       return;
@@ -313,29 +364,100 @@ export default function BillsDatabase({
     }
   };
 
-  // Export database to CSV
-  const handleExportCSV = async () => {
-    if (bills.length === 0) return;
-    const headers = ['Category', 'Invoice #', 'Party / City Name', 'Date', 'Time', 'Subtotal', 'Total Amount', 'Paid', 'Balance', 'Status'];
-    const rows = bills.map((b) => [
-      b.bill_type === 'supplier' ? 'Saudia Arabia Buying Cost' : 'Customer Sale',
-      b.invoice_number,
-      `"${b.customer_name}"`,
-      b.bill_date,
-      b.bill_time || '',
-      b.subtotal,
-      b.total_amount,
-      b.amount_paid || 0,
-      b.balance_due ?? Math.max(0, (b.total_amount || 0) - (b.amount_paid || 0)),
-      b.status,
-    ]);
+  const buildBillsExportTable = () => {
+    const headers = [
+      'Category',
+      'Invoice #',
+      'Party',
+      'Date',
+      'Time',
+      'Subtotal',
+      'Total',
+      'Paid',
+      'Balance',
+      'Status',
+    ];
+    const rows = bills.map((b) => {
+      // Prefer line-item totals when stored totals look wrong
+      let subtotal = Number(b.subtotal) || 0;
+      let total = Number(b.total_amount) || 0;
+      if (Array.isArray(b.items) && b.items.length) {
+        const fromItems = b.items.reduce((s, it) => {
+          const qty = Math.max(0, (Number(it.quantity) || 0) - (Number(it.returned_qty) || 0));
+          return s + qty * (Number(it.unit_price) || 0);
+        }, 0);
+        const taxRate = Number(b.tax_rate) || 0;
+        const discountRate = Number(b.discount_rate) || 0;
+        const discount = (fromItems * discountRate) / 100;
+        const after = Math.max(0, fromItems - discount);
+        const tax = (after * taxRate) / 100;
+        const itemsTotal = Math.round((after + tax) * 100) / 100;
+        if (itemsTotal > 0 && (total <= 0 || Math.abs(total - itemsTotal) > 0.02)) {
+          subtotal = Math.round(fromItems * 100) / 100;
+          total = itemsTotal;
+        }
+      }
+      const paid = Number(b.amount_paid) || 0;
+      const balance = Math.max(0, Math.round((total - paid) * 100) / 100);
+      let status = b.status || 'pending';
+      if (!isCancelled(b) && total > 0) {
+        if (balance <= 0) status = 'paid';
+        else if (status === 'paid') status = 'due';
+      }
+      return [
+        b.bill_type === 'supplier' ? 'Saudia Buying' : 'Customer Sale',
+        b.invoice_number || '',
+        b.customer_name || '',
+        b.bill_date || '',
+        b.bill_time || '',
+        exportMoney(subtotal),
+        exportMoney(total),
+        exportMoney(paid),
+        exportMoney(balance),
+        status,
+      ];
+    });
+    return { headers, rows };
+  };
 
-    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const handleExportCSV = async () => {
+    if (bills.length === 0) {
+      toast.info('No bills to export');
+      return;
+    }
     try {
-      await downloadBlob(blob, `Bills_Master_${pakistanToday()}.csv`, 'text/csv');
+      const { headers, rows } = buildBillsExportTable();
+      await downloadCsv(headers, rows, `Bills_Master_${pakistanToday()}.csv`);
+      toast.success(`Exported ${rows.length} bill${rows.length === 1 ? '' : 's'} (CSV)`);
     } catch (err) {
-      if (err?.name !== 'AbortError') toast.error('Export failed: ' + err.message);
+      if (err?.name !== 'AbortError') toast.error('CSV export failed: ' + err.message);
+    }
+  };
+
+  const handleExportPDF = async () => {
+    if (bills.length === 0) {
+      toast.info('No bills to export');
+      return;
+    }
+    try {
+      const { headers, rows } = buildBillsExportTable();
+      const filterBits = [
+        billTypeFilter !== 'all' ? billTypeFilter : null,
+        statusFilter !== 'all' ? statusFilter : null,
+        debouncedSearch ? `search “${debouncedSearch}”` : null,
+      ].filter(Boolean);
+      await downloadTablePdf({
+        title: 'Elite Chocolate — Bills Master',
+        subtitle: `${pakistanToday()} · ${rows.length} bill(s)${filterBits.length ? ` · ${filterBits.join(' · ')}` : ''}`,
+        headers,
+        rows,
+        filename: `Bills_Master_${pakistanToday()}.pdf`,
+        landscape: true,
+        colWeights: [1.2, 1.3, 1.4, 1.1, 0.7, 1.1, 1.1, 1.1, 1.1, 0.8],
+      });
+      toast.success(`Exported ${rows.length} bill${rows.length === 1 ? '' : 's'} (PDF)`);
+    } catch (err) {
+      if (err?.name !== 'AbortError') toast.error('PDF export failed: ' + err.message);
     }
   };
 
@@ -350,12 +472,21 @@ export default function BillsDatabase({
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button className="btn-secondary" onClick={handleExportCSV}>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button className="btn-secondary" onClick={handleExportCSV} disabled={!bills.length}>
             <Download size={16} /> Export CSV
           </button>
-          <button className="btn-secondary" onClick={apiFetchBills} title="Refresh Database">
-            <RefreshCw size={16} />
+          <button className="btn-secondary" onClick={handleExportPDF} disabled={!bills.length}>
+            <FileText size={16} /> Export PDF
+          </button>
+          <button
+            className="btn-secondary bills-refresh-btn"
+            onClick={() => apiFetchBills({ soft: true })}
+            title="Refresh Database"
+            disabled={refreshing || loading}
+            aria-busy={refreshing}
+          >
+            <RefreshCw size={16} className={refreshing ? 'spin' : undefined} />
           </button>
         </div>
       </div>
@@ -441,7 +572,10 @@ export default function BillsDatabase({
           />
         )
       ) : (
-        <>
+        <div
+          key={listAnimKey}
+          className={`bills-list-panel${refreshing ? ' is-refreshing' : ''}${listAnimKey > 0 ? ' bills-list-panel--enter' : ''}`}
+        >
           {/* Desktop table */}
           <div className="table-container desktop-only-table">
             <table className="data-table">
@@ -467,9 +601,12 @@ export default function BillsDatabase({
                     <td className="invoice-mono">{bill.invoice_number}</td>
                     <td>
                       <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>{bill.customer_name}</div>
-                      {(Number(bill.amount_paid) > 0 || Number(bill.balance_due) > 0) && bill.status !== 'paid' && (
+                      {(billBalance(bill) > 0 || Number(bill.amount_paid) > 0) && (
                         <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: 2 }}>
-                          Paid {formatCurrency(currencySymbol, bill.amount_paid || 0)} · Due {formatCurrency(currencySymbol, bill.balance_due || 0)}
+                          Paid {formatCurrency(currencySymbol, bill.amount_paid || 0)}
+                          {billBalance(bill) > 0
+                            ? ` · Due ${formatCurrency(currencySymbol, billBalance(bill))}`
+                            : ' · Cleared'}
                         </div>
                       )}
                     </td>
@@ -481,16 +618,10 @@ export default function BillsDatabase({
                       {isCancelled(bill) ? (
                         <StatusBadge status="cancelled" />
                       ) : (
-                        <select
-                          className={`badge badge-${bill.status} status-select`}
+                        <StatusSelect
                           value={bill.status}
-                          onChange={(e) => handleUpdateStatus(bill.id, e.target.value)}
-                          aria-label="Bill status"
-                        >
-                          <option value="paid">Paid</option>
-                          <option value="pending">Due</option>
-                          <option value="overdue">Overdue</option>
-                        </select>
+                          onChange={(next) => handleUpdateStatus(bill.id, next)}
+                        />
                       )}
                     </td>
                     <td style={{ textAlign: 'center' }}>
@@ -499,12 +630,17 @@ export default function BillsDatabase({
                           <Eye size={14} /> View
                         </button>
                         {!isCancelled(bill) && (
-                          <button className="btn-secondary" style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto' }} onClick={() => openPayModal(bill)} title="Record payment">
+                          <button
+                            className="btn-secondary"
+                            style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto', opacity: canTakePayment(bill) ? 1 : 0.45 }}
+                            onClick={() => openPayModal(bill)}
+                            disabled={!canTakePayment(bill)}
+                            title={canTakePayment(bill) ? 'Record payment' : 'Fully paid — Pay locked'}
+                          >
                             <Banknote size={14} /> Pay
                           </button>
                         )}
-                        {!isCancelled(bill) &&
-                          (Number(bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0))) > 0) &&
+                        {canTakePayment(bill) &&
                           bill.bill_type !== 'supplier' && (
                           <>
                             <button
@@ -540,6 +676,14 @@ export default function BillsDatabase({
                             <Undo2 size={14} />
                           </button>
                         )}
+                        <button
+                          className="btn-danger"
+                          style={{ padding: '0.35rem 0.55rem', width: 'auto' }}
+                          onClick={() => askDeleteBill(bill)}
+                          title="Delete bill permanently"
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -566,67 +710,74 @@ export default function BillsDatabase({
                 {isCancelled(bill) ? (
                   <StatusBadge status="cancelled" />
                 ) : (
-                  <select
-                    className={`badge badge-${bill.status} status-select status-select-block`}
+                  <StatusSelect
+                    block
                     value={bill.status}
-                    onChange={(e) => handleUpdateStatus(bill.id, e.target.value)}
-                    aria-label="Bill status"
-                  >
-                    <option value="paid">Paid</option>
-                    <option value="pending">Due</option>
-                    <option value="overdue">Overdue</option>
-                  </select>
+                    onChange={(next) => handleUpdateStatus(bill.id, next)}
+                  />
                 )}
                 <div className="mobile-card-actions">
-                  <button className="btn-secondary" onClick={() => onViewBill(bill)}>
-                    <Eye size={14} /> View
-                  </button>
-                  {!isCancelled(bill) && (
-                    <button className="btn-secondary" onClick={() => openPayModal(bill)}>
-                      <Banknote size={14} /> Pay
+                  <div className="mobile-card-actions-main">
+                    <button className="btn-secondary" onClick={() => onViewBill(bill)}>
+                      <Eye size={14} /> View
                     </button>
-                  )}
-                  {!isCancelled(bill) &&
-                    (Number(bill.balance_due ?? Math.max(0, (bill.total_amount || 0) - (bill.amount_paid || 0))) > 0) &&
-                    bill.bill_type !== 'supplier' && (
-                    <>
+                    {!isCancelled(bill) && (
                       <button
                         className="btn-secondary"
-                        style={{ color: '#25D366' }}
-                        onClick={() => handleRemind(bill, 'whatsapp')}
-                        title="WhatsApp payment reminder"
+                        onClick={() => openPayModal(bill)}
+                        disabled={!canTakePayment(bill)}
+                        style={{ opacity: canTakePayment(bill) ? 1 : 0.45 }}
+                        title={canTakePayment(bill) ? 'Record payment' : 'Fully paid — Pay locked'}
                       >
-                        <MessageSquare size={14} />
+                        <Banknote size={14} /> Pay
                       </button>
-                      <button
-                        className="btn-secondary"
-                        onClick={() => handleRemind(bill, 'sms')}
-                        title="SMS payment reminder"
-                      >
-                        <Smartphone size={14} />
+                    )}
+                    {canTakePayment(bill) &&
+                      bill.bill_type !== 'supplier' && (
+                      <>
+                        <button
+                          className="btn-secondary"
+                          style={{ color: '#25D366' }}
+                          onClick={() => handleRemind(bill, 'whatsapp')}
+                          title="WhatsApp payment reminder"
+                        >
+                          <MessageSquare size={14} />
+                        </button>
+                        <button
+                          className="btn-secondary"
+                          onClick={() => handleRemind(bill, 'sms')}
+                          title="SMS payment reminder"
+                        >
+                          <Smartphone size={14} />
+                        </button>
+                      </>
+                    )}
+                    {!isCancelled(bill) && (
+                      <button className="btn-secondary" onClick={() => handleOpenEditModal(bill)}>
+                        <Edit3 size={14} /> Edit
                       </button>
-                    </>
-                  )}
-                  {!isCancelled(bill) && (
-                    <button className="btn-secondary" onClick={() => handleOpenEditModal(bill)}>
-                      <Edit3 size={14} /> Edit
+                    )}
+                    {onDuplicateBill && (
+                      <button className="btn-secondary" onClick={() => onDuplicateBill(bill)} title="Duplicate bill">
+                        <Copy size={14} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="mobile-card-actions-foot">
+                    {!isCancelled(bill) && (
+                      <button className="btn-secondary" onClick={() => openAdjust(bill)}>
+                        <Undo2 size={14} /> Return
+                      </button>
+                    )}
+                    <button className="btn-danger" onClick={() => askDeleteBill(bill)} title="Delete bill permanently">
+                      <Trash2 size={14} /> Delete
                     </button>
-                  )}
-                  {onDuplicateBill && (
-                    <button className="btn-secondary" onClick={() => onDuplicateBill(bill)}>
-                      <Copy size={14} />
-                    </button>
-                  )}
-                  {!isCancelled(bill) && (
-                    <button className="btn-secondary" onClick={() => openAdjust(bill)}>
-                      <Undo2 size={14} /> Return
-                    </button>
-                  )}
+                  </div>
                 </div>
               </div>
             ))}
           </div>
-        </>
+        </div>
       )}
 
       {/* FULL EDIT BILL INTERACTIVE MODAL */}
@@ -646,10 +797,15 @@ export default function BillsDatabase({
             <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
               <div className="form-group">
                 <label className="form-label">Bill Category *</label>
-                <select className="form-select" value={editType} onChange={(e) => setEditType(e.target.value)}>
-                  <option value="customer">🛒 Customer Sale Invoice</option>
-                  <option value="supplier">🇸🇦 Saudia Purchase / Payment Advice</option>
-                </select>
+                <AppSelect
+                  value={editType}
+                  onChange={setEditType}
+                  aria-label="Bill category"
+                  options={[
+                    { value: 'customer', label: 'Customer Sale Invoice' },
+                    { value: 'supplier', label: 'Saudia Purchase / Payment Advice' },
+                  ]}
+                />
               </div>
 
               <div className="form-group">
@@ -746,11 +902,11 @@ export default function BillsDatabase({
 
       {payBill && (
         <div className="modal-sheet" style={{ position: 'fixed', inset: 0, background: 'rgba(7,41,41,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
-          <form onSubmit={handleRecordPayment} className="glass-panel" style={{ width: '100%', maxWidth: '420px', padding: '1.5rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <form onSubmit={handleRecordPayment} className="glass-panel pay-modal" style={{ width: '100%', maxWidth: '400px', padding: '1.35rem 1.4rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
               <div>
-                <h3 style={{ fontSize: '1.05rem', fontWeight: 800 }}>Record Payment</h3>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>Record payment</h3>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0' }}>
                   {payBill.invoice_number} · {payBill.customer_name}
                 </p>
               </div>
@@ -760,51 +916,76 @@ export default function BillsDatabase({
             </div>
 
             {paySummary && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.45rem', marginBottom: '0.85rem' }}>
-                {paySummary.lines.map((line) => (
-                  <div key={line.label} className="surface-block" style={{ padding: '0.5rem 0.6rem' }}>
-                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{line.label}</div>
-                    <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: line.accent || 'var(--text-primary)' }}>
-                      {line.value}
-                    </div>
-                  </div>
-                ))}
+              <div className="pay-due-banner">
+                <span className="pay-due-label">Still due</span>
+                <strong className="pay-due-value">{paySummary.dueLabel}</strong>
+                {paySummary.paid > 0 && (
+                  <span className="pay-due-hint">
+                    Bill {paySummary.totalLabel} · already paid {paySummary.paidLabel}
+                  </span>
+                )}
               </div>
             )}
 
             {payHistory.length > 0 && (
-              <div style={{ marginBottom: '0.85rem', maxHeight: 120, overflowY: 'auto' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>Payment history</div>
-                {payHistory.map((p) => (
-                  <div key={p.id} style={{ fontSize: '0.78rem', display: 'flex', justifyContent: 'space-between', gap: '0.5rem', padding: '0.25rem 0', borderBottom: '1px solid var(--border-color)' }}>
-                    <span>{p.payment_date} · {p.method}</span>
-                    <strong style={{ fontFamily: 'var(--font-mono)' }}>{formatCurrency(currencySymbol, p.amount)}</strong>
-                  </div>
-                ))}
-              </div>
+              <details className="pay-history-details">
+                <summary>Previous payments ({payHistory.length})</summary>
+                <div className="pay-history-list">
+                  {payHistory.map((p) => (
+                    <div key={p.id} className="pay-history-row">
+                      <span>{p.payment_date} · {p.method}</span>
+                      <strong>{formatCurrency(currencySymbol, p.amount)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </details>
             )}
 
             <div className="form-group">
-              <label className="form-label">Amount to subtract ({currencySymbol})</label>
-              <input type="number" step="0.01" min="0.01" className="form-input" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} required />
+              <div className="pay-amount-head">
+                <label className="form-label" style={{ margin: 0 }}>Amount received ({currencySymbol})</label>
+                {paySummary?.balance > 0 && (
+                  <button
+                    type="button"
+                    className="pay-full-btn"
+                    onClick={() => setPayAmount(String(paySummary.balance))}
+                  >
+                    Pay full due
+                  </button>
+                )}
+              </div>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                className="form-input"
+                value={payAmount}
+                onChange={(e) => setPayAmount(e.target.value)}
+                required
+                autoFocus
+              />
+              {paySummary && payAmountNum > 0 && (
+                <p className={`pay-left-line ${paySummary.remaining <= 0 ? 'is-clear' : ''}`}>
+                  {paySummary.remaining <= 0
+                    ? 'This clears the bill.'
+                    : `Left after save: ${paySummary.leftLabel}`}
+                </p>
+              )}
             </div>
+
             <div className="form-group">
-              <label className="form-label">Method</label>
-              <select
-                className="form-select"
+              <label className="form-label">How paid</label>
+              <AppSelect
                 value={payMethod}
-                onChange={(e) => {
-                  setPayMethod(e.target.value);
-                  if (!String(e.target.value).toLowerCase().includes('cash')) setPayTendered('');
+                aria-label="How paid"
+                onChange={(next) => {
+                  setPayMethod(next);
+                  if (!String(next).toLowerCase().includes('cash')) setPayTendered('');
                 }}
-              >
-                <option>Cash</option>
-                <option>Bank Transfer / Raast</option>
-                <option>JazzCash</option>
-                <option>EasyPaisa</option>
-                <option>Card</option>
-              </select>
+                options={['Cash', 'Bank Transfer / Raast', 'JazzCash', 'EasyPaisa', 'Card']}
+              />
             </div>
+
             {isPayCash && (
               <div className="cash-change-box form-group">
                 <label className="form-label">Cash tendered ({currencySymbol})</label>
@@ -836,30 +1017,35 @@ export default function BillsDatabase({
                 )}
               </div>
             )}
-            <div className="form-group">
-              <label className="form-label">Notes</label>
-              <input type="text" className="form-input" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} placeholder="Optional" />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Payment screenshot</label>
-              <label className="btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', width: 'auto' }}>
-                <ImagePlus size={16} />
-                {payScreenshotName || 'Attach image'}
-                <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleScreenshotPick} />
-              </label>
-              {payScreenshot && (
-                <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                  <img src={payScreenshot} alt="Payment proof" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border-color)' }} />
-                  <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.6rem' }} onClick={() => { setPayScreenshot(''); setPayScreenshotName(''); }}>
-                    Remove
-                  </button>
-                </div>
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', marginTop: '0.75rem' }}>
+
+            <details className="pay-more-details">
+              <summary>Notes / screenshot (optional)</summary>
+              <div className="form-group" style={{ marginTop: '0.65rem' }}>
+                <label className="form-label">Notes</label>
+                <input type="text" className="form-input" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} placeholder="Optional" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Screenshot</label>
+                <label className="btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', width: 'auto' }}>
+                  <ImagePlus size={16} />
+                  {payScreenshotName || 'Attach image'}
+                  <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleScreenshotPick} />
+                </label>
+                {payScreenshot && (
+                  <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                    <img src={payScreenshot} alt="Payment proof" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border-color)' }} />
+                    <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.6rem' }} onClick={() => { setPayScreenshot(''); setPayScreenshotName(''); }}>
+                      Remove
+                    </button>
+                  </div>
+                )}
+              </div>
+            </details>
+
+            <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
               <button type="button" className="btn-secondary" onClick={() => setPayBill(null)}>Cancel</button>
               <button type="submit" className="btn-primary" disabled={paySaving}>
-                <Banknote size={16} /> {paySaving ? 'Saving…' : 'Save Payment'}
+                <Banknote size={16} /> {paySaving ? 'Saving…' : 'Save payment'}
               </button>
             </div>
           </form>
@@ -872,6 +1058,16 @@ export default function BillsDatabase({
         onClose={() => setAdjustBill(null)}
         onUpdated={() => apiFetchBills()}
         currencySymbol={currencySymbol}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={`Delete ${deleteTarget?.invoice_number || (deleteTarget ? `#${deleteTarget.id}` : 'bill')}?`}
+        message="This cannot be undone. Stock will be put back if the bill was not already cancelled."
+        confirmLabel={deleting ? 'Deleting…' : 'Delete'}
+        busy={deleting}
+        onCancel={cancelDeleteBill}
+        onConfirm={confirmDeleteBill}
       />
     </div>
   );

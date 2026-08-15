@@ -1,8 +1,7 @@
 import React from 'react';
 
 /**
- * Elite Chocolate mark — heritage circular seal (burgundy + gold).
- * Stacked wordmark with gold rule so "CHOCOLATE" never clips the rings.
+ * Elite Chocolate mark — same artwork as public/favicon.svg
  */
 export default function BrandMark({ size = 36, className = '', style }) {
   const px = typeof size === 'number' ? size : 36;
@@ -71,7 +70,7 @@ export function BrandWordmark({ subtitle = 'POS & Bills', stacked = true, classN
 export function DeveloperCredit({ className = '', compact = false }) {
   return (
     <p className={`developer-credit ${compact ? 'is-compact' : ''} ${className}`.trim()}>
-      <span className="developer-credit-label">Developer by</span>
+      <span className="developer-credit-label">Developed by</span>
       <span className="developer-credit-name">Muhammad Haris</span>
     </p>
   );

@@ -3,9 +3,11 @@ import { Camera, X } from 'lucide-react';
 
 /**
  * Camera barcode / QR scanner using BarcodeDetector when available.
+ * Renders inline next to the Scan control (not a floating center modal).
  * Falls back to a tip to type the SKU if unsupported.
  */
 export default function BarcodeScanner({ open, onClose, onDetected }) {
+  const rootRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const rafRef = useRef(null);
@@ -14,9 +16,18 @@ export default function BarcodeScanner({ open, onClose, onDetected }) {
 
   useEffect(() => {
     if (!open) return undefined;
+    const t = setTimeout(() => {
+      rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 40);
+    return () => clearTimeout(t);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
 
     let cancelled = false;
     setError('');
+    setSupported(true);
 
     const stop = () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -88,29 +99,34 @@ export default function BarcodeScanner({ open, onClose, onDetected }) {
   if (!open) return null;
 
   return (
-    <div className="barcode-scanner-overlay" role="dialog" aria-modal="true">
-      <div className="barcode-scanner-sheet glass-panel">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            <Camera size={18} /> Scan barcode
-          </h3>
-          <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.55rem' }} onClick={onClose}>
-            <X size={16} />
-          </button>
-        </div>
-        {supported ? (
-          <video ref={videoRef} playsInline muted className="barcode-scanner-video" />
-        ) : (
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{error || 'Scanner unavailable'}</p>
-        )}
-        {error && supported ? (
-          <p style={{ fontSize: '0.8rem', color: 'var(--danger)', marginTop: '0.5rem' }}>{error}</p>
-        ) : (
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.55rem' }}>
-            Point the camera at the product barcode. Or close and type the SKU.
-          </p>
-        )}
+    <div
+      ref={rootRef}
+      className="barcode-scanner-inline"
+      role="region"
+      aria-label="Scan barcode"
+    >
+      <div className="barcode-scanner-inline-head">
+        <h3>
+          <Camera size={16} /> Scan barcode
+        </h3>
+        <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.55rem' }} onClick={onClose}>
+          <X size={16} />
+        </button>
       </div>
+      {supported ? (
+        <video ref={videoRef} playsInline muted className="barcode-scanner-video" />
+      ) : (
+        <p className="barcode-scanner-inline-msg">{error || 'Scanner unavailable'}</p>
+      )}
+      {error && supported ? (
+        <p className="barcode-scanner-inline-err">{error}</p>
+      ) : (
+        <p className="barcode-scanner-inline-hint">
+          {supported
+            ? 'Point the camera at the product barcode. Or close and type the SKU.'
+            : 'Use the Quick add box above to type the SKU or product name.'}
+        </p>
+      )}
     </div>
   );
 }

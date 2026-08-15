@@ -311,6 +311,16 @@ export async function deleteLocalSnapshot(id) {
   await db.delete('snapshots', Number(id));
 }
 
+export async function deleteLocalSnapshots(ids) {
+  const list = [...new Set((ids || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))];
+  if (!list.length) return 0;
+  const db = await getBackupDb();
+  for (const id of list) {
+    await db.delete('snapshots', id);
+  }
+  return list.length;
+}
+
 /** Manual export — full triple backup with Drive share. */
 export async function exportBackupFile({ offerShare = true } = {}) {
   return runFullBackup({

@@ -1,5 +1,6 @@
 /**
  * Due-date reminders. OPT-IN only — never prompts until Settings is turned on.
+ * Works on Android APK (Capacitor Local Notifications). Web shows tips only.
  */
 import { Capacitor } from '@capacitor/core';
 import { apiFetch } from '../api/client';
@@ -8,6 +9,7 @@ import { formatCurrency, pakistanToday } from './pakistan';
 const LAST_DAY_KEY = 'elite-due-notify-day';
 const SUMMARY_ID = 4101;
 const DAILY_ID = 4102;
+const CHANNEL_ID = 'cocoadesk_due';
 
 function isNative() {
   try {
@@ -40,9 +42,33 @@ export async function requestDueReminderPermission() {
   }
 }
 
+async function ensureChannel(LocalNotifications) {
+  if (Capacitor.getPlatform() !== 'android') return;
+  try {
+    await LocalNotifications.createChannel({
+      id: CHANNEL_ID,
+      name: 'Due bills',
+      description: 'Reminders for overdue and due-today invoices',
+      importance: 4,
+      visibility: 1,
+      sound: 'default',
+      vibration: true,
+    });
+  } catch (_) {
+    /* channel may already exist */
+  }
+}
+
 function summarize(rows, currencySymbol) {
-  const overdue = (rows || []).filter((r) => (Number(r.days_overdue) || 0) >= 1);
-  const dueToday = (rows || []).filter((r) => (Number(r.days_overdue) || 0) === 0);
+  const today = pakistanToday();
+  const list = rows || [];
+  // days_overdue is clamped at 0 in the API, so future dues also show 0 —
+  // only treat as "due today" when the due date is actually today.
+  const overdue = list.filter((r) => (Number(r.days_overdue) || 0) >= 1);
+  const dueToday = list.filter((r) => {
+    const due = String(r.due_date || r.bill_date || '');
+    return due === today;
+  });
   const overdueAmt = overdue.reduce((s, r) => s + (Number(r.balance_due) || 0), 0);
   const dueAmt = dueToday.reduce((s, r) => s + (Number(r.balance_due) || 0), 0);
   return { overdue, dueToday, overdueAmt, dueAmt, currencySymbol };
@@ -80,6 +106,7 @@ export async function syncDueReminders(settings = {}) {
   }
 
   const LocalNotifications = await loadPlugin();
+  await ensureChannel(LocalNotifications);
   const body = buildBody(summary);
 
   try {
@@ -99,8 +126,9 @@ export async function syncDueReminders(settings = {}) {
   const notifications = [
     {
       id: DAILY_ID,
-      title: 'ELITE CHOCOLATE — collections',
+      title: 'CocoaDesk — collections',
       body,
+      channelId: CHANNEL_ID,
       schedule: { on: { hour: 10, minute: 0 }, repeats: true, allowWhileIdle: true },
     },
   ];
@@ -110,6 +138,7 @@ export async function syncDueReminders(settings = {}) {
       id: SUMMARY_ID,
       title: 'Bills need follow-up',
       body,
+      channelId: CHANNEL_ID,
       schedule: { at: new Date(Date.now() + 2500), allowWhileIdle: true },
     });
     try {
@@ -120,14 +149,52 @@ export async function syncDueReminders(settings = {}) {
   }
 
   await LocalNotifications.schedule({ notifications });
-  return { skipped: false, body };
+  return { skipped: false, body, overdue: summary.overdue.length, dueToday: summary.dueToday.length };
+}
+
+/** Fire one immediate test notification (APK only). */
+export async function sendTestDueNotification(settings = {}) {
+  if (!isNative()) return { ok: false, reason: 'web' };
+  const perm = await requestDueReminderPermission();
+  if (!perm.granted) return { ok: false, reason: perm.reason || 'denied' };
+
+  let body = 'Notifications are working.';
+  try {
+    const res = await apiFetch('/api/reports/aging');
+    const report = await res.json();
+    if (res.ok) {
+      const summary = summarize(report.rows || [], settings.currency_symbol || 'Rs.');
+      if (summary.overdue.length || summary.dueToday.length) {
+        body = buildBody(summary);
+      }
+    }
+  } catch (_) {
+    /* keep default body */
+  }
+
+  const LocalNotifications = await loadPlugin();
+  await ensureChannel(LocalNotifications);
+  await LocalNotifications.schedule({
+    notifications: [
+      {
+        id: 4199,
+        title: 'CocoaDesk — test',
+        body,
+        channelId: CHANNEL_ID,
+        schedule: { at: new Date(Date.now() + 1200), allowWhileIdle: true },
+      },
+    ],
+  });
+  return { ok: true, body };
 }
 
 export async function cancelDueReminders() {
   if (!isNative()) return;
   try {
     const LocalNotifications = await loadPlugin();
-    await LocalNotifications.cancel({ notifications: [{ id: SUMMARY_ID }, { id: DAILY_ID }] });
+    await LocalNotifications.cancel({
+      notifications: [{ id: SUMMARY_ID }, { id: DAILY_ID }, { id: 4199 }],
+    });
   } catch (_) {
     /* ignore */
   }

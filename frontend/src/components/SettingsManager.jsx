@@ -12,9 +12,10 @@ import {
   Share2,
   Fingerprint,
   Bell,
+  Plus,
 } from 'lucide-react';
 import { checkBiometricAvailable } from '../utils/appSecurity';
-import { cancelDueReminders, requestDueReminderPermission, syncDueReminders } from '../utils/dueReminders';
+import { cancelDueReminders, requestDueReminderPermission, syncDueReminders, sendTestDueNotification } from '../utils/dueReminders';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
@@ -25,6 +26,8 @@ import {
   shareLocalSnapshot,
   listLocalSnapshots,
   saveLocalSnapshot,
+  deleteLocalSnapshot,
+  deleteLocalSnapshots,
   getLastAutoBackupAt,
   getLastPhoneBackupPath,
   parseBackupPayload,
@@ -35,10 +38,13 @@ import {
 } from '../utils/backupManager';
 import { readPickedFileText } from '../utils/downloadFile';
 import { DeveloperCredit } from './BrandMark';
+import AppSelect from './AppSelect';
+import { emptyPaymentMethod, getPaymentMethods, withPaymentMethods } from '../utils/paymentMethods';
 
 export default function SettingsManager({ onSettingsUpdated, focusBackup = false, onFocusHandled }) {
   const toast = useToast();
   const backupPanelRef = useRef(null);
+  const deleteConfirmRef = useRef(null);
   const [backupHighlight, setBackupHighlight] = useState(false);
   const [settings, setSettings] = useState({
     company_name: 'ELITE CHOCOLATE',
@@ -54,10 +60,12 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
     account_number: '',
     mobile_wallet: '',
     payment_instructions: '',
+    payment_methods: [emptyPaymentMethod({ label: 'Primary' })],
     app_pin: '',
     biometric_lock: 0,
     due_reminders: 0,
     urdu_labels: 0,
+    show_developer_credit: 1,
     low_stock_threshold: 5,
   });
 
@@ -68,6 +76,8 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
   const [restoreConfirm, setRestoreConfirm] = useState('');
   const [pendingRestore, setPendingRestore] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
+  const [selectedVersions, setSelectedVersions] = useState([]);
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState(null);
   const [reportMonth, setReportMonth] = useState(() => {
@@ -78,9 +88,83 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
 
   const refreshSnapshots = async () => {
     try {
-      setSnapshots(await listLocalSnapshots());
+      const list = await listLocalSnapshots();
+      setSnapshots(list);
+      setSelectedVersions((prev) => prev.filter((id) => list.some((s) => s.id === id)));
     } catch (err) {
       console.warn(err);
+    }
+  };
+
+  const toggleVersionSelect = (id) => {
+    setSelectedVersions((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const toggleSelectAllVersions = () => {
+    if (selectedVersions.length === snapshots.length) setSelectedVersions([]);
+    else setSelectedVersions(snapshots.map((s) => s.id));
+  };
+
+  const askDeleteVersion = (id, label) => {
+    setPendingDelete({
+      mode: 'one',
+      ids: [id],
+      title: 'Delete saved version?',
+      message: `Remove "${label || `version #${id}`}" from App versions. Phone/Drive copies are not deleted.`,
+    });
+  };
+
+  const askDeleteSelectedVersions = () => {
+    if (!selectedVersions.length) {
+      toast.info('Select one or more versions first');
+      return;
+    }
+    const n = selectedVersions.length;
+    setPendingDelete({
+      mode: 'many',
+      ids: [...selectedVersions],
+      title: `Delete ${n} selected version${n === 1 ? '' : 's'}?`,
+      message: 'Remove them from App versions. Phone/Drive copies are not deleted.',
+    });
+  };
+
+  useEffect(() => {
+    if (!pendingDelete) return undefined;
+    const t = setTimeout(() => {
+      deleteConfirmRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 40);
+    return () => clearTimeout(t);
+  }, [pendingDelete]);
+
+  const cancelPendingDelete = () => setPendingDelete(null);
+
+  const confirmPendingDelete = async () => {
+    if (!pendingDelete?.ids?.length) return;
+    const ids = pendingDelete.ids;
+    setBusy(true);
+    try {
+      if (ids.length === 1) {
+        await deleteLocalSnapshot(ids[0]);
+        if (pendingRestore?.kind === 'version' && pendingRestore.id === ids[0]) {
+          setPendingRestore(null);
+          setRestoreConfirm('');
+        }
+        toast.success('Saved version deleted');
+      } else {
+        const n = await deleteLocalSnapshots(ids);
+        if (pendingRestore?.kind === 'version' && ids.includes(pendingRestore.id)) {
+          setPendingRestore(null);
+          setRestoreConfirm('');
+        }
+        setSelectedVersions([]);
+        toast.success(`Deleted ${n} saved version${n === 1 ? '' : 's'}`);
+      }
+      setPendingDelete(null);
+      await refreshSnapshots();
+    } catch (err) {
+      toast.error('Delete failed: ' + err.message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -88,7 +172,15 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
     apiFetch('/api/settings')
       .then((res) => res.json())
       .then((data) => {
-        if (data && data.company_name) setSettings((prev) => ({ ...prev, ...data }));
+        if (data && data.company_name) {
+          const enriched = withPaymentMethods(data);
+          const methods = getPaymentMethods(enriched);
+          setSettings((prev) => ({
+            ...prev,
+            ...enriched,
+            payment_methods: methods.length ? methods : [emptyPaymentMethod({ label: 'Primary' })],
+          }));
+        }
       })
       .catch((err) => console.error(err));
     refreshSnapshots();
@@ -113,6 +205,35 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
     setSettings((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleMethodChange = (id, field, value) => {
+    setSettings((prev) => ({
+      ...prev,
+      payment_methods: (prev.payment_methods || []).map((m) =>
+        m.id === id ? { ...m, [field]: value } : m
+      ),
+    }));
+  };
+
+  const handleAddPaymentMethod = () => {
+    setSettings((prev) => ({
+      ...prev,
+      payment_methods: [
+        ...(prev.payment_methods || []),
+        emptyPaymentMethod({ label: `Option ${(prev.payment_methods || []).length + 1}` }),
+      ],
+    }));
+  };
+
+  const handleRemovePaymentMethod = (id) => {
+    setSettings((prev) => {
+      const list = prev.payment_methods || [];
+      if (list.length <= 1) {
+        return { ...prev, payment_methods: [emptyPaymentMethod({ label: 'Primary' })] };
+      }
+      return { ...prev, payment_methods: list.filter((m) => m.id !== id) };
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -121,7 +242,9 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...settings,
+          payment_methods: settings.payment_methods || [],
           urdu_labels: settings.urdu_labels ? 1 : 0,
+          show_developer_credit: settings.show_developer_credit === 0 || settings.show_developer_credit === false ? 0 : 1,
           biometric_lock: settings.biometric_lock ? 1 : 0,
           due_reminders: settings.due_reminders ? 1 : 0,
           low_stock_threshold: parseInt(settings.low_stock_threshold, 10) || 5,
@@ -129,13 +252,19 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
       });
       if (res.ok) {
         const updated = await res.json();
-        setSettings((prev) => ({ ...prev, ...updated }));
-        if (onSettingsUpdated) onSettingsUpdated(updated);
+        const enriched = withPaymentMethods(updated);
+        const methods = getPaymentMethods(enriched);
+        setSettings((prev) => ({
+          ...prev,
+          ...enriched,
+          payment_methods: methods.length ? methods : [emptyPaymentMethod({ label: 'Primary' })],
+        }));
+        if (onSettingsUpdated) onSettingsUpdated(enriched);
         setSavedMsg(true);
         toast.success('Settings saved');
         setTimeout(() => setSavedMsg(false), 3000);
-        if (Number(updated.due_reminders)) {
-          syncDueReminders(updated).catch(() => {});
+        if (Number(enriched.due_reminders)) {
+          syncDueReminders(enriched).catch(() => {});
         } else {
           cancelDueReminders().catch(() => {});
         }
@@ -308,25 +437,81 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
   };
 
   const exportReportCsv = async () => {
-    if (!report?.bills?.length) return;
-    const headers = ['Type', 'Invoice', 'Party', 'Date', 'Total', 'Paid', 'Status'];
-    const rows = report.bills.map((b) => [
-      b.bill_type,
-      b.invoice_number,
-      `"${b.customer_name}"`,
-      b.bill_date,
-      b.total_amount,
-      b.amount_paid || 0,
-      b.status,
-    ]);
-    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    if (!report?.bills?.length) {
+      toast.info('Load a month with bills first');
+      return;
+    }
     try {
-      const { downloadBlob } = await import('../utils/downloadFile');
-      await downloadBlob(blob, `monthly-report-${report.period}.csv`, 'text/csv');
-      toast.success('Report exported');
+      const { downloadCsv, exportMoney } = await import('../utils/tableExport');
+      const headers = ['Type', 'Invoice', 'Party', 'Date', 'Total', 'Paid', 'Balance', 'Status'];
+      const rows = report.bills.map((b) => {
+        const total = Number(b.total_amount) || 0;
+        const paid = Number(b.amount_paid) || 0;
+        const balance = Math.max(0, Math.round((total - paid) * 100) / 100);
+        let status = b.status || 'pending';
+        if (total > 0) {
+          if (balance <= 0) status = 'paid';
+          else if (status === 'paid') status = 'due';
+        }
+        return [
+          b.bill_type || '',
+          b.invoice_number || '',
+          b.customer_name || '',
+          b.bill_date || '',
+          exportMoney(total),
+          exportMoney(paid),
+          exportMoney(balance),
+          status,
+        ];
+      });
+      await downloadCsv(headers, rows, `monthly-report-${report.period}.csv`);
+      toast.success('Report exported (CSV)');
     } catch (err) {
-      if (err?.name !== 'AbortError') toast.error('Export failed: ' + err.message);
+      if (err?.name !== 'AbortError') toast.error('CSV export failed: ' + err.message);
+    }
+  };
+
+  const exportReportPdf = async () => {
+    if (!report?.bills?.length) {
+      toast.info('Load a month with bills first');
+      return;
+    }
+    try {
+      const { downloadTablePdf, exportMoney } = await import('../utils/tableExport');
+      const headers = ['Type', 'Invoice', 'Party', 'Date', 'Total', 'Paid', 'Balance', 'Status'];
+      const rows = report.bills.map((b) => {
+        const total = Number(b.total_amount) || 0;
+        const paid = Number(b.amount_paid) || 0;
+        const balance = Math.max(0, Math.round((total - paid) * 100) / 100);
+        let status = b.status || 'pending';
+        if (total > 0) {
+          if (balance <= 0) status = 'paid';
+          else if (status === 'paid') status = 'due';
+        }
+        return [
+          b.bill_type || '',
+          b.invoice_number || '',
+          b.customer_name || '',
+          b.bill_date || '',
+          exportMoney(total),
+          exportMoney(paid),
+          exportMoney(balance),
+          status,
+        ];
+      });
+      const sym = settings.currency_symbol || 'Rs.';
+      await downloadTablePdf({
+        title: 'Elite Chocolate — Monthly Report',
+        subtitle: `${report.period} · Sales ${sym} ${exportMoney(report.sales_total)} · Collected ${sym} ${exportMoney(report.sales_paid)} · Buying ${sym} ${exportMoney(report.buying_total)}`,
+        headers,
+        rows,
+        filename: `monthly-report-${report.period}.pdf`,
+        landscape: true,
+        colWeights: [1.1, 1.3, 1.5, 1.1, 1.2, 1.2, 1.2, 0.9],
+      });
+      toast.success('Report exported (PDF)');
+    } catch (err) {
+      if (err?.name !== 'AbortError') toast.error('PDF export failed: ' + err.message);
     }
   };
 
@@ -384,35 +569,99 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
         {snapshots.length === 0 ? (
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No local versions yet — run a backup first.</p>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: 220, overflowY: 'auto' }}>
-            {snapshots.map((s) => (
-              <div key={s.id} className="surface-block" style={{ padding: '0.55rem 0.7rem', display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ fontSize: '0.78rem' }}>
-                  <div style={{ fontWeight: 700 }}>{s.filename}</div>
-                  <div style={{ color: 'var(--text-muted)' }}>{s.reason} · {new Date(s.created_at).toLocaleString()}</div>
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={selectedVersions.length === snapshots.length && snapshots.length > 0}
+                  onChange={toggleSelectAllVersions}
+                />
+                Select all ({snapshots.length})
+              </label>
+              <button
+                type="button"
+                className="btn-danger"
+                style={{ width: 'auto', fontSize: '0.75rem', minHeight: 34 }}
+                disabled={busy || selectedVersions.length === 0}
+                onClick={askDeleteSelectedVersions}
+              >
+                <Trash2 size={14} /> Delete selected{selectedVersions.length ? ` (${selectedVersions.length})` : ''}
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: 260, overflowY: 'auto' }}>
+              {snapshots.map((s) => (
+                <div key={s.id} className="surface-block" style={{ padding: '0.55rem 0.7rem', display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', minWidth: 0, flex: 1, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedVersions.includes(s.id)}
+                      onChange={() => toggleVersionSelect(s.id)}
+                      style={{ marginTop: 3 }}
+                    />
+                    <span style={{ fontSize: '0.78rem', minWidth: 0 }}>
+                      <span style={{ fontWeight: 700, display: 'block', overflowWrap: 'anywhere' }}>{s.filename}</span>
+                      <span style={{ color: 'var(--text-muted)' }}>{s.reason} · {new Date(s.created_at).toLocaleString()}</span>
+                    </span>
+                  </label>
+                  <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ width: 'auto', fontSize: '0.75rem' }}
+                      disabled={busy}
+                      onClick={async () => {
+                        try {
+                          await shareLocalSnapshot(s.id);
+                        } catch (err) {
+                          if (err?.name !== 'AbortError') toast.error(err.message);
+                        }
+                      }}
+                    >
+                      Share
+                    </button>
+                    <button type="button" className="btn-secondary" style={{ width: 'auto', fontSize: '0.75rem' }} onClick={() => startVersionRestore(s.id)}>
+                      Restore
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-danger"
+                      style={{ width: 'auto', fontSize: '0.75rem', padding: '0.35rem 0.55rem' }}
+                      disabled={busy}
+                      title="Delete this saved version"
+                      onClick={() => askDeleteVersion(s.id, s.filename)}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: '0.35rem' }}>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    style={{ width: 'auto', fontSize: '0.75rem' }}
-                    disabled={busy}
-                    onClick={async () => {
-                      try {
-                        await shareLocalSnapshot(s.id);
-                      } catch (err) {
-                        if (err?.name !== 'AbortError') toast.error(err.message);
-                      }
-                    }}
-                  >
-                    Share
-                  </button>
-                  <button type="button" className="btn-secondary" style={{ width: 'auto', fontSize: '0.75rem' }} onClick={() => startVersionRestore(s.id)}>
-                    Restore
-                  </button>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
+          </>
+        )}
+
+        {pendingDelete && (
+          <div
+            ref={deleteConfirmRef}
+            className="backup-delete-confirm"
+            role="dialog"
+            aria-labelledby="backup-delete-title"
+          >
+            <div className="backup-delete-confirm-icon" aria-hidden>
+              <AlertTriangle size={18} />
+            </div>
+            <div className="backup-delete-confirm-copy">
+              <h4 id="backup-delete-title">{pendingDelete.title}</h4>
+              <p>{pendingDelete.message}</p>
+            </div>
+            <div className="backup-delete-confirm-actions">
+              <button type="button" className="btn-secondary" disabled={busy} onClick={cancelPendingDelete}>
+                Cancel
+              </button>
+              <button type="button" className="btn-danger confirm-dialog-delete" disabled={busy} onClick={confirmPendingDelete}>
+                <Trash2 size={14} /> Delete
+              </button>
+            </div>
           </div>
         )}
 
@@ -470,12 +719,17 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
           </div>
           <div className="form-group">
             <label className="form-label">Currency Symbol</label>
-            <select className="form-select" value={settings.currency_symbol || 'Rs.'} onChange={(e) => handleChange('currency_symbol', e.target.value)}>
-              <option value="Rs.">Rs. (PKR)</option>
-              <option value="PKR">PKR</option>
-              <option value="$">$</option>
-              <option value="AED">AED</option>
-            </select>
+            <AppSelect
+              value={settings.currency_symbol || 'Rs.'}
+              onChange={(next) => handleChange('currency_symbol', next)}
+              aria-label="Currency"
+              options={[
+                { value: 'Rs.', label: 'Rs. (PKR)' },
+                { value: 'PKR', label: 'PKR' },
+                { value: '$', label: '$' },
+                { value: 'AED', label: 'AED' },
+              ]}
+            />
           </div>
           <div className="form-group">
             <label className="form-label">Contact Phone</label>
@@ -559,10 +813,34 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
                 <Bell size={16} /> Due-date notifications
               </strong>
               <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                Off by default. When on, the phone can remind you of overdue / due-today bills (daily at 10:00).
+                Off by default. When on, the phone reminds you of overdue / due-today bills (daily at 10:00). Save settings after turning on.
               </span>
             </span>
           </label>
+          {Boolean(Number(settings.due_reminders)) && (
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ width: 'auto', marginTop: '0.75rem', fontSize: '0.78rem' }}
+              disabled={busy}
+              onClick={async () => {
+                try {
+                  const result = await sendTestDueNotification(settings);
+                  if (!result.ok && result.reason === 'web') {
+                    toast.info('Test notification only works on the Android APK.');
+                  } else if (!result.ok) {
+                    toast.error('Allow notifications in Android settings, then try again.');
+                  } else {
+                    toast.success('Test notification sent — check the shade in ~1s.');
+                  }
+                } catch (err) {
+                  toast.error('Notification test failed: ' + (err.message || err));
+                }
+              }}
+            >
+              <Bell size={14} /> Send test notification
+            </button>
+          )}
         </div>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginTop: '0.75rem', fontSize: '0.9rem', cursor: 'pointer' }}>
@@ -574,29 +852,111 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
           Show bilingual English + Urdu labels on invoices / receipts (Noto Nastaliq)
         </label>
 
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginTop: '0.75rem', fontSize: '0.9rem', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={settings.show_developer_credit !== 0 && settings.show_developer_credit !== false}
+            onChange={(e) => handleChange('show_developer_credit', e.target.checked ? 1 : 0)}
+          />
+          Show developer name on invoices / bills
+        </label>
+
         <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-          <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-teal)', marginBottom: '0.75rem' }}>Bank & Payment Options</h4>
-          <div className="settings-form-grid responsive-grid" style={{ display: 'grid', gap: '1rem' }}>
-            <div className="form-group">
-              <label className="form-label">Bank Name</label>
-              <input className="form-input" type="text" value={settings.bank_name || ''} onChange={(e) => handleChange('bank_name', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Account Title</label>
-              <input className="form-input" type="text" value={settings.account_title || ''} onChange={(e) => handleChange('account_title', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Account Number / IBAN</label>
-              <input className="form-input" type="text" value={settings.account_number || ''} onChange={(e) => handleChange('account_number', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Raast / JazzCash / EasyPaisa</label>
-              <input className="form-input" type="text" value={settings.mobile_wallet || ''} onChange={(e) => handleChange('mobile_wallet', e.target.value)} />
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+            <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>Bank & Payment Options</h4>
+            <button type="button" className="btn-secondary" style={{ width: 'auto', fontSize: '0.78rem' }} onClick={handleAddPaymentMethod}>
+              <Plus size={14} /> Add option
+            </button>
           </div>
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
+            Add every bank / wallet customers can pay into. All options appear on invoices and payment reminders.
+          </p>
+          {(settings.payment_methods || []).map((method, index) => (
+            <div
+              key={method.id}
+              className="surface-block"
+              style={{ padding: '0.85rem', marginBottom: '0.75rem', border: '1px solid var(--border-color)' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.65rem' }}>
+                <strong style={{ fontSize: '0.85rem' }}>Option {index + 1}</strong>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ width: 'auto', padding: '0.35rem 0.55rem', fontSize: '0.72rem' }}
+                  onClick={() => handleRemovePaymentMethod(method.id)}
+                  title="Remove this option"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+              <div className="settings-form-grid responsive-grid" style={{ display: 'grid', gap: '0.75rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Label</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    placeholder="e.g. Meezan, HBL, JazzCash"
+                    value={method.label || ''}
+                    onChange={(e) => handleMethodChange(method.id, 'label', e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Bank Name</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={method.bank_name || ''}
+                    onChange={(e) => handleMethodChange(method.id, 'bank_name', e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Account Title</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={method.account_title || ''}
+                    onChange={(e) => handleMethodChange(method.id, 'account_title', e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Account Number / IBAN</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={method.account_number || ''}
+                    onChange={(e) => handleMethodChange(method.id, 'account_number', e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Raast / JazzCash / EasyPaisa</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={method.mobile_wallet || ''}
+                    onChange={(e) => handleMethodChange(method.id, 'mobile_wallet', e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Notes (optional)</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    placeholder="Branch, preferred method, etc."
+                    value={method.notes || ''}
+                    onChange={(e) => handleMethodChange(method.id, 'notes', e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
           <div className="form-group" style={{ marginTop: '0.5rem' }}>
-            <label className="form-label">Payment Instructions</label>
-            <input className="form-input" type="text" value={settings.payment_instructions || ''} onChange={(e) => handleChange('payment_instructions', e.target.value)} />
+            <label className="form-label">Payment Instructions (shared)</label>
+            <input
+              className="form-input"
+              type="text"
+              value={settings.payment_instructions || ''}
+              onChange={(e) => handleChange('payment_instructions', e.target.value)}
+            />
           </div>
         </div>
 
@@ -620,7 +980,10 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
           <input className="form-input" type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} />
           <button type="button" className="btn-secondary" onClick={loadMonthlyReport}>Load</button>
           {report && (
-            <button type="button" className="btn-secondary" onClick={exportReportCsv}>Export CSV</button>
+            <>
+              <button type="button" className="btn-secondary" onClick={exportReportCsv}>Export CSV</button>
+              <button type="button" className="btn-secondary" onClick={exportReportPdf}>Export PDF</button>
+            </>
           )}
         </div>
         {report && (

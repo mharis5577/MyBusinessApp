@@ -5,6 +5,7 @@
 import { openDB } from 'idb';
 import { pakistanToday, pakistanYearMonth, pakistanNowTime } from '../utils/pakistan';
 import { allItemsReturned, isCancelled, recalcBillTotals, remainingQty } from '../utils/billAdjust';
+import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from '../utils/paymentMethods';
 
 const DB_NAME = 'elite-chocolate-pos';
 const DB_VERSION = 2;
@@ -28,22 +29,63 @@ const DEFAULT_SETTINGS = {
   account_number: '03337669709',
   mobile_wallet: '03337669709 (Raast / JazzCash / EasyPaisa)',
   payment_instructions: 'Please share payment screenshot on WhatsApp +923337669709',
+  payment_methods: [
+    {
+      id: 'pm_default',
+      label: 'Primary',
+      bank_name: 'Meezan Bank / HBL',
+      account_title: 'ELITE CHOCOLATE',
+      account_number: '03337669709',
+      mobile_wallet: '03337669709 (Raast / JazzCash / EasyPaisa)',
+      notes: '',
+    },
+  ],
   app_pin: '',
   biometric_lock: 0,
   due_reminders: 0,
   urdu_labels: 0,
   low_stock_threshold: 5,
+  show_developer_credit: 1,
 };
 
 function enrichBill(bill) {
   if (!bill) return bill;
   const paid = Number(bill.amount_paid) || 0;
-  const total = Number(bill.total_amount) || 0;
+  let total = Number(bill.total_amount) || 0;
+  let subtotal = Number(bill.subtotal) || 0;
   const cancelled = isCancelled(bill);
+
+  // Prefer line-item math when items are present (fixes corrupt stored totals)
+  if (Array.isArray(bill.items) && bill.items.length) {
+    const recomputed = recalcBillTotals(bill, bill.items);
+    if (
+      recomputed.total_amount > 0 &&
+      (total <= 0 || Math.abs(total - recomputed.total_amount) > 0.02)
+    ) {
+      subtotal = recomputed.subtotal;
+      total = recomputed.total_amount;
+      bill = {
+        ...bill,
+        discount_amount: recomputed.discount_amount,
+        tax_amount: recomputed.tax_amount,
+      };
+    }
+  }
+
+  const balance_due = cancelled ? 0 : Math.max(0, Math.round((total - paid) * 100) / 100);
+  let status = bill.status;
+  if (!cancelled && total > 0) {
+    if (balance_due <= 0) status = 'paid';
+    else if (status === 'paid') status = 'pending';
+  }
+
   return {
     ...bill,
     amount_paid: paid,
-    balance_due: cancelled ? 0 : Math.max(0, Math.round((total - paid) * 100) / 100),
+    total_amount: total,
+    subtotal,
+    balance_due,
+    status,
   };
 }
 
@@ -260,22 +302,39 @@ async function handleLocalRequestInner(url, options = {}) {
   if (parts[1] === 'settings' && parts.length === 2) {
     if (method === 'GET') {
       const s = (await db.get('settings', 1)) || DEFAULT_SETTINGS;
-      return jsonOk(s);
+      return jsonOk(withPaymentMethods(s));
     }
     if (method === 'PUT') {
       const prev = (await db.get('settings', 1)) || DEFAULT_SETTINGS;
+      const pay = serializePaymentMethods(
+        Array.isArray(body.payment_methods)
+          ? body.payment_methods
+          : [
+              {
+                label: 'Primary',
+                bank_name: body.bank_name ?? prev.bank_name,
+                account_title: body.account_title ?? prev.account_title,
+                account_number: body.account_number ?? prev.account_number,
+                mobile_wallet: body.mobile_wallet ?? prev.mobile_wallet,
+              },
+            ],
+        body.payment_instructions ?? prev.payment_instructions
+      );
       const next = {
         ...prev,
         ...body,
+        ...pay,
         id: 1,
         urdu_labels: body.urdu_labels ? 1 : 0,
         biometric_lock: body.biometric_lock ? 1 : 0,
         due_reminders: body.due_reminders ? 1 : 0,
+        show_developer_credit:
+          body.show_developer_credit === 0 || body.show_developer_credit === false ? 0 : 1,
         low_stock_threshold: body.low_stock_threshold ?? prev.low_stock_threshold ?? 5,
         updated_at: new Date().toISOString(),
       };
       await db.put('settings', next);
-      return jsonOk(next);
+      return jsonOk(withPaymentMethods(next));
     }
   }
 
@@ -920,6 +979,16 @@ async function handleLocalRequestInner(url, options = {}) {
         payee_account_number: body.payee_account_number ?? existing.payee_account_number ?? '',
         payee_payment_notes: body.payee_payment_notes ?? existing.payee_payment_notes ?? '',
       };
+      const paidAmt = Number(updated.amount_paid) || 0;
+      const totalAmt = Number(updated.total_amount) || 0;
+      if (
+        updated.status !== 'cancelled' &&
+        totalAmt > 0 &&
+        paidAmt >= totalAmt &&
+        updated.status !== 'paid'
+      ) {
+        updated.status = 'paid';
+      }
       await db.put('bills', updated);
 
       if (Array.isArray(body.items)) {
@@ -947,6 +1016,13 @@ async function handleLocalRequestInner(url, options = {}) {
 
     if (parts.length === 3 && method === 'DELETE') {
       const id = Number(parts[2]);
+      const bill = await db.get('bills', id);
+      if (!bill) return jsonErr('Bill not found', 404);
+      const items = (await db.getAll('bill_items')).filter((it) => it.bill_id === id);
+      if (!isCancelled(bill)) {
+        const qtyByItemId = new Map(items.map((it) => [Number(it.id), remainingQty(it)]));
+        await restoreStockForQtys(db, bill, items, qtyByItemId, 'bill delete');
+      }
       for (const store of ['bill_payments', 'bill_items']) {
         const rows = await db.getAll(store);
         for (const r of rows) {
@@ -964,9 +1040,12 @@ async function handleLocalRequestInner(url, options = {}) {
       const bill = await db.get('bills', id);
       if (!bill) return jsonErr('Bill not found', 404);
       if (isCancelled(bill)) return jsonErr('Cancelled bills cannot change status');
+      const total = Number(bill.total_amount) || 0;
+      const payments = (await db.getAll('bill_payments')).filter((p) => p.bill_id === id);
+      let paidFromPayments = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+
       if (status === 'paid') {
-        const total = Number(bill.total_amount) || 0;
-        const already = Number(bill.amount_paid) || 0;
+        const already = Math.max(Number(bill.amount_paid) || 0, paidFromPayments);
         const gap = Math.max(0, Math.round((total - already) * 100) / 100);
         if (gap > 0) {
           const payId = await nextId(db, 'bill_payments');
@@ -980,10 +1059,21 @@ async function handleLocalRequestInner(url, options = {}) {
             screenshot_data: '',
             created_at: new Date().toISOString(),
           });
+          paidFromPayments += gap;
         }
-        await db.put('bills', { ...bill, status: 'paid', amount_paid: total });
+        await db.put('bills', {
+          ...bill,
+          status: 'paid',
+          amount_paid: Math.max(total, paidFromPayments),
+        });
       } else {
-        await db.put('bills', { ...bill, status });
+        // Keep money received — never wipe amount_paid just because label changed
+        const paid = Math.max(Number(bill.amount_paid) || 0, paidFromPayments);
+        const due = Math.max(0, Math.round((total - paid) * 100) / 100);
+        if (due <= 0 && total > 0) {
+          return jsonErr('This bill is fully paid. Clear or reduce payments before marking it Due / Overdue.');
+        }
+        await db.put('bills', { ...bill, status, amount_paid: paid });
       }
       return jsonOk(enrichBill(await db.get('bills', id)));
     }
@@ -1070,6 +1160,9 @@ async function handleLocalRequestInner(url, options = {}) {
       const bill = await db.get('bills', id);
       if (!bill) return jsonErr('Bill not found', 404);
       if (isCancelled(bill)) return jsonErr('Cannot take payment on a cancelled bill');
+      const due = Math.max(0, Math.round(((Number(bill.total_amount) || 0) - (Number(bill.amount_paid) || 0)) * 100) / 100);
+      if (due <= 0) return jsonErr('Bill is fully paid — nothing left to collect');
+      if (amount > due + 0.001) return jsonErr(`Amount exceeds balance due (${due})`);
       const payId = await nextId(db, 'bill_payments');
       await db.put('bill_payments', {
         id: payId,
@@ -1102,6 +1195,11 @@ async function handleLocalRequestInner(url, options = {}) {
     const paid = bills.filter((b) => b.status === 'paid');
     const pending = bills.filter((b) => b.status === 'pending');
     const overdue = bills.filter((b) => b.status === 'overdue');
+    const outstandingOf = (list) =>
+      list.reduce((s, b) => {
+        const due = Math.max(0, (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0));
+        return s + due;
+      }, 0);
     const recent = [...bills].sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)).slice(0, 5);
     const today = pakistanToday();
     const monthPrefix = pakistanYearMonth(today);
@@ -1130,9 +1228,11 @@ async function handleLocalRequestInner(url, options = {}) {
     const todayTotals = sumSaleCost(todaySales);
     const monthTotals = sumSaleCost(monthSales);
     return jsonOk({
-      total_revenue: paid.reduce((s, b) => s + (Number(b.total_amount) || 0), 0),
-      total_pending: pending.reduce((s, b) => s + (Number(b.total_amount) || 0), 0),
-      total_overdue: overdue.reduce((s, b) => s + (Number(b.total_amount) || 0), 0),
+      total_revenue: bills
+        .filter((b) => b.bill_type !== 'supplier' && !isCancelled(b))
+        .reduce((s, b) => s + (Number(b.amount_paid) || 0), 0),
+      total_pending: outstandingOf(pending),
+      total_overdue: outstandingOf(overdue),
       total_bills: bills.length,
       paid_bills_count: paid.length,
       pending_bills_count: pending.length,
@@ -1339,9 +1439,13 @@ async function handleLocalRequestInner(url, options = {}) {
       await putAll('stock_adjustments', data.stock_adjustments);
 
       if (data.settings?.[0]) {
-        await tx.objectStore('settings').put({ ...DEFAULT_SETTINGS, ...data.settings[0], id: 1 });
+        const s = { ...DEFAULT_SETTINGS, ...data.settings[0], id: 1 };
+        const pay = serializePaymentMethods(getPaymentMethods(s), s.payment_instructions);
+        await tx.objectStore('settings').put({ ...s, ...pay, id: 1 });
       } else if (data.settings && !Array.isArray(data.settings) && data.settings.company_name) {
-        await tx.objectStore('settings').put({ ...DEFAULT_SETTINGS, ...data.settings, id: 1 });
+        const s = { ...DEFAULT_SETTINGS, ...data.settings, id: 1 };
+        const pay = serializePaymentMethods(getPaymentMethods(s), s.payment_instructions);
+        await tx.objectStore('settings').put({ ...s, ...pay, id: 1 });
       }
 
       await tx.done;

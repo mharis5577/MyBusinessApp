@@ -1,5 +1,6 @@
 import { formatCurrency } from './pakistan';
 import { toast } from './toast';
+import { getPaymentMethods, paymentMethodLines, compactPaymentInstructions } from './paymentMethods';
 
 export function normalizeWhatsAppPhone(phone) {
   const digits = String(phone || '').replace(/\D/g, '');
@@ -70,8 +71,19 @@ export function buildPaymentReminderText({
     return ur;
   }
 
-  const wallet = settings.mobile_wallet || settings.account_number || '';
-  const instructions = settings.payment_instructions || '';
+  const methods = getPaymentMethods(settings);
+  const methodBlock = methods.length
+    ? methods
+        .map((m, i) => {
+          const lines = paymentMethodLines(m);
+          if (!lines.length) return null;
+          const header = methods.length > 1 ? `Payment option ${i + 1}:` : 'Payment details:';
+          return [header, ...lines].join('\n');
+        })
+        .filter(Boolean)
+        .join('\n\n')
+    : null;
+  const instructions = compactPaymentInstructions(settings.payment_instructions, methods);
 
   const en = [
     `Assalam o Alaikum ${bill.customer_name || 'Client'},`,
@@ -79,12 +91,7 @@ export function buildPaymentReminderText({
     `Invoice ${bill.invoice_number} — Balance due: ${formatCurrency(currencySymbol, balance)}`,
     bill.due_date ? `Due date: ${bill.due_date}` : null,
     '',
-    wallet ? `Pay via Raast / JazzCash / EasyPaisa: ${wallet}` : null,
-    settings.bank_name ? `Bank: ${settings.bank_name}` : null,
-    settings.account_title ? `Title: ${settings.account_title}` : null,
-    settings.account_number && settings.account_number !== wallet
-      ? `A/C: ${settings.account_number}`
-      : null,
+    methodBlock,
     instructions || null,
     '',
     `— ${company}`,
@@ -94,13 +101,18 @@ export function buildPaymentReminderText({
 
   if (!urdu) return en;
 
+  const primaryWallet =
+    methods.find((m) => m.mobile_wallet)?.mobile_wallet ||
+    methods.find((m) => m.account_number)?.account_number ||
+    '';
+
   const ur = [
     `السلام علیکم ${bill.customer_name || 'گاہک'}،`,
     '',
     `انوائس ${bill.invoice_number} — باقی رقم: ${formatCurrency(currencySymbol, balance)}`,
     bill.due_date ? `آخری تاریخ: ${bill.due_date}` : null,
     '',
-    wallet ? `ادائیگی (راست / جازکیش / ایزی پیسہ): ${wallet}` : null,
+    primaryWallet ? `ادائیگی (راست / جازکیش / ایزی پیسہ): ${primaryWallet}` : null,
     instructions || null,
     '',
     `— ${company}`,

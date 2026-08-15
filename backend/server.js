@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import db, { dbAll, dbGet, dbRun } from './db.js';
 import { pakistanToday, pakistanYearMonth, pakistanNowTime } from './pakistan.js';
+import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from './utils/paymentMethods.js';
 
 const app = express();
 const PORT = process.env.PORT || 11000;
@@ -33,9 +34,36 @@ function recalcBillTotals(bill, items) {
 function enrichBill(bill) {
   if (!bill) return bill;
   const paid = Number(bill.amount_paid) || 0;
-  const total = Number(bill.total_amount) || 0;
+  let total = Number(bill.total_amount) || 0;
+  let subtotal = Number(bill.subtotal) || 0;
+  const cancelled = isCancelled(bill);
+
+  // Prefer line-item math when items are present (fixes corrupt stored totals)
+  if (Array.isArray(bill.items) && bill.items.length) {
+    const recomputed = recalcBillTotals(bill, bill.items);
+    if (
+      recomputed.total_amount > 0 &&
+      (total <= 0 || Math.abs(total - recomputed.total_amount) > 0.02)
+    ) {
+      subtotal = recomputed.subtotal;
+      total = recomputed.total_amount;
+      bill.discount_amount = recomputed.discount_amount;
+      bill.tax_amount = recomputed.tax_amount;
+    }
+  }
+
+  const balance_due = cancelled ? 0 : Math.max(0, Math.round((total - paid) * 100) / 100);
+  let status = bill.status;
+  if (!cancelled && total > 0) {
+    if (balance_due <= 0) status = 'paid';
+    else if (status === 'paid') status = 'pending';
+  }
+
   bill.amount_paid = paid;
-  bill.balance_due = isCancelled(bill) ? 0 : Math.max(0, Math.round((total - paid) * 100) / 100);
+  bill.total_amount = total;
+  bill.subtotal = subtotal;
+  bill.balance_due = balance_due;
+  bill.status = status;
   return bill;
 }
 
@@ -109,7 +137,7 @@ app.post('/api/reset-db', async (req, res) => {
 app.get('/api/settings', async (req, res) => {
   try {
     const settings = await dbGet('SELECT * FROM settings LIMIT 1');
-    res.json(settings || {});
+    res.json(withPaymentMethods(settings || {}));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -126,6 +154,7 @@ app.put('/api/settings', async (req, res) => {
       logo_url,
       currency_symbol,
       default_tax_rate,
+      payment_methods,
       bank_name,
       account_title,
       account_number,
@@ -136,7 +165,23 @@ app.put('/api/settings', async (req, res) => {
       low_stock_threshold,
       biometric_lock,
       due_reminders,
+      show_developer_credit,
     } = req.body;
+
+    const pay = serializePaymentMethods(
+      Array.isArray(payment_methods)
+        ? payment_methods
+        : [
+            {
+              label: 'Primary',
+              bank_name,
+              account_title,
+              account_number,
+              mobile_wallet,
+            },
+          ],
+      payment_instructions
+    );
 
     await dbRun(
       `UPDATE settings SET 
@@ -153,11 +198,13 @@ app.put('/api/settings', async (req, res) => {
         account_number = ?,
         mobile_wallet = ?,
         payment_instructions = ?,
+        payment_methods = ?,
         app_pin = ?,
         urdu_labels = ?,
         low_stock_threshold = ?,
         biometric_lock = ?,
         due_reminders = ?,
+        show_developer_credit = ?,
         updated_at = CURRENT_TIMESTAMP
        WHERE id = (SELECT id FROM settings LIMIT 1)`,
       [
@@ -169,21 +216,23 @@ app.put('/api/settings', async (req, res) => {
         logo_url,
         currency_symbol,
         default_tax_rate,
-        bank_name,
-        account_title,
-        account_number,
-        mobile_wallet,
-        payment_instructions,
+        pay.bank_name,
+        pay.account_title,
+        pay.account_number,
+        pay.mobile_wallet,
+        pay.payment_instructions,
+        pay.payment_methods,
         app_pin ?? '',
         urdu_labels ? 1 : 0,
-        low_stock_threshold ?? 5,
+        Number.isFinite(Number(low_stock_threshold)) ? Number(low_stock_threshold) : 5,
         biometric_lock ? 1 : 0,
         due_reminders ? 1 : 0,
+        show_developer_credit === 0 || show_developer_credit === false ? 0 : 1,
       ]
     );
 
     const updated = await dbGet('SELECT * FROM settings LIMIT 1');
-    res.json(updated);
+    res.json(withPaymentMethods(updated || {}));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1019,9 +1068,20 @@ app.put('/api/bills/:id', async (req, res) => {
     }
 
     const updatedBill = await dbGet('SELECT * FROM bills WHERE id = ?', [id]);
+    const paidAmt = Number(updatedBill.amount_paid) || 0;
+    const totalAmt = Number(updatedBill.total_amount) || 0;
+    if (
+      updatedBill.status !== 'cancelled' &&
+      totalAmt > 0 &&
+      paidAmt >= totalAmt &&
+      updatedBill.status !== 'paid'
+    ) {
+      await dbRun("UPDATE bills SET status = 'paid' WHERE id = ?", [id]);
+      updatedBill.status = 'paid';
+    }
     updatedBill.items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [id]);
 
-    res.json(updatedBill);
+    res.json(enrichBill(updatedBill));
   } catch (err) {
     console.error('Error updating bill:', err);
     res.status(500).json({ error: err.message });
@@ -1040,20 +1100,42 @@ app.put('/api/bills/:id/status', async (req, res) => {
     if (!bill) return res.status(404).json({ error: 'Bill not found' });
     if (isCancelled(bill)) return res.status(400).json({ error: 'Cancelled bills cannot change status' });
 
+    const total = Number(bill.total_amount) || 0;
+    const sumRow = await dbGet(
+      'SELECT COALESCE(SUM(amount), 0) as paid FROM bill_payments WHERE bill_id = ?',
+      [req.params.id]
+    );
+    let paidFromPayments = Number(sumRow?.paid) || 0;
+
     if (status === 'paid') {
-      const total = Number(bill.total_amount) || 0;
-      const already = Number(bill.amount_paid) || 0;
+      const already = Math.max(Number(bill.amount_paid) || 0, paidFromPayments);
       const gap = Math.max(0, Math.round((total - already) * 100) / 100);
       if (gap > 0) {
         await dbRun(
           'INSERT INTO bill_payments (bill_id, amount, method, payment_date, notes) VALUES (?, ?, ?, ?, ?)',
           [bill.id, gap, bill.payment_method || 'Cash', pakistanToday(), 'Marked paid (full balance)']
         );
+        paidFromPayments += gap;
       }
-      await dbRun('UPDATE bills SET status = ?, amount_paid = ? WHERE id = ?', [status, total, req.params.id]);
+      await dbRun('UPDATE bills SET status = ?, amount_paid = ? WHERE id = ?', [
+        'paid',
+        Math.max(total, paidFromPayments),
+        req.params.id,
+      ]);
     } else {
-      // Un-pay: clear paid amount so Revenue paid stays correct
-      await dbRun('UPDATE bills SET status = ?, amount_paid = 0 WHERE id = ?', [status, req.params.id]);
+      // Keep money received — never wipe amount_paid just because label changed
+      const paid = Math.max(Number(bill.amount_paid) || 0, paidFromPayments);
+      const due = Math.max(0, Math.round((total - paid) * 100) / 100);
+      if (due <= 0 && total > 0) {
+        return res.status(400).json({
+          error: 'This bill is fully paid. Clear or reduce payments before marking it Due / Overdue.',
+        });
+      }
+      await dbRun('UPDATE bills SET status = ?, amount_paid = ? WHERE id = ?', [
+        status,
+        paid,
+        req.params.id,
+      ]);
     }
 
     const updated = enrichBill(await dbGet('SELECT * FROM bills WHERE id = ?', [req.params.id]));
@@ -1076,6 +1158,13 @@ app.post('/api/bills/:id/payments', async (req, res) => {
     const bill = await dbGet('SELECT * FROM bills WHERE id = ?', [req.params.id]);
     if (!bill) return res.status(404).json({ error: 'Bill not found' });
     if (isCancelled(bill)) return res.status(400).json({ error: 'Cannot take payment on a cancelled bill' });
+    const due = Math.max(0, Math.round(((Number(bill.total_amount) || 0) - (Number(bill.amount_paid) || 0)) * 100) / 100);
+    if (due <= 0) {
+      return res.status(400).json({ error: 'Bill is fully paid — nothing left to collect' });
+    }
+    if (amount > due + 0.001) {
+      return res.status(400).json({ error: `Amount exceeds balance due (${due})` });
+    }
 
     await dbRun(
       'INSERT INTO bill_payments (bill_id, amount, method, payment_date, notes, screenshot_data) VALUES (?, ?, ?, ?, ?, ?)',
@@ -1192,9 +1281,16 @@ app.get('/api/bills/:id/payments', async (req, res) => {
   }
 });
 
-// Delete Bill
+// Delete Bill (restores remaining stock if not already cancelled)
 app.delete('/api/bills/:id', async (req, res) => {
   try {
+    const bill = await dbGet('SELECT * FROM bills WHERE id = ?', [req.params.id]);
+    if (!bill) return res.status(404).json({ error: 'Bill not found' });
+    const items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [bill.id]);
+    if (!isCancelled(bill)) {
+      const qtyByItemId = new Map(items.map((it) => [Number(it.id), remainingQty(it)]));
+      await restoreStockForQtys(bill, items, qtyByItemId, 'bill delete');
+    }
     await dbRun('DELETE FROM bill_payments WHERE bill_id = ?', [req.params.id]);
     await dbRun('DELETE FROM bill_items WHERE bill_id = ?', [req.params.id]);
     await dbRun('DELETE FROM bills WHERE id = ?', [req.params.id]);
@@ -1209,9 +1305,25 @@ app.delete('/api/bills/:id', async (req, res) => {
 // -------------------------------------------------------------
 app.get('/api/stats', async (req, res) => {
   try {
-    const totalRevenueRow = await dbGet("SELECT SUM(total_amount) as total FROM bills WHERE status = 'paid'");
-    const totalPendingRow = await dbGet("SELECT SUM(total_amount) as total FROM bills WHERE status = 'pending'");
-    const totalOverdueRow = await dbGet("SELECT SUM(total_amount) as total FROM bills WHERE status = 'overdue'");
+    const totalRevenueRow = await dbGet(
+      "SELECT SUM(COALESCE(amount_paid, 0)) as total FROM bills WHERE status != 'cancelled' AND bill_type != 'supplier'"
+    );
+    const totalPendingRow = await dbGet(
+      `SELECT SUM(CASE
+         WHEN (COALESCE(total_amount, 0) - COALESCE(amount_paid, 0)) > 0
+         THEN (COALESCE(total_amount, 0) - COALESCE(amount_paid, 0))
+         ELSE 0 END) as total
+       FROM bills
+       WHERE status = 'pending'`
+    );
+    const totalOverdueRow = await dbGet(
+      `SELECT SUM(CASE
+         WHEN (COALESCE(total_amount, 0) - COALESCE(amount_paid, 0)) > 0
+         THEN (COALESCE(total_amount, 0) - COALESCE(amount_paid, 0))
+         ELSE 0 END) as total
+       FROM bills
+       WHERE status = 'overdue'`
+    );
     const totalCountRow = await dbGet('SELECT COUNT(*) as count FROM bills');
     const paidCountRow = await dbGet("SELECT COUNT(*) as count FROM bills WHERE status = 'paid'");
     const pendingCountRow = await dbGet("SELECT COUNT(*) as count FROM bills WHERE status = 'pending'");
@@ -1510,19 +1622,21 @@ app.post('/api/restore', async (req, res) => {
 
       if (data.settings && data.settings[0]) {
         const s = data.settings[0];
+        const pay = serializePaymentMethods(getPaymentMethods(s), s.payment_instructions);
         await dbRun(
           `UPDATE settings SET
             company_name=?, company_email=?, company_phone=?, company_address=?, company_tax_id=?,
             logo_url=?, currency_symbol=?, default_tax_rate=?, bank_name=?, account_title=?,
-            account_number=?, mobile_wallet=?, payment_instructions=?, app_pin=?, urdu_labels=?,
-            low_stock_threshold=?, biometric_lock=?, due_reminders=?
+            account_number=?, mobile_wallet=?, payment_instructions=?, payment_methods=?,
+            app_pin=?, urdu_labels=?, low_stock_threshold=?, biometric_lock=?, due_reminders=?, show_developer_credit=?
            WHERE id = (SELECT id FROM settings LIMIT 1)`,
           [
             s.company_name, s.company_email, s.company_phone, s.company_address, s.company_tax_id,
-            s.logo_url || '', s.currency_symbol || 'Rs.', s.default_tax_rate || 0, s.bank_name || '',
-            s.account_title || '', s.account_number || '', s.mobile_wallet || '', s.payment_instructions || '',
-            s.app_pin || '', s.urdu_labels ? 1 : 0, s.low_stock_threshold ?? 5, s.biometric_lock ? 1 : 0,
-            s.due_reminders ? 1 : 0,
+            s.logo_url || '', s.currency_symbol || 'Rs.', s.default_tax_rate || 0, pay.bank_name,
+            pay.account_title, pay.account_number, pay.mobile_wallet, pay.payment_instructions,
+            pay.payment_methods, s.app_pin || '', s.urdu_labels ? 1 : 0, s.low_stock_threshold ?? 5,
+            s.biometric_lock ? 1 : 0, s.due_reminders ? 1 : 0,
+            s.show_developer_credit === 0 || s.show_developer_credit === false ? 0 : 1,
           ]
         );
       }

@@ -7,5 +7,10 @@
   },
   "android": {
     "allowMixedContent": true
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "iconColor": "#00B3A6"
+    }
   }
 }

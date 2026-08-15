@@ -1,4 +1,5 @@
-import { ArrowDownUp, Settings, X, Package, Download } from 'lucide-react';
+import { ArrowDownUp, Settings, X, Download, Sparkles, Clock } from 'lucide-react';
+import { DeveloperCredit } from './BrandMark';
 
 export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, activeTab }) {
   if (!open) return null;
@@ -17,6 +18,35 @@ export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, acti
             <X size={16} />
           </button>
         </div>
+
+        <p className="more-menu-section-label">
+          <Sparkles size={13} /> Extras
+        </p>
+
+        <button
+          type="button"
+          className={`more-menu-item ${activeTab === 'cashflow' ? 'active' : ''}`}
+          onClick={() => go('cashflow')}
+        >
+          <ArrowDownUp size={20} />
+          <span>
+            <strong>Cashflow</strong>
+            <small>Sales vs Saudia buying</small>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          className={`more-menu-item ${activeTab === 'aging' ? 'active' : ''}`}
+          onClick={() => go('aging')}
+        >
+          <Clock size={20} />
+          <span>
+            <strong>Collections</strong>
+            <small>Aging buckets & WhatsApp reminders</small>
+          </span>
+        </button>
+
         <button
           type="button"
           className="more-menu-item"
@@ -31,28 +61,7 @@ export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, acti
             <small>App, phone storage, Google Drive</small>
           </span>
         </button>
-        <button
-          type="button"
-          className={`more-menu-item ${activeTab === 'catalog' ? 'active' : ''}`}
-          onClick={() => go('catalog')}
-        >
-          <Package size={20} />
-          <span>
-            <strong>Items</strong>
-            <small>Products & stock</small>
-          </span>
-        </button>
-        <button
-          type="button"
-          className={`more-menu-item ${activeTab === 'cashflow' ? 'active' : ''}`}
-          onClick={() => go('cashflow')}
-        >
-          <ArrowDownUp size={20} />
-          <span>
-            <strong>Cashflow</strong>
-            <small>Sales vs Saudia buying</small>
-          </span>
-        </button>
+
         <button
           type="button"
           className={`more-menu-item ${activeTab === 'settings' ? 'active' : ''}`}
@@ -64,6 +73,10 @@ export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, acti
             <small>Store profile, PIN, fingerprint</small>
           </span>
         </button>
+
+        <div className="more-menu-developer">
+          <DeveloperCredit compact />
+        </div>
       </div>
     </div>
   );

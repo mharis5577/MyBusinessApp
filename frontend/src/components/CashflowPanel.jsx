@@ -5,7 +5,7 @@ import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import EmptyState from './EmptyState';
 
-export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false, onNavigate }) {
+export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false, onNavigate, embedded = false }) {
   const toast = useToast();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -30,7 +30,7 @@ export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false,
 
   if (loading && !data) {
     return (
-      <div className="panel-flat" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem 0' }}>
+      <div className={`panel-flat${embedded ? ' is-embedded' : ''}`} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem 0' }}>
         <RefreshCw className="spin" size={20} /> Loading cashflow…
       </div>
     );
@@ -46,18 +46,29 @@ export default function CashflowPanel({ currencySymbol = 'Rs.', compact = false,
   } = data || {};
 
   return (
-    <div className={`panel-flat cashflow-panel${compact ? ' is-compact' : ''}`}>
-      <div className="panel-flat-head">
-        <div>
-          <h3 className="panel-flat-title">
-            <ArrowDownUp size={17} /> Cashflow
-          </h3>
-          <p className="panel-flat-sub">Sales in vs Saudia buying out</p>
+    <div className={`panel-flat cashflow-panel${compact ? ' is-compact' : ''}${embedded ? ' is-embedded' : ''}`}>
+      {!embedded && (
+        <div className="panel-flat-head">
+          <div>
+            <h3 className="panel-flat-title">
+              <ArrowDownUp size={17} /> Cashflow
+            </h3>
+            <p className="panel-flat-sub">Sales in vs Saudia buying out</p>
+          </div>
+          <button type="button" className="btn-secondary" style={{ width: 'auto', minHeight: 36, padding: '0.35rem 0.7rem', fontSize: '0.75rem' }} onClick={load}>
+            <RefreshCw size={14} /> Refresh
+          </button>
         </div>
-        <button type="button" className="btn-secondary" style={{ width: 'auto', minHeight: 36, padding: '0.35rem 0.7rem', fontSize: '0.75rem' }} onClick={load}>
-          <RefreshCw size={14} /> Refresh
-        </button>
-      </div>
+      )}
+
+      {embedded && (
+        <div className="dash-dropdown-toolbar">
+          <span>Sales in vs Saudia buying</span>
+          <button type="button" className="btn-secondary" style={{ width: 'auto', minHeight: 32, padding: '0.3rem 0.65rem', fontSize: '0.72rem' }} onClick={load}>
+            <RefreshCw size={13} /> Refresh
+          </button>
+        </div>
+      )}
 
       <div className="stats-grid stats-grid-quiet cashflow-stats">
         <div className="stat-card">

@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   LayoutDashboard,
   PlusCircle,
+  Plus,
   Database,
   Users,
-  Package,
   Settings,
   Moon,
   Sun,
@@ -13,15 +13,16 @@ import {
   ArrowDownUp,
   MoreHorizontal,
   Fingerprint,
+  Clock,
 } from 'lucide-react';
 import DashboardStats from './components/DashboardStats';
 import SmartBillForm from './components/SmartBillForm';
 import InvoicePreview from './components/InvoicePreview';
 import BillsDatabase from './components/BillsDatabase';
 import CustomerManager from './components/CustomerManager';
-import ProductCatalog from './components/ProductCatalog';
 import SettingsManager from './components/SettingsManager';
 import CashflowPanel from './components/CashflowPanel';
+import AgingReport from './components/AgingReport';
 import MoreMenu from './components/MoreMenu';
 import SplashScreen from './components/SplashScreen';
 import BrandMark, { BrandWordmark } from './components/BrandMark';
@@ -42,6 +43,17 @@ const THEME_KEY = 'elite-chocolate-theme';
 const PIN_UNLOCK_KEY = 'elite-chocolate-pin-ok';
 const AUTO_LOCK_MS = 2 * 60 * 1000; // re-lock after 2 min in background (only if lock is enabled)
 
+const TAB_ORDER = [
+  'dashboard',
+  'create',
+  'database',
+  'customers',
+  'cashflow',
+  'aging',
+  'settings',
+  'preview',
+];
+
 function getInitialTheme() {
   try {
     const saved = localStorage.getItem(THEME_KEY);
@@ -55,6 +67,7 @@ function getInitialTheme() {
 export default function App() {
   const toast = useToast();
   const [currentTab, setCurrentTab] = useState('dashboard');
+  const [tabDir, setTabDir] = useState('forward');
   const [selectedBill, setSelectedBill] = useState(null);
   const [draftBill, setDraftBill] = useState(null);
   const [settings, setSettings] = useState({
@@ -86,11 +99,19 @@ export default function App() {
 
   const finishSplash = useCallback(() => setShowSplash(false), []);
 
+  const goToTab = useCallback((tab) => {
+    if (!tab || tab === currentTab) return;
+    const from = TAB_ORDER.indexOf(currentTab);
+    const to = TAB_ORDER.indexOf(tab);
+    setTabDir(from >= 0 && to >= 0 && to < from ? 'back' : 'forward');
+    setCurrentTab(tab);
+  }, [currentTab]);
+
   const openBackupSettings = useCallback(() => {
-    setCurrentTab('settings');
+    goToTab('settings');
     setFocusBackup(true);
     setMoreOpen(false);
-  }, []);
+  }, [goToTab]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -248,17 +269,17 @@ export default function App() {
 
   const handleBillGenerated = (newBill) => {
     setSelectedBill(newBill);
-    setCurrentTab('preview');
+    goToTab('preview');
   };
 
   const handleViewBill = (bill) => {
     setSelectedBill(bill);
-    setCurrentTab('preview');
+    goToTab('preview');
   };
 
   const handleDuplicateBill = (bill) => {
     setDraftBill(bill);
-    setCurrentTab('create');
+    goToTab('create');
   };
 
   const toggleTheme = () => {
@@ -275,8 +296,7 @@ export default function App() {
     setDeferredInstall(null);
   };
 
-  const moreActive =
-    currentTab === 'cashflow' || currentTab === 'settings' || currentTab === 'catalog';
+  const moreActive = currentTab === 'cashflow' || currentTab === 'aging' || currentTab === 'settings';
 
   if (showSplash) {
     return <SplashScreen onDone={finishSplash} />;
@@ -341,7 +361,7 @@ export default function App() {
           className="brand"
           onClick={(e) => {
             e.preventDefault();
-            setCurrentTab('dashboard');
+            goToTab('dashboard');
           }}
         >
           <span className="brand-mark">
@@ -353,131 +373,164 @@ export default function App() {
         <nav className="desktop-nav">
           <button
             className={`nav-btn ${currentTab === 'dashboard' ? 'active' : ''}`}
-            onClick={() => setCurrentTab('dashboard')}
+            onClick={() => goToTab('dashboard')}
           >
             <LayoutDashboard size={17} /> Dashboard
           </button>
-          <button className={`nav-btn ${currentTab === 'create' ? 'active' : ''}`} onClick={() => setCurrentTab('create')}>
+          <button className={`nav-btn ${currentTab === 'create' ? 'active' : ''}`} onClick={() => goToTab('create')}>
             <PlusCircle size={17} /> Create Bill
           </button>
           <button
             className={`nav-btn ${currentTab === 'database' ? 'active' : ''}`}
-            onClick={() => setCurrentTab('database')}
+            onClick={() => goToTab('database')}
           >
             <Database size={17} /> Bills
           </button>
-          <button className={`nav-btn ${currentTab === 'catalog' ? 'active' : ''}`} onClick={() => setCurrentTab('catalog')}>
-            <Package size={17} /> Items
-          </button>
           <button
             className={`nav-btn ${currentTab === 'customers' ? 'active' : ''}`}
-            onClick={() => setCurrentTab('customers')}
+            onClick={() => goToTab('customers')}
           >
             <Users size={17} /> Clients
           </button>
           <button
             className={`nav-btn ${currentTab === 'cashflow' ? 'active' : ''}`}
-            onClick={() => setCurrentTab('cashflow')}
+            onClick={() => goToTab('cashflow')}
           >
             <ArrowDownUp size={17} /> Cashflow
           </button>
           <button
+            className={`nav-btn ${currentTab === 'aging' ? 'active' : ''}`}
+            onClick={() => goToTab('aging')}
+          >
+            <Clock size={17} /> Collections
+          </button>
+          <button
             className={`nav-btn ${currentTab === 'settings' ? 'active' : ''}`}
-            onClick={() => setCurrentTab('settings')}
+            onClick={() => goToTab('settings')}
           >
             <Settings size={17} /> Settings
           </button>
         </nav>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+        <div className="navbar-actions">
           {deferredInstall && (
-            <button className="nav-btn icon-only" onClick={handleInstallApp} title="Install app">
+            <button type="button" className="nav-btn icon-only" onClick={handleInstallApp} title="Install app">
               <Download size={18} />
             </button>
           )}
           {lockRequired(settings) && (
-            <button className="nav-btn icon-only" onClick={lockApp} title="Lock app">
+            <button type="button" className="nav-btn icon-only" onClick={lockApp} title="Lock app">
               <Lock size={18} />
             </button>
           )}
-          <button className="nav-btn icon-only" onClick={toggleTheme} title="Toggle theme">
+          <button
+            type="button"
+            className={`nav-btn icon-only${currentTab === 'settings' ? ' active' : ''}`}
+            onClick={() => goToTab('settings')}
+            title="Settings"
+            aria-label="Settings"
+          >
+            <Settings size={18} />
+          </button>
+          <button type="button" className="nav-btn icon-only" onClick={toggleTheme} title="Toggle theme">
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
         </div>
       </header>
 
       <main className="app-container">
-        {currentTab === 'dashboard' && (
-          <DashboardStats
-            onNavigate={(tab) => {
-              if (tab === 'backup') {
-                openBackupSettings();
-                return;
-              }
-              setCurrentTab(tab);
-            }}
-            onViewBill={(bill) => {
-              setSelectedBill(bill);
-              setCurrentTab('preview');
-            }}
-            currencySymbol={settings.currency_symbol || 'Rs.'}
-            settings={settings}
-          />
-        )}
+        <div key={currentTab} className={`tab-page tab-page--${tabDir}`}>
+          {currentTab === 'dashboard' && (
+            <DashboardStats
+              onNavigate={(tab) => {
+                if (tab === 'backup') {
+                  openBackupSettings();
+                  return;
+                }
+                goToTab(tab);
+              }}
+              onViewBill={(bill) => {
+                setSelectedBill(bill);
+                goToTab('preview');
+              }}
+              currencySymbol={settings.currency_symbol || 'Rs.'}
+              settings={settings}
+            />
+          )}
 
-        {currentTab === 'create' && (
-          <SmartBillForm
-            onBillGenerated={handleBillGenerated}
-            currencySymbol={settings.currency_symbol || 'Rs.'}
-            defaultTaxRate={settings.default_tax_rate ?? 0}
-            draftBill={draftBill}
-            onDraftConsumed={() => setDraftBill(null)}
-          />
-        )}
+          {currentTab === 'create' && (
+            <SmartBillForm
+              onBillGenerated={handleBillGenerated}
+              currencySymbol={settings.currency_symbol || 'Rs.'}
+              defaultTaxRate={settings.default_tax_rate ?? 0}
+              draftBill={draftBill}
+              onDraftConsumed={() => setDraftBill(null)}
+            />
+          )}
 
-        {currentTab === 'preview' && (
-          <InvoicePreview
-            bill={selectedBill}
-            onBack={() => setCurrentTab('database')}
-            onDuplicate={handleDuplicateBill}
-            onBillUpdated={setSelectedBill}
-            currencySymbol={settings.currency_symbol || 'Rs.'}
-            urduLabels={Boolean(settings.urdu_labels)}
-          />
-        )}
+          {currentTab === 'preview' && (
+            <InvoicePreview
+              bill={selectedBill}
+              onBack={() => goToTab('database')}
+              onDuplicate={handleDuplicateBill}
+              onBillUpdated={setSelectedBill}
+              currencySymbol={settings.currency_symbol || 'Rs.'}
+              urduLabels={Boolean(settings.urdu_labels)}
+            />
+          )}
 
-        {currentTab === 'database' && (
-          <BillsDatabase
-            onViewBill={handleViewBill}
-            onDuplicateBill={handleDuplicateBill}
-            onNavigate={(tab) => setCurrentTab(tab)}
-            currencySymbol={settings.currency_symbol || 'Rs.'}
-            urduLabels={Boolean(settings.urdu_labels)}
-            settings={settings}
-          />
-        )}
+          {currentTab === 'database' && (
+            <BillsDatabase
+              onViewBill={handleViewBill}
+              onDuplicateBill={handleDuplicateBill}
+              onNavigate={(tab) => goToTab(tab)}
+              currencySymbol={settings.currency_symbol || 'Rs.'}
+              urduLabels={Boolean(settings.urdu_labels)}
+              settings={settings}
+            />
+          )}
 
-        {currentTab === 'catalog' && <ProductCatalog currencySymbol={settings.currency_symbol || 'Rs.'} />}
+          {currentTab === 'customers' && <CustomerManager currencySymbol={settings.currency_symbol || 'Rs.'} />}
 
-        {currentTab === 'customers' && <CustomerManager currencySymbol={settings.currency_symbol || 'Rs.'} />}
+          {currentTab === 'cashflow' && (
+            <CashflowPanel currencySymbol={settings.currency_symbol || 'Rs.'} onNavigate={(tab) => goToTab(tab)} />
+          )}
 
-        {currentTab === 'cashflow' && (
-          <CashflowPanel currencySymbol={settings.currency_symbol || 'Rs.'} onNavigate={(tab) => setCurrentTab(tab)} />
-        )}
+          {currentTab === 'aging' && (
+            <AgingReport
+              currencySymbol={settings.currency_symbol || 'Rs.'}
+              settings={settings}
+              onOpenBill={async (row) => {
+                try {
+                  const res = await apiFetch(`/api/bills/${row.id}`);
+                  const bill = await res.json();
+                  if (res.ok && bill?.id) {
+                    setSelectedBill(bill);
+                    goToTab('preview');
+                    return;
+                  }
+                } catch (_) {
+                  /* fall through */
+                }
+                goToTab('database');
+              }}
+            />
+          )}
 
-        {currentTab === 'settings' && (
-          <SettingsManager
-            onSettingsUpdated={fetchSettings}
-            focusBackup={focusBackup}
-            onFocusHandled={() => setFocusBackup(false)}
-          />
-        )}
+          {currentTab === 'settings' && (
+            <SettingsManager
+              onSettingsUpdated={fetchSettings}
+              focusBackup={focusBackup}
+              onFocusHandled={() => setFocusBackup(false)}
+            />
+          )}
+        </div>
       </main>
 
       <MoreMenu
         open={moreOpen}
         onClose={() => setMoreOpen(false)}
-        onNavigate={setCurrentTab}
+        onNavigate={goToTab}
         onOpenBackup={openBackupSettings}
         activeTab={currentTab}
       />
@@ -489,39 +542,58 @@ export default function App() {
         onRestore={openBackupSettings}
       />
 
-      <nav className="mobile-bottom-nav no-print">
-        <button
-          className={`mobile-nav-item ${currentTab === 'dashboard' ? 'active' : ''}`}
-          onClick={() => setCurrentTab('dashboard')}
-        >
-          <LayoutDashboard size={22} strokeWidth={2.25} />
-          <span>Home</span>
-        </button>
-        <button
-          className={`mobile-nav-item ${currentTab === 'create' ? 'active' : ''}`}
-          onClick={() => setCurrentTab('create')}
-        >
-          <PlusCircle size={22} strokeWidth={2.25} />
-          <span>New</span>
-        </button>
-        <button
-          className={`mobile-nav-item ${currentTab === 'database' ? 'active' : ''}`}
-          onClick={() => setCurrentTab('database')}
-        >
-          <Database size={22} strokeWidth={2.25} />
-          <span>Bills</span>
-        </button>
-        <button
-          className={`mobile-nav-item ${currentTab === 'customers' ? 'active' : ''}`}
-          onClick={() => setCurrentTab('customers')}
-        >
-          <Users size={22} strokeWidth={2.25} />
-          <span>Clients</span>
-        </button>
-        <button className={`mobile-nav-item ${moreActive ? 'active' : ''}`} onClick={() => setMoreOpen(true)}>
-          <MoreHorizontal size={22} strokeWidth={2.25} />
-          <span>More</span>
-        </button>
+      <nav className="mobile-bottom-nav no-print" aria-label="Main">
+        <div className="mobile-nav-dock">
+          <div className="mobile-nav-side">
+            <button
+              type="button"
+              className={`mobile-nav-item ${currentTab === 'dashboard' ? 'active' : ''}`}
+              onClick={() => goToTab('dashboard')}
+            >
+              <LayoutDashboard size={22} strokeWidth={currentTab === 'dashboard' ? 2.5 : 2} />
+              <span>Home</span>
+            </button>
+            <button
+              type="button"
+              className={`mobile-nav-item ${currentTab === 'database' ? 'active' : ''}`}
+              onClick={() => goToTab('database')}
+            >
+              <Database size={22} strokeWidth={currentTab === 'database' ? 2.5 : 2} />
+              <span>Bills</span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className={`mobile-nav-fab ${currentTab === 'create' ? 'active' : ''}`}
+            onClick={() => goToTab('create')}
+            aria-label="Create bill"
+          >
+            <span className="mobile-nav-fab-disc">
+              <Plus size={26} strokeWidth={2.75} />
+            </span>
+            <span className="mobile-nav-fab-label">New</span>
+          </button>
+
+          <div className="mobile-nav-side mobile-nav-side--end">
+            <button
+              type="button"
+              className={`mobile-nav-item ${currentTab === 'customers' ? 'active' : ''}`}
+              onClick={() => goToTab('customers')}
+            >
+              <Users size={22} strokeWidth={currentTab === 'customers' ? 2.5 : 2} />
+              <span>Clients</span>
+            </button>
+            <button
+              type="button"
+              className={`mobile-nav-item ${moreActive ? 'active' : ''}`}
+              onClick={() => setMoreOpen(true)}
+            >
+              <MoreHorizontal size={22} strokeWidth={moreActive ? 2.5 : 2} />
+              <span>More</span>
+            </button>
+          </div>
+        </div>
       </nav>
     </div>
   );
