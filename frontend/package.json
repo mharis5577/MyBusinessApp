@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "build:apk": "vite build --mode apk",
     "cap:sync": "npx cap sync android",
-    "cap:open": "npx cap open android"
+    "cap:open": "npx cap open android",
+    "icons:android": "node scripts/generate-android-icons.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",
@@ -35,6 +36,7 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "sharp": "^0.35.3",
     "vite": "^5.2.11"
   }
 }
