@@ -42,6 +42,8 @@ const CustomerManager = lazy(() => import('./components/CustomerManager'));
 const SettingsManager = lazy(() => import('./components/SettingsManager'));
 const CashflowPanel = lazy(() => import('./components/CashflowPanel'));
 const AgingReport = lazy(() => import('./components/AgingReport'));
+const DailyClosePanel = lazy(() => import('./components/DailyClosePanel'));
+const NotepadPanel = lazy(() => import('./components/NotepadPanel'));
 
 const THEME_KEY = 'elite-chocolate-theme';
 const PIN_UNLOCK_KEY = 'elite-chocolate-pin-ok';
@@ -54,6 +56,8 @@ const TAB_ORDER = [
   'customers',
   'cashflow',
   'aging',
+  'closing',
+  'notepad',
   'settings',
   'preview',
 ];
@@ -345,7 +349,12 @@ export default function App() {
     setDeferredInstall(null);
   };
 
-  const moreActive = currentTab === 'cashflow' || currentTab === 'aging' || currentTab === 'settings';
+  const moreActive =
+    currentTab === 'cashflow' ||
+    currentTab === 'aging' ||
+    currentTab === 'closing' ||
+    currentTab === 'notepad' ||
+    currentTab === 'settings';
 
   if (showSplash) {
     return <SplashScreen onDone={finishSplash} minMs={700} />;
@@ -569,12 +578,26 @@ export default function App() {
               )}
 
               {currentTab === 'customers' && (
-                <CustomerManager currencySymbol={settings.currency_symbol || 'Rs.'} settings={settings} />
+                <CustomerManager
+                  currencySymbol={settings.currency_symbol || 'Rs.'}
+                  settings={settings}
+                  onViewBill={handleViewBill}
+                />
               )}
 
               {currentTab === 'cashflow' && (
-                <CashflowPanel currencySymbol={settings.currency_symbol || 'Rs.'} onNavigate={(tab) => goToTab(tab)} />
+                <CashflowPanel
+                  currencySymbol={settings.currency_symbol || 'Rs.'}
+                  onNavigate={(tab) => goToTab(tab)}
+                  onViewBill={handleViewBill}
+                />
               )}
+
+              {currentTab === 'closing' && (
+                <DailyClosePanel currencySymbol={settings.currency_symbol || 'Rs.'} />
+              )}
+
+              {currentTab === 'notepad' && <NotepadPanel />}
 
               {currentTab === 'aging' && (
                 <AgingReport

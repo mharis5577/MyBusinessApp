@@ -4,4 +4,9 @@
     <string name="title_activity_main">CocoaDesk</string>
     <string name="package_name">pk.elitechocolate.pos.test</string>
     <string name="custom_url_scheme">pk.elitechocolate.pos.test</string>
+    <string name="home_widget_name">CocoaDesk</string>
+    <string name="home_widget_description">Today’s profit and overdue from CocoaDesk</string>
+    <string name="home_widget_profit_label">Profit today</string>
+    <string name="home_widget_overdue_label">Overdue</string>
+    <string name="home_widget_placeholder">Rs. 0</string>
 </resources>

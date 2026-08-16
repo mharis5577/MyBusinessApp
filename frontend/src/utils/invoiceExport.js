@@ -50,64 +50,109 @@ function parseAlpha(raw) {
   return clamp01(parseFloat(s));
 }
 
+function toCamelCssName(name) {
+  const camel = String(name).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  if (camel.startsWith('Webkit')) return ['webkit' + camel.slice(6), camel];
+  if (camel.startsWith('Moz')) return ['moz' + camel.slice(3), camel];
+  if (camel.startsWith('Ms')) return ['ms' + camel.slice(2), camel];
+  return [camel];
+}
+
 function wrapComputedStyle(style) {
   if (!style || style.__html2canvasColorPatched) return style;
-  return new Proxy(style, {
-    get(target, prop) {
-      if (prop === '__html2canvasColorPatched') return true;
 
-      if (prop === 'getPropertyValue') {
-        return (name) => {
-          try {
-            return normalizeCssColor(CSSStyleDeclaration.prototype.getPropertyValue.call(target, name));
-          } catch {
-            return '';
-          }
-        };
+  const read = (key) => {
+    try {
+      if (key === 'cssText' || key === 'parentRule' || key === 'length') {
+        return style[key];
       }
-
-      if (prop === 'getPropertyPriority') {
-        return (name) => {
-          try {
-            return CSSStyleDeclaration.prototype.getPropertyPriority.call(target, name);
-          } catch {
-            return '';
-          }
-        };
+      if (typeof key === 'string' && key.includes('-')) {
+        return normalizeCssColor(style.getPropertyValue(key));
       }
+      const val = style[key];
+      return typeof val === 'string' ? normalizeCssColor(val) : val;
+    } catch {
+      return '';
+    }
+  };
 
-      if (prop === 'item') {
-        return (index) => {
-          try {
-            return CSSStyleDeclaration.prototype.item.call(target, index);
-          } catch {
-            return '';
-          }
-        };
-      }
-
-      // CRITICAL: use `target` as this — Proxy as receiver causes Illegal invocation
-      // on native CSSStyleDeclaration getters in Chrome.
-      let val;
+  const wrapped = {
+    __html2canvasColorPatched: true,
+    getPropertyValue(name) {
       try {
-        val = Reflect.get(target, prop, target);
+        return normalizeCssColor(style.getPropertyValue(name));
       } catch {
-        return prop === 'length' ? 0 : '';
+        return '';
       }
+    },
+    getPropertyPriority(name) {
+      try {
+        return style.getPropertyPriority(name);
+      } catch {
+        return '';
+      }
+    },
+    item(index) {
+      try {
+        return style.item(index);
+      } catch {
+        return '';
+      }
+    },
+  };
 
-      if (typeof val === 'string') return normalizeCssColor(val);
-      if (typeof val === 'function') {
-        return (...args) => {
-          try {
-            return val.apply(target, args);
-          } catch {
-            return undefined;
-          }
-        };
-      }
-      return val;
+  Object.defineProperty(wrapped, 'length', {
+    enumerable: true,
+    get() {
+      return style.length;
     },
   });
+
+  const keys = new Set(['cssFloat', 'cssText', 'parentRule', 'float']);
+  for (let i = 0; i < style.length; i += 1) {
+    const kebab = style.item(i);
+    wrapped[i] = kebab;
+    if (!kebab) continue;
+    keys.add(kebab);
+    toCamelCssName(kebab).forEach((n) => keys.add(n));
+  }
+
+  let proto = style;
+  const skip = new Set([
+    'getPropertyValue',
+    'getPropertyPriority',
+    'item',
+    'setProperty',
+    'removeProperty',
+    'constructor',
+    'length',
+    '__html2canvasColorPatched',
+  ]);
+  while (proto && proto !== Object.prototype) {
+    Object.getOwnPropertyNames(proto).forEach((name) => {
+      if (skip.has(name) || name.startsWith('__')) return;
+      try {
+        if (typeof style[name] === 'function') return;
+      } catch {
+        return;
+      }
+      keys.add(name);
+    });
+    proto = Object.getPrototypeOf(proto);
+  }
+
+  keys.forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(wrapped, key)) return;
+    Object.defineProperty(wrapped, key, {
+      enumerable: true,
+      configurable: true,
+      get() {
+        return read(key);
+      },
+    });
+  });
+
+  return wrapped;
 }
 
 function patchComputedStyleColors(targetWindow) {
@@ -159,15 +204,29 @@ function downscaleCanvas(canvas, maxWidth) {
   return next;
 }
 
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/** Decode a data URL to the same bytes as toDataURL produced (no re-encode, no fetch). */
 function dataUrlToBlob(dataUrl) {
-  const parts = String(dataUrl || '').split(',');
-  const header = parts[0] || '';
-  const data = parts[1] || '';
+  const text = String(dataUrl || '');
+  const comma = text.indexOf(',');
+  const header = comma >= 0 ? text.slice(0, comma) : '';
+  const payload = (comma >= 0 ? text.slice(comma + 1) : text).replace(/\s/g, '');
   const mime = (header.match(/data:([^;]+)/) || [])[1] || 'image/jpeg';
-  const bin = atob(data);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
-  return new Blob([bytes], { type: mime });
+  const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
+  const out = new Uint8Array((padded.length * 3) >> 2);
+  let o = 0;
+  for (let i = 0; i < padded.length; i += 4) {
+    const n =
+      (Math.max(0, B64.indexOf(padded[i])) << 18) |
+      (Math.max(0, B64.indexOf(padded[i + 1])) << 12) |
+      (Math.max(0, B64.indexOf(padded[i + 2])) << 6) |
+      Math.max(0, B64.indexOf(padded[i + 3]));
+    out[o++] = (n >> 16) & 255;
+    if (padded[i + 2] !== '=') out[o++] = (n >> 8) & 255;
+    if (padded[i + 3] !== '=') out[o++] = n & 255;
+  }
+  return new Blob([out.subarray(0, o)], { type: mime });
 }
 
 /** Copy onto a same-document canvas so toBlob never hits a cross-realm Illegal invocation. */
@@ -187,29 +246,29 @@ function canvasToJpegBlob(canvas, quality = 0.88) {
   const local = materializeCanvas(canvas);
   return new Promise((resolve, reject) => {
     const q = Math.min(1, Math.max(0.4, Number(quality) || 0.88));
+    const fromDataUrl = () => {
+      try {
+        resolve(dataUrlToBlob(local.toDataURL('image/jpeg', q)));
+      } catch (err) {
+        reject(err);
+      }
+    };
     try {
       if (typeof local.toBlob === 'function') {
         local.toBlob(
           (b) => {
-            if (b) {
-              resolve(b);
-              return;
-            }
-            try {
-              resolve(dataUrlToBlob(local.toDataURL('image/jpeg', q)));
-            } catch (err) {
-              reject(err);
-            }
+            if (b) resolve(b);
+            else fromDataUrl();
           },
           'image/jpeg',
           q
         );
         return;
       }
-      resolve(dataUrlToBlob(local.toDataURL('image/jpeg', q)));
+      fromDataUrl();
     } catch (err) {
       try {
-        resolve(dataUrlToBlob(local.toDataURL('image/jpeg', q)));
+        fromDataUrl();
       } catch (err2) {
         reject(err2 || err || new Error('Could not create image'));
       }

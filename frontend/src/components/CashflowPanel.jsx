@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowDownUp, RefreshCw, TrendingUp } from 'lucide-react';
+import { ArrowDownUp, ChevronRight, RefreshCw, TrendingUp } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
@@ -10,6 +10,7 @@ export default function CashflowPanel({
   currencySymbol = 'Rs.',
   compact = false,
   onNavigate,
+  onViewBill,
   embedded = false,
   helpGiven,
   helpOutstanding: helpOutstandingProp,
@@ -35,6 +36,12 @@ export default function CashflowPanel({
   useEffect(() => {
     load();
   }, [compact]);
+
+  const openFlowBill = (row) => {
+    if (!row?.id) return;
+    if (onViewBill) onViewBill(row);
+    else if (onNavigate) onNavigate('database');
+  };
 
   if (loading && !data) {
     return (
@@ -131,24 +138,31 @@ export default function CashflowPanel({
           ) : (
             <div className="mobile-card-list">
               {money_flow.slice(0, 40).map((row) => (
-                <div key={`${row.id}-${row.date}`} className="mobile-card" style={{ padding: '0.7rem 0' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', fontSize: '0.8rem' }}>
-                    <span>
+                <button
+                  key={`${row.id}-${row.date}`}
+                  type="button"
+                  className="cashflow-flow-row"
+                  onClick={() => openFlowBill(row)}
+                >
+                  <span className="cashflow-flow-copy">
+                    <span className="cashflow-flow-top">
                       <span className={`type-badge ${billTypeBadgeClass(row)}`}>
                         {billTypeShortLabel(row)}
-                      </span>{' '}
-                      <span className="invoice-mono">{row.invoice_number}</span> · {row.date}
+                      </span>
+                      <span className="invoice-mono">{row.invoice_number}</span>
+                      <span className="cashflow-flow-date">{row.date}</span>
                     </span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 750 }}>
-                      {isHelpBill(row)
-                        ? `−${formatCurrency(currencySymbol, row.expenditure || 0)}`
-                        : row.selling > 0
-                          ? `+${formatCurrency(currencySymbol, row.selling)}`
-                          : `−${formatCurrency(currencySymbol, row.buying)}`}
-                    </span>
-                  </div>
-                  <div style={{ color: 'var(--text-secondary)', marginTop: 2, fontSize: '0.75rem' }}>{row.comment}</div>
-                </div>
+                    <span className="cashflow-flow-comment">{row.comment}</span>
+                  </span>
+                  <span className="cashflow-flow-amt">
+                    {isHelpBill(row)
+                      ? `−${formatCurrency(currencySymbol, row.expenditure || 0)}`
+                      : row.selling > 0
+                        ? `+${formatCurrency(currencySymbol, row.selling)}`
+                        : `−${formatCurrency(currencySymbol, row.buying)}`}
+                  </span>
+                  <ChevronRight className="cashflow-flow-chevron" size={16} aria-hidden />
+                </button>
               ))}
             </div>
           )}

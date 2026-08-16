@@ -16,6 +16,7 @@ import {
   HeartHandshake,
   Banknote,
   MessageCircle,
+  Calculator,
 } from 'lucide-react';
 import { formatCurrency, formatBillDateTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
@@ -30,6 +31,7 @@ import EmptyState from './EmptyState';
 import StatusBadge from './StatusBadge';
 import QuickPaySheet from './QuickPaySheet';
 import { getLastAutoBackupAt } from '../utils/backupManager';
+import { publishHomeWidgetStats } from '../utils/homeWidget';
 import { useToast } from '../toast/ToastContext';
 import { billBalance } from '../utils/billPayments';
 import {
@@ -40,6 +42,7 @@ import {
 
 const CashflowPanel = lazy(() => import('./CashflowPanel'));
 const OverduePanel = lazy(() => import('./OverduePanel'));
+const DailyClosePanel = lazy(() => import('./DailyClosePanel'));
 
 function StatCard({ label, value, hint, icon: Icon }) {
   return (
@@ -119,6 +122,11 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
         return String(a.due_date || '').localeCompare(String(b.due_date || ''));
       });
       setHelpBills(rows);
+      publishHomeWidgetStats({
+        profitToday: Number(data?.profit_today) || 0,
+        overdue: Number(data?.total_overdue) || 0,
+        currency: currencySymbol,
+      });
     } catch (err) {
       console.error('Failed to fetch stats:', err);
     } finally {
@@ -330,19 +338,19 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
               value={money(total_revenue)}
               hint={
                 <>
-                  <TrendingUp size={12} /> Paid revenue
+                  <TrendingUp size={12} /> Customer sales paid
                 </>
               }
               icon={DollarSign}
             />
-            <StatCard label="Due" value={money(total_pending)} hint="Awaiting payment" icon={Clock} />
+            <StatCard label="Due" value={money(total_pending)} hint="Sales not yet late" icon={Clock} />
             <StatCard
               label="Overdue"
               value={money(total_overdue)}
-              hint="Needs follow-up"
+              hint="Sales past due date"
               icon={AlertTriangle}
             />
-            <StatCard label="Bills" value={String(total_bills)} hint="In database" icon={FileText} />
+            <StatCard label="Bills" value={String(total_bills)} hint="Active (not cancelled)" icon={FileText} />
             <StatCard
               label="Help given"
               value={money(help_given)}
@@ -500,6 +508,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
             currencySymbol={currencySymbol}
             compact
             onNavigate={onNavigate}
+            onViewBill={onViewBill}
             helpGiven={help_given}
             helpOutstanding={help_outstanding}
           />
@@ -572,6 +581,19 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
               </div>
             )}
           </div>
+        </DashDropdown>
+
+        <DashDropdown
+          id="closing"
+          openId={openSection}
+          onOpenChange={setOpenSection}
+          title="Day close"
+          hint="Cash vs collected today"
+          icon={Calculator}
+        >
+          <Suspense fallback={<p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading…</p>}>
+            <DailyClosePanel embedded currencySymbol={currencySymbol} />
+          </Suspense>
         </DashDropdown>
 
         <DashDropdown

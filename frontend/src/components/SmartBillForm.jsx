@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History, ChevronDown, ChevronUp, FlaskConical, ShoppingCart, Package, HeartHandshake } from 'lucide-react';
+import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History, ChevronDown, ChevronUp, ShoppingCart, Package, HeartHandshake } from 'lucide-react';
 import { parseNaturalBillText } from '../utils/naturalParser';
 import { pakistanToday, addDaysToDateString, formatCurrency, pakistanNowTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
@@ -534,102 +534,6 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     await fetchNextInvoiceNumber(billType);
   };
 
-  const fillDummyValues = () => {
-    const today = pakistanToday();
-    dateTouchedRef.current = false;
-    setBillDate(today);
-    setDueDate(addDaysToDateString(today, 14));
-    setTaxRate(defaultTaxRate || 0);
-    setDiscountRate(5);
-    setCashTendered('');
-    setSkuQuery('');
-    setShowAdvanced(true);
-    setNaturalText('');
-
-    if (billType === 'supplier') {
-      setSelectedCustomerId(null);
-      setCustomerRates([]);
-      setCustomerName('Al-Madina Trading Co. (Jeddah)');
-      setCustomerEmail('orders@almadina-test.example');
-      setCustomerPhone('+966501234567');
-      setCustomerAddress('Industrial Area, Jeddah, Saudi Arabia');
-      setPaymentMethod('Bank Transfer / Remittance');
-      setNotes('TEST — Purchase remittance / payment advice (dummy data)');
-      setPayeeBankName('Al Rajhi Bank');
-      setPayeeAccountTitle('Al-Madina Trading Co.');
-      setPayeeAccountNumber('SA4420000001234567891234');
-      setPayeePaymentNotes('SWIFT: RJHISARI — dummy test only');
-      setInitialPayment('5000');
-      setItems([
-        { product_id: null, description: 'Belgian Dark Chocolate 70% (carton)', quantity: 20, unit_price: 1850 },
-        { product_id: null, description: 'Assorted Truffle Mix (kg)', quantity: 15, unit_price: 3200 },
-        { product_id: null, description: 'Gift Box Packaging (set of 50)', quantity: 4, unit_price: 950 },
-      ]);
-    } else if (billType === 'help') {
-      setSelectedCustomerId(null);
-      setCustomerRates([]);
-      setCustomerName('Imran Ali');
-      setCustomerEmail('');
-      setCustomerPhone('+923001112233');
-      setCustomerAddress('Street 4, Attock');
-      setPaymentMethod('Cash');
-      setNotes('Help for family expenses — return after the agreed period');
-      setHelpPeriodDays(30);
-      setDueDate(addDaysToDateString(today, 30));
-      setInitialPayment('');
-      setItems([{ product_id: null, description: 'Help / loan given', quantity: 1, unit_price: 10000 }]);
-    } else {
-      const existing = customers.find((c) => String(c.name || '').trim());
-      if (existing) {
-        setSelectedCustomerId(existing.id);
-        setCustomerName(existing.name || 'Ahmed Khan (Test)');
-        setCustomerEmail(existing.email || 'ahmed.test@example.com');
-        setCustomerPhone(existing.phone || '+923001234567');
-        setCustomerAddress(existing.address || 'Street 12, F-7, Islamabad');
-        if (existing.id) {
-          apiFetch(`/api/customers/${existing.id}/rates`)
-            .then((res) => res.json())
-            .then((rates) => setCustomerRates(Array.isArray(rates) ? rates : []))
-            .catch(() => setCustomerRates([]));
-        }
-      } else {
-        setSelectedCustomerId(null);
-        setCustomerRates([]);
-        setCustomerName('Ahmed Khan (Test)');
-        setCustomerEmail('ahmed.test@example.com');
-        setCustomerPhone('+923001234567');
-        setCustomerAddress('Street 12, F-7, Islamabad');
-      }
-      setPaymentMethod('Cash');
-      setNotes('TEST — Thank you for your order! (dummy data)');
-      setPayeeBankName('');
-      setPayeeAccountTitle('');
-      setPayeeAccountNumber('');
-      setPayeePaymentNotes('');
-      setInitialPayment('1000');
-
-      if (products.length > 0) {
-        const pick = products.slice(0, Math.min(3, products.length));
-        setItems(
-          pick.map((p, i) => ({
-            product_id: p.id,
-            description: p.name || `Test item ${i + 1}`,
-            quantity: i === 0 ? 2 : 1,
-            unit_price: Number(p.price) || 500,
-          }))
-        );
-      } else {
-        setItems([
-          { product_id: null, description: 'Ferrero Rocher 16pc', quantity: 2, unit_price: 2450 },
-          { product_id: null, description: 'Lindt Dark 100g', quantity: 3, unit_price: 850 },
-          { product_id: null, description: 'Gift Wrap Premium', quantity: 1, unit_price: 200 },
-        ]);
-      }
-    }
-
-    toast.success('Dummy test values filled — review before saving');
-  };
-
   const applySkuLookup = (rawQuery) => {
     const q = String(rawQuery ?? skuQuery).trim().toLowerCase();
     if (!q) return;
@@ -1003,26 +907,15 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
       {/* Main Bill Generator Form */}
       <form onSubmit={handleSubmit} className="glass-panel" style={{ padding: '1.75rem' }}>
         <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
-            <div>
-              <h2 style={{ fontSize: '1.3rem', fontWeight: 800 }}>
-                {billType === 'help' ? 'Help / loan' : 'Auto Bill Generator'}
-              </h2>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                {billType === 'help'
-                  ? 'Give money to a person and set when they should return it'
-                  : 'Fill invoice details & save directly to database'}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={fillDummyValues}
-              title="Fill dummy values for testing"
-              style={{ width: 'auto', whiteSpace: 'nowrap' }}
-            >
-              <FlaskConical size={16} /> Fill test data
-            </button>
+          <div>
+            <h2 style={{ fontSize: '1.3rem', fontWeight: 800 }}>
+              {billType === 'help' ? 'Help / loan' : 'Auto Bill Generator'}
+            </h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              {billType === 'help'
+                ? 'Give money to a person and set when they should return it'
+                : 'Fill invoice details & save directly to database'}
+            </p>
           </div>
 
           <div className="surface-block" style={{ marginTop: '1rem', padding: '0.9rem 1rem', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '0.75rem' }}>

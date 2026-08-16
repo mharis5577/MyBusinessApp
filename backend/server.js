@@ -4,6 +4,8 @@ import db, { dbAll, dbGet, dbRun } from './db.js';
 import { pakistanToday, pakistanYearMonth, pakistanNowTime } from './pakistan.js';
 import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from './utils/paymentMethods.js';
 import { normalizeBillType, invoicePrefixForType, partyTypeForBill, outstandingByPartyName } from './utils/billTypes.js';
+import { saleOverviewTotals } from './utils/dashboardStats.js';
+import { isDemoBill, isDemoCustomer } from './utils/demoData.js';
 
 const app = express();
 const PORT = process.env.PORT || 11000;
@@ -1334,29 +1336,10 @@ app.delete('/api/bills/:id', async (req, res) => {
 // -------------------------------------------------------------
 app.get('/api/stats', async (req, res) => {
   try {
-    const totalRevenueRow = await dbGet(
-      "SELECT SUM(COALESCE(amount_paid, 0)) as total FROM bills WHERE status != 'cancelled' AND COALESCE(bill_type, 'customer') = 'customer'"
-    );
-    const totalPendingRow = await dbGet(
-      `SELECT SUM(CASE
-         WHEN (COALESCE(total_amount, 0) - COALESCE(amount_paid, 0)) > 0
-         THEN (COALESCE(total_amount, 0) - COALESCE(amount_paid, 0))
-         ELSE 0 END) as total
-       FROM bills
-       WHERE status = 'pending' AND COALESCE(bill_type, 'customer') NOT IN ('help', 'loan')`
-    );
-    const totalOverdueRow = await dbGet(
-      `SELECT SUM(CASE
-         WHEN (COALESCE(total_amount, 0) - COALESCE(amount_paid, 0)) > 0
-         THEN (COALESCE(total_amount, 0) - COALESCE(amount_paid, 0))
-         ELSE 0 END) as total
-       FROM bills
-       WHERE status = 'overdue' AND COALESCE(bill_type, 'customer') NOT IN ('help', 'loan')`
-    );
-    const totalCountRow = await dbGet('SELECT COUNT(*) as count FROM bills');
-    const paidCountRow = await dbGet("SELECT COUNT(*) as count FROM bills WHERE status = 'paid'");
-    const pendingCountRow = await dbGet("SELECT COUNT(*) as count FROM bills WHERE status = 'pending'");
-    const overdueCountRow = await dbGet("SELECT COUNT(*) as count FROM bills WHERE status = 'overdue'");
+    const allBills = await dbAll('SELECT * FROM bills');
+    const today = pakistanToday();
+    const overview = saleOverviewTotals(allBills, today);
+    const activeCount = allBills.filter((b) => !isCancelled(b)).length;
 
     const recentBills = await dbAll('SELECT * FROM bills ORDER BY id DESC LIMIT 5');
     recentBills.forEach(enrichBill);
@@ -1368,7 +1351,6 @@ app.get('/api/stats', async (req, res) => {
       [threshold]
     );
 
-    const today = pakistanToday();
     const monthPrefix = pakistanYearMonth(today);
     const sumSaleCost = async (list) => {
       let sales = 0;
@@ -1410,13 +1392,13 @@ app.get('/api/stats', async (req, res) => {
     const help_outstanding = Math.round(Math.max(0, help_given - help_repaid) * 100) / 100;
 
     res.json({
-      total_revenue: totalRevenueRow.total || 0,
-      total_pending: totalPendingRow.total || 0,
-      total_overdue: totalOverdueRow.total || 0,
-      total_bills: totalCountRow.count || 0,
-      paid_bills_count: paidCountRow.count || 0,
-      pending_bills_count: pendingCountRow.count || 0,
-      overdue_bills_count: overdueCountRow.count || 0,
+      total_revenue: overview.total_revenue,
+      total_pending: overview.total_pending,
+      total_overdue: overview.total_overdue,
+      total_bills: activeCount,
+      paid_bills_count: overview.paid_bills_count,
+      pending_bills_count: overview.pending_bills_count,
+      overdue_bills_count: overview.overdue_bills_count,
       recent_bills: recentBills,
       low_stock: lowStock,
       low_stock_threshold: threshold,
@@ -1584,6 +1566,8 @@ app.get('/api/backup', async (req, res) => {
       advances: await dbAll('SELECT * FROM advance_payments'),
       customer_product_rates: await dbAll('SELECT * FROM customer_product_rates'),
       stock_adjustments: await dbAll('SELECT * FROM stock_adjustments'),
+      day_closings: await dbAll('SELECT * FROM day_closings'),
+      memos: await dbAll('SELECT * FROM memos'),
     };
     res.setHeader('Content-Type', 'application/json');
     res.setHeader(
@@ -1704,6 +1688,16 @@ app.post('/api/restore', async (req, res) => {
           'INSERT INTO stock_adjustments (id, product_id, delta, reason, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)',
           [s.id, s.product_id, s.delta || 0, s.reason || 'adjustment', s.notes || '', s.created_at || null]
         );
+      }
+
+      if (Array.isArray(data.memos)) {
+        await dbRun('DELETE FROM memos');
+        for (const m of data.memos) {
+          await dbRun(
+            'INSERT INTO memos (id, title, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+            [m.id, m.title || 'Untitled', m.body || '', m.created_at || null, m.updated_at || m.created_at || null]
+          );
+        }
       }
 
       if (data.settings && data.settings[0]) {
@@ -1903,6 +1897,155 @@ app.post('/api/customers/merge', async (req, res) => {
 
     const updated = await dbGet('SELECT * FROM customers WHERE id = ?', [primaryId]);
     res.json({ success: true, customer: updated, merged: duplicateIds.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// DAY CLOSE + DEMO PURGE
+// -------------------------------------------------------------
+app.get('/api/closings/today', async (req, res) => {
+  try {
+    const today = pakistanToday();
+    const row = await dbGet(
+      `SELECT COALESCE(SUM(p.amount), 0) as total
+       FROM bill_payments p
+       INNER JOIN bills b ON b.id = p.bill_id
+       WHERE p.payment_date = ?
+         AND COALESCE(b.bill_type, 'customer') = 'customer'
+         AND b.status != 'cancelled'`,
+      [today]
+    );
+    const last = await dbGet(
+      'SELECT * FROM day_closings WHERE close_date = ? ORDER BY id DESC LIMIT 1',
+      [today]
+    );
+    res.json({ date: today, collected: Number(row?.total) || 0, last_close: last || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/closings', async (req, res) => {
+  try {
+    const limit = Math.min(60, Math.max(1, Number(req.query.limit) || 14));
+    const rows = await dbAll('SELECT * FROM day_closings ORDER BY close_date DESC, id DESC LIMIT ?', [limit]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/closings', async (req, res) => {
+  try {
+    const today = pakistanToday();
+    const cash_counted = Number(req.body.cash_counted);
+    if (!Number.isFinite(cash_counted) || cash_counted < 0) {
+      return res.status(400).json({ error: 'cash_counted is required' });
+    }
+    const payRow = await dbGet(
+      `SELECT COALESCE(SUM(p.amount), 0) as total
+       FROM bill_payments p
+       INNER JOIN bills b ON b.id = p.bill_id
+       WHERE p.payment_date = ?
+         AND COALESCE(b.bill_type, 'customer') = 'customer'
+         AND b.status != 'cancelled'`,
+      [today]
+    );
+    const collected_sales = Number(payRow?.total) || 0;
+    const gap = Math.round((cash_counted - collected_sales) * 100) / 100;
+    const result = await dbRun(
+      `INSERT INTO day_closings (close_date, cash_counted, collected_sales, gap, notes)
+       VALUES (?, ?, ?, ?, ?)`,
+      [today, cash_counted, collected_sales, gap, req.body.notes || '']
+    );
+    const row = await dbGet('SELECT * FROM day_closings WHERE id = ?', [result.lastID]);
+    res.status(201).json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/maintenance/purge-demo', async (req, res) => {
+  try {
+    const customers = await dbAll('SELECT * FROM customers');
+    const bills = await dbAll('SELECT * FROM bills');
+    const demoCustomers = customers.filter(isDemoCustomer);
+    const demoNames = new Set(demoCustomers.map((c) => String(c.name || '').trim().toLowerCase()));
+    const demoBills = bills.filter(
+      (b) => isDemoBill(b) || demoNames.has(String(b.customer_name || '').trim().toLowerCase())
+    );
+    for (const b of demoBills) {
+      await dbRun('DELETE FROM bill_items WHERE bill_id = ?', [b.id]);
+      await dbRun('DELETE FROM bill_payments WHERE bill_id = ?', [b.id]);
+      await dbRun('DELETE FROM bills WHERE id = ?', [b.id]);
+    }
+    for (const c of demoCustomers) {
+      await dbRun('DELETE FROM customer_product_rates WHERE customer_id = ?', [c.id]);
+      await dbRun('DELETE FROM customers WHERE id = ?', [c.id]);
+    }
+    res.json({
+      success: true,
+      removed_bills: demoBills.length,
+      removed_customers: demoCustomers.length,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// NOTEPAD
+// -------------------------------------------------------------
+app.get('/api/memos', async (req, res) => {
+  try {
+    const rows = await dbAll('SELECT * FROM memos ORDER BY updated_at DESC, id DESC');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/memos', async (req, res) => {
+  try {
+    const title = String(req.body.title || '').trim();
+    const body = String(req.body.body || '');
+    if (!title && !body.trim()) return res.status(400).json({ error: 'Write a title or note' });
+    const result = await dbRun(
+      'INSERT INTO memos (title, body) VALUES (?, ?)',
+      [title || 'Untitled', body]
+    );
+    const row = await dbGet('SELECT * FROM memos WHERE id = ?', [result.lastID]);
+    res.status(201).json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/memos/:id', async (req, res) => {
+  try {
+    const existing = await dbGet('SELECT * FROM memos WHERE id = ?', [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Note not found' });
+    const title = String(req.body.title ?? existing.title ?? '').trim() || 'Untitled';
+    const body = req.body.body != null ? String(req.body.body) : String(existing.body || '');
+    await dbRun(
+      `UPDATE memos SET title = ?, body = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [title, body, req.params.id]
+    );
+    const row = await dbGet('SELECT * FROM memos WHERE id = ?', [req.params.id]);
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/memos/:id', async (req, res) => {
+  try {
+    const existing = await dbGet('SELECT * FROM memos WHERE id = ?', [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Note not found' });
+    await dbRun('DELETE FROM memos WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

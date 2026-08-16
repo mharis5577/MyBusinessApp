@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Users, Plus, Trash2, Mail, Phone, Tag, Check, PackagePlus, BookOpen, GitMerge, MessageCircle, Bell, ChevronDown, HeartHandshake } from 'lucide-react';
+import { Users, Plus, Trash2, Mail, Phone, Tag, Check, PackagePlus, BookOpen, GitMerge, MessageCircle, Bell, ChevronDown, ChevronRight, HeartHandshake } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { normalizePartyName } from '../utils/aging';
 import {
-  buildPaymentReminderText,
+  buildClientStatementText,
+} from '../utils/clientStatement';
+import {
   openWhatsAppReminder,
   normalizeWhatsAppPhone,
 } from '../utils/paymentReminder';
@@ -20,7 +22,7 @@ import AppSelect from './AppSelect';
 import PayeeBankSelect from './PayeeBankSelect';
 import { getPaymentMethods } from '../utils/paymentMethods';
 
-export default function CustomerManager({ currencySymbol = 'Rs.', settings = {} }) {
+export default function CustomerManager({ currencySymbol = 'Rs.', settings = {}, onViewBill }) {
   const toast = useToast();
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
@@ -149,16 +151,12 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {} 
           Number(b.balance_due ?? Math.max(0, (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0))) > 0
       );
       if (!unpaid.length) {
-        toast.info('No unpaid bills for this client');
+        toast.info('Nothing outstanding for this client');
         return;
       }
-      const bill = unpaid[0];
-      const text = buildPaymentReminderText({
-        bill: {
-          ...bill,
-          customer_phone: c.phone,
-          balance_due: Number(bill.balance_due ?? Math.max(0, (Number(bill.total_amount) || 0) - (Number(bill.amount_paid) || 0))),
-        },
+      const text = buildClientStatementText({
+        customer: c,
+        bills: unpaid,
         settings: shopSettings,
         currencySymbol,
         urdu: Boolean(shopSettings.urdu_labels),
@@ -520,70 +518,66 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {} 
                 return (
                   <div
                     key={c.id}
+                    className={`client-dir-card${isSelected ? ' is-selected' : ''}`}
                     onClick={() => handleSelectCustomer(c)}
-                    style={{
-                      background: isSelected ? 'var(--surface-muted)' : 'var(--bg-card)',
-                      borderColor: isSelected ? 'var(--accent-teal)' : 'var(--border-color)',
-                      padding: '0.9rem',
-                      borderRadius: 'var(--radius-sm)',
-                      border: '1px solid',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                    }}
                   >
-                    <div>
-                      <h4 style={{ fontWeight: 800, fontSize: '0.95rem', color: isSelected ? 'var(--accent-teal)' : 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <div className="client-dir-main">
+                      <h4>
                         {c.name}
                         <span className={`type-badge ${pt}`}>{pt === 'supplier' ? 'Supplier' : 'Customer'}</span>
                       </h4>
-                      {c.phone && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}><Phone size={12} /> {c.phone}</div>}
-                      {c.email && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}><Mail size={12} /> {c.email}</div>}
+                      {c.phone ? (
+                        <div className="client-dir-meta">
+                          <Phone size={12} /> {c.phone}
+                        </div>
+                      ) : null}
+                      {c.email ? (
+                        <div className="client-dir-meta">
+                          <Mail size={12} /> {c.email}
+                        </div>
+                      ) : null}
                       {(Number(c.sales_outstanding) > 0 || Number(c.help_outstanding) > 0 || Number(c.buying_outstanding) > 0) && (
                         <div className="client-out-line">
                           {Number(c.sales_outstanding) > 0 ? (
-                            <span>Sales due {formatCurrency(currencySymbol, c.sales_outstanding)}</span>
+                            <span>Sales due {formatCurrency(currencySymbol, c.sales_outstanding, { maximumFractionDigits: 0 })}</span>
                           ) : null}
                           {Number(c.help_outstanding) > 0 ? (
                             <span className="is-help">
-                              <HeartHandshake size={12} /> Help out {formatCurrency(currencySymbol, c.help_outstanding)}
+                              <HeartHandshake size={12} /> Help out {formatCurrency(currencySymbol, c.help_outstanding, { maximumFractionDigits: 0 })}
                             </span>
                           ) : null}
                           {Number(c.buying_outstanding) > 0 ? (
-                            <span>Buying due {formatCurrency(currencySymbol, c.buying_outstanding)}</span>
+                            <span>Buying due {formatCurrency(currencySymbol, c.buying_outstanding, { maximumFractionDigits: 0 })}</span>
                           ) : null}
                         </div>
                       )}
                       {c.payee_account_number && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                        <div className="client-dir-meta is-muted">
                           Pay To: {c.payee_bank_name || 'Bank'} · {c.payee_account_number}
                         </div>
                       )}
                     </div>
 
-                    <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <div className="client-dir-actions" onClick={(e) => e.stopPropagation()}>
                       {c.phone && (
                         <>
-                          <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.5rem' }} title="Call" onClick={(e) => openCall(c, e)}>
+                          <button type="button" className="client-dir-icon-btn" title="Call" onClick={(e) => openCall(c, e)}>
                             <Phone size={14} />
                           </button>
-                          <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.5rem', color: '#25D366' }} title="WhatsApp" onClick={(e) => openWhatsApp(c, e)}>
+                          <button type="button" className="client-dir-icon-btn is-wa" title="WhatsApp" onClick={(e) => openWhatsApp(c, e)}>
                             <MessageCircle size={14} />
                           </button>
                           {pt === 'customer' && (
-                            <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.5rem' }} title="Remind unpaid" onClick={(e) => remindUnpaid(c, e)}>
+                            <button type="button" className="client-dir-icon-btn" title="WhatsApp statement" onClick={(e) => remindUnpaid(c, e)}>
                               <Bell size={14} />
                             </button>
                           )}
                         </>
                       )}
-                      <span className="badge" style={{ background: isSelected ? 'var(--ink)' : 'var(--surface-muted)', color: isSelected ? '#f4f2eb' : 'var(--text-secondary)' }}>
-                        {isSelected ? 'Selected' : 'Rates'}
-                      </span>
                       <button
-                        className="btn-danger"
+                        type="button"
+                        className="client-dir-icon-btn is-danger"
+                        title="Delete"
                         onClick={(e) => {
                           e.stopPropagation();
                           askDeleteCustomer(c);
@@ -719,7 +713,12 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {} 
                     const due = Math.max(0, Number(b.balance_due ?? (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0)));
                     const help = isHelpBill(b);
                     return (
-                      <div key={b.id} className="client-ledger-row">
+                      <button
+                        key={b.id}
+                        type="button"
+                        className="client-ledger-row"
+                        onClick={() => (onViewBill ? onViewBill(b) : null)}
+                      >
                         <span>
                           <span className={`type-badge ${billTypeBadgeClass(b)}`}>{billTypeShortLabel(b)}</span>
                           {' '}
@@ -731,8 +730,9 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {} 
                           {due > 0
                             ? formatCurrency(currencySymbol, due)
                             : formatCurrency(currencySymbol, b.total_amount)}
+                          <ChevronRight size={14} aria-hidden />
                         </span>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>

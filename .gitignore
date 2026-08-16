@@ -17,6 +17,8 @@ frontend/android/**/build/
 *.ap_
 *.keystore
 *.jks
+!frontend/android/keystore/
+!frontend/android/keystore/elite-release.jks
 
 # Env / OS
 .env

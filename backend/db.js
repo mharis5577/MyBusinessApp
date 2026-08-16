@@ -256,6 +256,28 @@ function initTables() {
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
       )
     `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS day_closings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        close_date TEXT NOT NULL,
+        cash_counted REAL NOT NULL DEFAULT 0,
+        collected_sales REAL NOT NULL DEFAULT 0,
+        gap REAL NOT NULL DEFAULT 0,
+        notes TEXT DEFAULT '',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS memos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT DEFAULT '',
+        body TEXT DEFAULT '',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
   });
 }
 

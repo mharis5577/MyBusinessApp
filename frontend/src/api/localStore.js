@@ -7,10 +7,12 @@ import { pakistanToday, pakistanYearMonth, pakistanNowTime } from '../utils/paki
 import { allItemsReturned, isCancelled, recalcBillTotals, remainingQty } from '../utils/billAdjust';
 import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from '../utils/paymentMethods';
 import { normalizeBillType, invoicePrefixForType, partyTypeForBill, outstandingByPartyName } from '../utils/billTypes';
+import { saleOverviewTotals } from '../utils/dashboardStats';
 import { deletePaymentProofFile } from '../utils/paymentProof';
+import { isDemoBill, isDemoCustomer } from '../utils/demoData';
 
 const DB_NAME = 'elite-chocolate-pos';
-const DB_VERSION = 3;
+const DB_VERSION = 5;
 
 function normalizePartyType(value) {
   return value === 'supplier' ? 'supplier' : 'customer';
@@ -104,6 +106,8 @@ async function getDb() {
         'advances',
         'rates',
         'stock_adjustments',
+        'day_closings',
+        'memos',
       ];
       for (const name of stores) {
         if (!db.objectStoreNames.contains(name)) {
@@ -277,6 +281,20 @@ async function restoreStockForQtys(db, bill, items, qtyByItemId, reason) {
       created_at: new Date().toISOString(),
     });
   }
+}
+
+async function collectedSalesOnDate(db, dateStr) {
+  const bills = await db.getAll('bills');
+  const saleIds = new Set(
+    bills
+      .filter((b) => normalizeBillType(b.bill_type) === 'customer' && !isCancelled(b))
+      .map((b) => Number(b.id))
+  );
+  const payments = await db.getAll('bill_payments');
+  const total = payments
+    .filter((p) => String(p.payment_date || '') === String(dateStr) && saleIds.has(Number(p.bill_id)))
+    .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  return Math.round(total * 100) / 100;
 }
 
 async function refreshBillPaidStatus(db, billId) {
@@ -1236,22 +1254,131 @@ async function handleLocalRequestInner(url, options = {}) {
     }
   }
 
+  // DAY CLOSE
+  if (parts[1] === 'closings' && parts[2] === 'today' && method === 'GET') {
+    const today = pakistanToday();
+    const collected = await collectedSalesOnDate(db, today);
+    const all = await db.getAll('day_closings');
+    const last = all
+      .filter((r) => String(r.close_date) === today)
+      .sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0))[0] || null;
+    return jsonOk({ date: today, collected, last_close: last });
+  }
+  if (parts[1] === 'closings' && method === 'GET') {
+    const limit = Math.min(60, Math.max(1, Number(search.get('limit')) || 14));
+    const rows = (await db.getAll('day_closings'))
+      .sort((a, b) => String(b.close_date || '').localeCompare(String(a.close_date || '')) || (Number(b.id) || 0) - (Number(a.id) || 0))
+      .slice(0, limit);
+    return jsonOk(rows);
+  }
+  if (parts[1] === 'closings' && method === 'POST') {
+    const today = pakistanToday();
+    const cash_counted = Number(body.cash_counted);
+    if (!Number.isFinite(cash_counted) || cash_counted < 0) {
+      return jsonErr('cash_counted is required');
+    }
+    const collected_sales = await collectedSalesOnDate(db, today);
+    const gap = Math.round((cash_counted - collected_sales) * 100) / 100;
+    const id = await nextId(db, 'day_closings');
+    const row = {
+      id,
+      close_date: today,
+      cash_counted,
+      collected_sales,
+      gap,
+      notes: body.notes || '',
+      created_at: new Date().toISOString(),
+    };
+    await db.put('day_closings', row);
+    return jsonOk(row, 201);
+  }
+
+  // NOTEPAD / MEMOS
+  if (parts[1] === 'memos' && parts.length === 2 && method === 'GET') {
+    const rows = (await db.getAll('memos'))
+      .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')) || (Number(b.id) || 0) - (Number(a.id) || 0));
+    return jsonOk(rows);
+  }
+  if (parts[1] === 'memos' && parts.length === 2 && method === 'POST') {
+    const title = String(body.title || '').trim();
+    const memoBody = String(body.body || '');
+    if (!title && !memoBody.trim()) return jsonErr('Write a title or note');
+    const now = new Date().toISOString();
+    const id = await nextId(db, 'memos');
+    const row = {
+      id,
+      title: title || 'Untitled',
+      body: memoBody,
+      created_at: now,
+      updated_at: now,
+    };
+    await db.put('memos', row);
+    return jsonOk(row, 201);
+  }
+  if (parts[1] === 'memos' && parts.length === 3 && method === 'PUT') {
+    const id = Number(parts[2]);
+    const existing = await db.get('memos', id);
+    if (!existing) return jsonErr('Note not found', 404);
+    const title = String(body.title ?? existing.title ?? '').trim() || 'Untitled';
+    const memoBody = body.body != null ? String(body.body) : String(existing.body || '');
+    const row = {
+      ...existing,
+      title,
+      body: memoBody,
+      updated_at: new Date().toISOString(),
+    };
+    await db.put('memos', row);
+    return jsonOk(row);
+  }
+  if (parts[1] === 'memos' && parts.length === 3 && method === 'DELETE') {
+    const id = Number(parts[2]);
+    const existing = await db.get('memos', id);
+    if (!existing) return jsonErr('Note not found', 404);
+    await db.delete('memos', id);
+    return jsonOk({ success: true });
+  }
+
+  // PURGE DEMO / TEST RECORDS
+  if (parts[1] === 'maintenance' && parts[2] === 'purge-demo' && method === 'POST') {
+    const customers = await db.getAll('customers');
+    const bills = await db.getAll('bills');
+    const demoCustomers = customers.filter(isDemoCustomer);
+    const demoNames = new Set(demoCustomers.map((c) => String(c.name || '').trim().toLowerCase()));
+    const demoBills = bills.filter(
+      (b) => isDemoBill(b) || demoNames.has(String(b.customer_name || '').trim().toLowerCase())
+    );
+    const demoBillIds = new Set(demoBills.map((b) => Number(b.id)));
+    const items = await db.getAll('bill_items');
+    const payments = await db.getAll('bill_payments');
+    for (const it of items) {
+      if (demoBillIds.has(Number(it.bill_id))) await db.delete('bill_items', it.id);
+    }
+    for (const p of payments) {
+      if (demoBillIds.has(Number(p.bill_id))) await db.delete('bill_payments', p.id);
+    }
+    for (const b of demoBills) await db.delete('bills', b.id);
+    const rates = await db.getAll('rates');
+    const demoCustIds = new Set(demoCustomers.map((c) => Number(c.id)));
+    for (const r of rates) {
+      if (demoCustIds.has(Number(r.customer_id))) await db.delete('rates', r.id);
+    }
+    for (const c of demoCustomers) await db.delete('customers', c.id);
+    return jsonOk({
+      success: true,
+      removed_bills: demoBills.length,
+      removed_customers: demoCustomers.length,
+    });
+  }
+
   // STATS
   if (parts[1] === 'stats' && method === 'GET') {
     const bills = await db.getAll('bills');
     const settings = (await db.get('settings', 1)) || DEFAULT_SETTINGS;
     const threshold = Number(settings.low_stock_threshold) || 5;
     const products = await db.getAll('products');
-    const paid = bills.filter((b) => b.status === 'paid');
-    const pending = bills.filter((b) => b.status === 'pending' && normalizeBillType(b.bill_type) !== 'help');
-    const overdue = bills.filter((b) => b.status === 'overdue' && normalizeBillType(b.bill_type) !== 'help');
-    const outstandingOf = (list) =>
-      list.reduce((s, b) => {
-        const due = Math.max(0, (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0));
-        return s + due;
-      }, 0);
-    const recent = [...bills].sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)).slice(0, 5);
     const today = pakistanToday();
+    const overview = saleOverviewTotals(bills, today);
+    const activeBills = bills.filter((b) => !isCancelled(b));
     const monthPrefix = pakistanYearMonth(today);
     const productById = new Map(products.map((p) => [Number(p.id), p]));
     const activeSales = bills.filter((b) => normalizeBillType(b.bill_type) === 'customer' && !isCancelled(b));
@@ -1289,6 +1416,7 @@ async function handleLocalRequestInner(url, options = {}) {
     };
     const todayTotals = sumSaleCost(todaySales);
     const monthTotals = sumSaleCost(monthSales);
+    const recent = [...bills].sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)).slice(0, 5);
     const helpBills = bills
       .filter((b) => normalizeBillType(b.bill_type) === 'help' && !isCancelled(b))
       .map(enrichBill)
@@ -1302,15 +1430,13 @@ async function handleLocalRequestInner(url, options = {}) {
     const help_repaid = helpBills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
     const help_outstanding = Math.round(Math.max(0, help_given - help_repaid) * 100) / 100;
     return jsonOk({
-      total_revenue: bills
-        .filter((b) => normalizeBillType(b.bill_type) === 'customer' && !isCancelled(b))
-        .reduce((s, b) => s + (Number(b.amount_paid) || 0), 0),
-      total_pending: outstandingOf(pending),
-      total_overdue: outstandingOf(overdue),
-      total_bills: bills.length,
-      paid_bills_count: paid.length,
-      pending_bills_count: pending.length,
-      overdue_bills_count: overdue.length,
+      total_revenue: overview.total_revenue,
+      total_pending: overview.total_pending,
+      total_overdue: overview.total_overdue,
+      total_bills: activeBills.length,
+      paid_bills_count: overview.paid_bills_count,
+      pending_bills_count: overview.pending_bills_count,
+      overdue_bills_count: overview.overdue_bills_count,
       recent_bills: recent.map(enrichBill),
       low_stock: products
         .filter((p) => Number(p.stock) <= threshold)
@@ -1493,6 +1619,8 @@ async function handleLocalRequestInner(url, options = {}) {
       advances: await db.getAll('advances'),
       customer_product_rates: await db.getAll('rates'),
       stock_adjustments: await db.getAll('stock_adjustments'),
+      day_closings: await db.getAll('day_closings'),
+      memos: await db.getAll('memos'),
     };
     return jsonOk(payload);
   }
@@ -1519,7 +1647,9 @@ async function handleLocalRequestInner(url, options = {}) {
       'advances',
       'customers',
       'products',
+      'day_closings',
     ];
+    if (Array.isArray(data.memos)) storeNames.push('memos');
 
     try {
       const tx = db.transaction([...storeNames, 'settings'], 'readwrite');
@@ -1549,6 +1679,8 @@ async function handleLocalRequestInner(url, options = {}) {
       await putAll('advances', data.advances);
       await putAll('rates', data.customer_product_rates || data.rates);
       await putAll('stock_adjustments', data.stock_adjustments);
+      await putAll('day_closings', data.day_closings);
+      if (Array.isArray(data.memos)) await putAll('memos', data.memos);
 
       if (data.settings?.[0]) {
         const s = { ...DEFAULT_SETTINGS, ...data.settings[0], id: 1 };

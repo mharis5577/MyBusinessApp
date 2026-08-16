@@ -48,7 +48,15 @@ The mobile APK stores bills, clients, and products **on the phone** (IndexedDB).
 1. Push this repo (see above).
 2. GitHub → **Actions** → **Build Android APK** → wait for success.
 3. Open the run → **Artifacts** → download **elite-chocolate-apk**.
-4. Unzip and install `app-debug.apk` (allow unknown sources).
+4. Unzip and install `app-release.apk` (allow unknown sources).
+
+This build is **version 1.1.0** (`versionCode` 2) and is signed with a stable key so later APKs can **update** the app already on the phone.
+
+- Same package name: `pk.elitechocolate.pos.test`
+- Higher version than the first GitHub APKs
+- Same signing key from now on
+
+**First time only:** the APKs already on the phone were unsigned GitHub debug builds. Android will not treat those as the same app, so uninstall CocoaDesk once, then install `app-release.apk`. After that, every new APK from Actions should say **Update**.
 
 Manual run: **Actions → Build Android APK → Run workflow**.
 
@@ -60,10 +68,10 @@ npm ci
 npm run build:apk
 npx cap sync android
 cd android
-./gradlew assembleDebug
+./gradlew assembleRelease
 ```
 
-APK: `frontend/android/app/build/outputs/apk/debug/app-debug.apk`
+APK: `frontend/android/app/build/outputs/apk/release/app-release.apk`
 
 ### Data modes
 

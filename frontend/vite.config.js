@@ -12,6 +12,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          // Keep heavy PDF/canvas libs out of screen chunks; load only when exporting.
           if (id.includes('node_modules/html2canvas') || id.includes('node_modules/jspdf')) return 'export';
         },
       },

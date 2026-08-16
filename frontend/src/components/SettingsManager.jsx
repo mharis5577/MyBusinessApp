@@ -73,6 +73,7 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
   const [savedMsg, setSavedMsg] = useState(false);
   const [resetMsg, setResetMsg] = useState('');
   const [wipeConfirm, setWipeConfirm] = useState('');
+  const [purgeConfirm, setPurgeConfirm] = useState('');
   const [restoreConfirm, setRestoreConfirm] = useState('');
   const [pendingRestore, setPendingRestore] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
@@ -284,6 +285,28 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
       }
     } catch (err) {
       toast.error('Error updating settings: ' + err.message);
+    }
+  };
+
+  const handlePurgeDemo = async () => {
+    if (purgeConfirm.trim() !== 'PURGE') {
+      toast.error('Type PURGE exactly to remove test records');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await apiFetch('/api/maintenance/purge-demo', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const bills = Number(data.removed_bills) || 0;
+      const customers = Number(data.removed_customers) || 0;
+      setPurgeConfirm('');
+      toast.success(`Removed ${customers} test client${customers === 1 ? '' : 's'} and ${bills} bill${bills === 1 ? '' : 's'}`);
+      if (onSettingsUpdated) onSettingsUpdated();
+    } catch (err) {
+      toast.error(err.message || 'Could not remove test records');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1019,6 +1042,38 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
             </div>
           </div>
         )}
+      </div>
+
+      <div className="glass-panel" style={{ padding: '1.5rem', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          <div>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <AlertTriangle size={18} /> Remove test records
+            </h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+              Deletes dummy clients and bills from the old Fill test data helper (names with Test, dummy, @example.com). Real clients like Imran Ali are left alone.
+            </p>
+          </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Type PURGE to enable</label>
+            <input
+              className="form-input"
+              value={purgeConfirm}
+              onChange={(e) => setPurgeConfirm(e.target.value)}
+              placeholder="PURGE"
+              autoComplete="off"
+            />
+          </div>
+          <button
+            type="button"
+            className="btn-danger"
+            onClick={handlePurgeDemo}
+            disabled={busy || purgeConfirm.trim() !== 'PURGE'}
+            style={{ padding: '0.65rem 1.2rem', width: 'auto', alignSelf: 'flex-start' }}
+          >
+            <Trash2 size={16} /> Remove test records
+          </button>
+        </div>
       </div>
 
       <div className="glass-panel" style={{ padding: '1.5rem', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)' }}>

@@ -43,13 +43,22 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      - name: Build debug APK
+      - name: Use GitHub signing secret when provided
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
         working-directory: frontend/android
-        run: ./gradlew assembleDebug --no-daemon
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p keystore
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > keystore/elite-release.jks
+
+      - name: Build signed release APK
+        working-directory: frontend/android
+        run: ./gradlew assembleRelease --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: elite-chocolate-apk
-          path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
+          path: frontend/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
