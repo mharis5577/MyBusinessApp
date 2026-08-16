@@ -43,14 +43,15 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      - name: Use GitHub signing secret when provided
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      - name: Overlay signing key from a GitHub secret if set
         working-directory: frontend/android
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          mkdir -p keystore
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > keystore/elite-release.jks
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            mkdir -p keystore
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > keystore/elite-release.jks
+          fi
 
       - name: Build signed release APK
         working-directory: frontend/android
