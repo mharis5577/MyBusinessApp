@@ -68,11 +68,22 @@ function canShareSafely(data) {
   }
 }
 
+function withTimeout(promise, ms, fallbackValue) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(fallbackValue), ms)),
+  ]);
+}
+
 async function webShareSafely(data) {
   try {
     if (typeof navigator?.share !== 'function') return false;
-    await navigator.share(data);
-    return true;
+    // Timeout in case user takes long or browser doesn't resolve
+    const sharePromise = navigator.share(data).then(() => true).catch((err) => {
+      if (err?.name === 'AbortError') throw err;
+      return false;
+    });
+    return await withTimeout(sharePromise, 15000, true);
   } catch (err) {
     if (err?.name === 'AbortError') throw err;
     return false;
@@ -120,35 +131,40 @@ async function shareViaCapacitor(blob, safeName, type, { title, dialogTitle, tex
     directory: Directory.Cache,
   });
 
-  try {
-    await Share.share({
-      title: title || safeName,
-      text: text || undefined,
-      files: [uri],
-      dialogTitle: dialogTitle || title || 'Save or share',
-    });
-    return 'shared';
-  } catch (err) {
-    const msg = String(err?.message || err || '');
-    if (/cancel|abort|dismiss/i.test(msg)) {
-      throw Object.assign(new Error('Share cancelled'), { name: 'AbortError' });
-    }
+  const doShare = async () => {
     try {
       await Share.share({
         title: title || safeName,
         text: text || undefined,
-        url: uri,
+        files: [uri],
         dialogTitle: dialogTitle || title || 'Save or share',
       });
       return 'shared';
-    } catch (err2) {
-      const msg2 = String(err2?.message || err2 || '');
-      if (/cancel|abort|dismiss/i.test(msg2)) {
+    } catch (err) {
+      const msg = String(err?.message || err || '');
+      if (/cancel|abort|dismiss/i.test(msg)) {
         throw Object.assign(new Error('Share cancelled'), { name: 'AbortError' });
       }
-      return null;
+      try {
+        await Share.share({
+          title: title || safeName,
+          text: text || undefined,
+          url: uri,
+          dialogTitle: dialogTitle || title || 'Save or share',
+        });
+        return 'shared';
+      } catch (err2) {
+        const msg2 = String(err2?.message || err2 || '');
+        if (/cancel|abort|dismiss/i.test(msg2)) {
+          throw Object.assign(new Error('Share cancelled'), { name: 'AbortError' });
+        }
+        return null;
+      }
     }
-  }
+  };
+
+  // Safe 15s timeout race so native share sheet doesn't leave frontend permanently pending
+  return await withTimeout(doShare(), 15000, 'shared');
 }
 
 /**

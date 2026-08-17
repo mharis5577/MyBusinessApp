@@ -1,5 +1,7 @@
 import { resolveBillExportOptions, DEFAULT_BILL_SEND_PREFS } from './billSendPrefs';
 
+const colorCache = new Map();
+
 /**
  * Chrome/Edge often return getComputedStyle colors as color(srgb …),
  * which html2canvas 1.4.x cannot parse. Normalize to rgb/rgba/hex.
@@ -10,6 +12,9 @@ function normalizeCssColor(value) {
   if (!v || v === 'transparent' || v === 'none' || v === 'currentcolor') return v;
   if (!/(?:color|oklch|oklab|lab|lch|color-mix)\(/i.test(v)) return v;
 
+  const cached = colorCache.get(v);
+  if (cached !== undefined) return cached;
+
   const srgb = v.match(
     /color\(\s*srgb\s+([0-9.eE+-]+)\s+([0-9.eE+-]+)\s+([0-9.eE+-]+)(?:\s*\/\s*([0-9.eE+%]+))?\)/i
   );
@@ -18,7 +23,9 @@ function normalizeCssColor(value) {
     const g = Math.round(clamp01(parseFloat(srgb[2])) * 255);
     const b = Math.round(clamp01(parseFloat(srgb[3])) * 255);
     const a = srgb[4] != null ? parseAlpha(srgb[4]) : 1;
-    return a < 1 ? `rgba(${r}, ${g}, ${b}, ${a})` : `rgb(${r}, ${g}, ${b})`;
+    const res = a < 1 ? `rgba(${r}, ${g}, ${b}, ${a})` : `rgb(${r}, ${g}, ${b})`;
+    colorCache.set(v, res);
+    return res;
   }
 
   try {
@@ -28,14 +35,19 @@ function normalizeCssColor(value) {
     ctx.fillStyle = '#000000';
     ctx.fillStyle = v;
     const out = ctx.fillStyle;
-    if (out && out !== '#000000') return out;
+    if (out && out !== '#000000') {
+      colorCache.set(v, out);
+      return out;
+    }
     if (/^(?:#000|#000000|black|rgb\(\s*0\s*,\s*0\s*,\s*0\s*\)|rgba\(\s*0\s*,\s*0\s*,\s*0)/i.test(v)) {
+      colorCache.set(v, out);
       return out;
     }
   } catch {
     /* fall through */
   }
 
+  colorCache.set(v, '#111111');
   return '#111111';
 }
 
@@ -50,109 +62,44 @@ function parseAlpha(raw) {
   return clamp01(parseFloat(s));
 }
 
-function toCamelCssName(name) {
-  const camel = String(name).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-  if (camel.startsWith('Webkit')) return ['webkit' + camel.slice(6), camel];
-  if (camel.startsWith('Moz')) return ['moz' + camel.slice(3), camel];
-  if (camel.startsWith('Ms')) return ['ms' + camel.slice(2), camel];
-  return [camel];
-}
-
 function wrapComputedStyle(style) {
   if (!style || style.__html2canvasColorPatched) return style;
 
-  const read = (key) => {
-    try {
-      if (key === 'cssText' || key === 'parentRule' || key === 'length') {
-        return style[key];
+  return new Proxy(style, {
+    get(target, prop) {
+      if (prop === '__html2canvasColorPatched') return true;
+      if (prop === 'getPropertyValue') {
+        return (name) => {
+          try {
+            return normalizeCssColor(target.getPropertyValue(name));
+          } catch {
+            return '';
+          }
+        };
       }
-      if (typeof key === 'string' && key.includes('-')) {
-        return normalizeCssColor(style.getPropertyValue(key));
-      }
-      const val = style[key];
-      return typeof val === 'string' ? normalizeCssColor(val) : val;
-    } catch {
-      return '';
-    }
-  };
-
-  const wrapped = {
-    __html2canvasColorPatched: true,
-    getPropertyValue(name) {
       try {
-        return normalizeCssColor(style.getPropertyValue(name));
+        const val = target[prop];
+        if (typeof val === 'function') {
+          return val.bind(target);
+        }
+        if (
+          typeof val === 'string' &&
+          typeof prop === 'string' &&
+          (prop.includes('Color') ||
+            prop.includes('color') ||
+            prop.includes('border') ||
+            prop.includes('background') ||
+            prop.includes('fill') ||
+            prop.includes('stroke'))
+        ) {
+          return normalizeCssColor(val);
+        }
+        return val;
       } catch {
         return '';
       }
-    },
-    getPropertyPriority(name) {
-      try {
-        return style.getPropertyPriority(name);
-      } catch {
-        return '';
-      }
-    },
-    item(index) {
-      try {
-        return style.item(index);
-      } catch {
-        return '';
-      }
-    },
-  };
-
-  Object.defineProperty(wrapped, 'length', {
-    enumerable: true,
-    get() {
-      return style.length;
     },
   });
-
-  const keys = new Set(['cssFloat', 'cssText', 'parentRule', 'float']);
-  for (let i = 0; i < style.length; i += 1) {
-    const kebab = style.item(i);
-    wrapped[i] = kebab;
-    if (!kebab) continue;
-    keys.add(kebab);
-    toCamelCssName(kebab).forEach((n) => keys.add(n));
-  }
-
-  let proto = style;
-  const skip = new Set([
-    'getPropertyValue',
-    'getPropertyPriority',
-    'item',
-    'setProperty',
-    'removeProperty',
-    'constructor',
-    'length',
-    '__html2canvasColorPatched',
-  ]);
-  while (proto && proto !== Object.prototype) {
-    Object.getOwnPropertyNames(proto).forEach((name) => {
-      if (skip.has(name) || name.startsWith('__')) return;
-      try {
-        if (typeof style[name] === 'function') return;
-      } catch {
-        return;
-      }
-      keys.add(name);
-    });
-    proto = Object.getPrototypeOf(proto);
-  }
-
-  keys.forEach((key) => {
-    if (Object.prototype.hasOwnProperty.call(wrapped, key)) return;
-    Object.defineProperty(wrapped, key, {
-      enumerable: true,
-      configurable: true,
-      get() {
-        return read(key);
-      },
-    });
-  });
-
-  return wrapped;
 }
 
 function patchComputedStyleColors(targetWindow) {
@@ -283,10 +230,10 @@ async function captureElement(element, options = {}) {
   try {
     return await html2canvas(element, {
       useCORS: true,
-      allowTaint: true,
+      allowTaint: false,
       backgroundColor: '#ffffff',
       logging: false,
-      imageTimeout: 8000,
+      imageTimeout: 3000,
       scale: scale ?? Math.min(2, window.devicePixelRatio || 2),
       ...rest,
       onclone: (clonedDoc, cloned) => {

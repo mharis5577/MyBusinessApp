@@ -42,6 +42,7 @@ import {
   openWhatsAppReminder,
   openSmsReminder,
 } from '../utils/paymentReminder';
+import { generateQrDataUrl } from '../utils/qrCode';
 
 function sanitizeFilename(name) {
   return String(name || 'Invoice').replace(/[^\w.-]+/g, '_');
@@ -158,6 +159,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeveloperCredit, setShowDeveloperCredit] = useState(true);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
 
   const setBillView = useCallback((view) => {
     const next = view === 'mobile' || view === 'thermal' ? view : 'desktop';
@@ -529,7 +531,21 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
   };
 
   const qrPaymentText = primaryWallet || `PAYMENT-INV:${liveBill.invoice_number}:${liveBill.total_amount}`;
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrPaymentText)}`;
+
+  useEffect(() => {
+    let active = true;
+    if (!qrPaymentText) {
+      setQrCodeDataUrl('');
+      return;
+    }
+    generateQrDataUrl(qrPaymentText, { width: 160 }).then((url) => {
+      if (active) setQrCodeDataUrl(url || '');
+    });
+    return () => {
+      active = false;
+    };
+  }, [qrPaymentText]);
+
   const busy = Boolean(sharing);
   const payments = liveBill.payments || [];
   const cancelled = isCancelled(liveBill);
@@ -876,7 +892,11 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
           )}
           {!isSupplier && (
             <div className="thermal-qr">
-              <img src={qrCodeUrl} alt="Scan to Pay" width={80} height={80} />
+              {qrCodeDataUrl ? (
+                <img src={qrCodeDataUrl} alt="Scan to Pay" width={80} height={80} />
+              ) : (
+                <div style={{ width: 80, height: 80, margin: '0 auto', background: '#f1f5f9', borderRadius: 4 }} />
+              )}
               <p><BiLabel en="Scan to Pay" ur="ادائیگی کے لیے اسکین کریں" urdu={urdu} /></p>
             </div>
           )}
