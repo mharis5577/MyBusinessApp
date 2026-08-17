@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Users, Plus, Trash2, Mail, Phone, Tag, Check, PackagePlus, BookOpen, GitMerge, MessageCircle, Bell, ChevronDown, ChevronRight, HeartHandshake } from 'lucide-react';
+import { Users, Plus, Trash2, Mail, Phone, Tag, Check, PackagePlus, BookOpen, GitMerge, MessageCircle, Bell, ChevronDown, ChevronRight, HeartHandshake, Star, Repeat, Sparkles } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
+import { playTapSound, playSuccessChime } from '../utils/audioEffects';
 import { normalizePartyName } from '../utils/aging';
 import {
   buildClientStatementText,
@@ -22,7 +23,7 @@ import AppSelect from './AppSelect';
 import PayeeBankSelect from './PayeeBankSelect';
 import { getPaymentMethods } from '../utils/paymentMethods';
 
-export default function CustomerManager({ currencySymbol = 'Rs.', settings = {}, onViewBill }) {
+export default function CustomerManager({ currencySymbol = 'Rs.', settings = {}, onViewBill, onDuplicateBill, onNavigate }) {
   const toast = useToast();
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
@@ -171,6 +172,28 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
     setSelectedCustomer(c);
     apiFetchCustomerRates(c.id);
     apiFetchLedger(c.name);
+  };
+
+  const handleReorderLastBill = async () => {
+    if (!ledger?.bills?.length) {
+      toast.info('No previous orders found for this customer');
+      return;
+    }
+    const lastBillSummary = ledger.bills[0];
+    playTapSound();
+    try {
+      const res = await apiFetch(`/api/bills/${lastBillSummary.id}`);
+      const fullBill = await res.json();
+      if (onDuplicateBill) {
+        onDuplicateBill(fullBill);
+        playSuccessChime();
+        toast.success(`Loaded previous order items for ${fullBill.customer_name}! ⭐`);
+      } else if (onNavigate) {
+        onNavigate('create');
+      }
+    } catch {
+      toast.error('Failed to load bill items for reorder');
+    }
   };
 
   const handleAddCustomer = async (e) => {
@@ -525,6 +548,11 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
                       <h4>
                         {c.name}
                         <span className={`type-badge ${pt}`}>{pt === 'supplier' ? 'Supplier' : 'Customer'}</span>
+                        {(Number(c.sales_outstanding) > 5000 || Number(c.total_revenue || 0) > 10000) && (
+                          <span className="vip-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: '0.68rem', fontWeight: 800, padding: '0.1rem 0.45rem', borderRadius: 999, background: 'rgba(212, 175, 55, 0.18)', color: '#d4af37', border: '1px solid rgba(212, 175, 55, 0.4)' }}>
+                            <Star size={10} fill="#d4af37" /> VIP
+                          </span>
+                        )}
                       </h4>
                       {c.phone ? (
                         <div className="client-dir-meta">
@@ -670,9 +698,22 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {ledger && (
               <div className="surface-block" style={{ padding: '1.1rem' }}>
-                <h4 style={{ fontSize: '0.95rem', fontWeight: 800, marginBottom: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <BookOpen size={16} /> Client ledger — {ledger.customer_name}
-                </h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <h4 style={{ fontSize: '0.95rem', fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <BookOpen size={16} /> Client ledger — {ledger.customer_name}
+                  </h4>
+                  {ledger?.bills?.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      style={{ width: 'auto', padding: '0.35rem 0.75rem', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                      onClick={handleReorderLastBill}
+                      title="Duplicate last order items to a new bill"
+                    >
+                      <Repeat size={13} /> 1-Click Reorder Box
+                    </button>
+                  )}
+                </div>
                 <div className="client-ledger-stats">
                   <div>
                     <div className="client-ledger-label">Sales due</div>

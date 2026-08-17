@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History, ChevronDown, ChevronUp, ShoppingCart, Package, HeartHandshake } from 'lucide-react';
+import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History, ChevronDown, ChevronUp, ShoppingCart, Package, HeartHandshake, Edit3 } from 'lucide-react';
 import { parseNaturalBillText } from '../utils/naturalParser';
 import { pakistanToday, addDaysToDateString, formatCurrency, pakistanNowTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
@@ -31,6 +31,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
   const [repeating, setRepeating] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [saveConfirm, setSaveConfirm] = useState(null);
+  const [editingBillId, setEditingBillId] = useState(null);
 
   // Form State
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -58,9 +59,9 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
 
   // Fetch initial helper data
   useEffect(() => {
-    fetchNextInvoiceNumber(billType);
+    if (!editingBillId) fetchNextInvoiceNumber(billType);
     fetchCustomersAndProducts();
-  }, [billType]);
+  }, [billType, editingBillId]);
 
   const didMountRef = useRef(false);
   useEffect(() => {
@@ -75,18 +76,20 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     setTaxRate(defaultTaxRate);
   }, [defaultTaxRate]);
 
-  // Apply duplicate / draft bill once
+  // Apply duplicate / draft / edit bill once
   useEffect(() => {
     if (!draftBill) return;
     const b = draftBill;
+    const isEdit = Boolean(b.isEditing);
+    setEditingBillId(isEdit ? b.id : null);
     dateTouchedRef.current = false;
     setBillType(normalizeBillType(b.bill_type));
     setCustomerName(b.customer_name || '');
     setCustomerEmail(b.customer_email || '');
     setCustomerPhone(b.customer_phone || '');
     setCustomerAddress(b.customer_address || '');
-    setBillDate(pakistanToday());
-    setDueDate(addDaysToDateString(pakistanToday(), 14));
+    setBillDate(b.bill_date || pakistanToday());
+    setDueDate(b.due_date || addDaysToDateString(pakistanToday(), 14));
     setTaxRate(b.tax_rate ?? defaultTaxRate);
     setDiscountRate(b.discount_rate ?? 0);
     setPaymentMethod(b.payment_method || (b.bill_type === 'supplier' ? 'Bank Transfer / Remittance' : b.bill_type === 'help' ? 'Cash' : 'Bank Transfer / Raast'));
@@ -105,7 +108,11 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         }))
       );
     }
-    fetchNextInvoiceNumber(normalizeBillType(b.bill_type));
+    if (isEdit) {
+      setInvoiceNumber(b.invoice_number || '');
+    } else {
+      fetchNextInvoiceNumber(normalizeBillType(b.bill_type));
+    }
     clearBillDraft();
     draftHydratedRef.current = true;
     if (onDraftConsumed) onDraftConsumed();
@@ -659,8 +666,11 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         })),
       };
 
-      const res = await apiFetch('/api/bills', {
-        method: 'POST',
+      const url = editingBillId ? `/api/bills/${editingBillId}` : '/api/bills';
+      const method = editingBillId ? 'PUT' : 'POST';
+
+      const res = await apiFetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -683,7 +693,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
       }
 
       let savedBill = data;
-      if (initialPayNum > 0 && savedBill?.id) {
+      if (initialPayNum > 0 && savedBill?.id && !editingBillId) {
         if (initialPayNum > totalAmount) {
           toast.info('Payment amount capped to bill total.');
         }
@@ -692,6 +702,13 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
 
       clearBillDraft();
       saveAckRef.current = { zero: false, stock: false };
+
+      if (editingBillId) {
+        toast.success(`Updated ${savedBill.invoice_number || invoiceNumber}`);
+        setEditingBillId(null);
+        onBillGenerated(savedBill);
+        return;
+      }
 
       if (mode === 'new') {
         await resetFormForNew();
@@ -906,6 +923,43 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
 
       {/* Main Bill Generator Form */}
       <form onSubmit={handleSubmit} className="glass-panel" style={{ padding: '1.75rem' }}>
+        {editingBillId && (
+          <div
+            style={{
+              background: 'rgba(212, 175, 55, 0.14)',
+              border: '1px solid #d4af37',
+              borderRadius: 'var(--radius-md, 8px)',
+              padding: '0.85rem 1.25rem',
+              marginBottom: '1.25rem',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '0.75rem',
+            }}
+          >
+            <div>
+              <strong style={{ color: '#d4af37', fontSize: '0.98rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Edit3 size={17} /> Editing Existing Bill: {invoiceNumber}
+              </strong>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                Modifying items, rates, or client details will update this bill directly in your records.
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ width: 'auto', padding: '0.4rem 0.95rem', fontSize: '0.82rem' }}
+              onClick={() => {
+                setEditingBillId(null);
+                resetFormForNew();
+                toast.info('Edit cancelled');
+              }}
+            >
+              Cancel Edit
+            </button>
+          </div>
+        )}
         <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
           <div>
             <h2 style={{ fontSize: '1.3rem', fontWeight: 800 }}>
@@ -1598,15 +1652,17 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
               Stock: {stockWarnings.join(' · ')}
             </div>
           )}
-          <button
-            type="submit"
-            className="btn-secondary"
-            style={{ padding: '0.85rem 1.25rem', fontSize: '0.95rem', width: 'auto' }}
-            disabled={loading}
-            onClick={() => setSaveMode('new')}
-          >
-            <FilePlus2 size={18} /> {loading && saveMode === 'new' ? 'Saving…' : 'Save & New'}
-          </button>
+          {!editingBillId && (
+            <button
+              type="submit"
+              className="btn-secondary"
+              style={{ padding: '0.85rem 1.25rem', fontSize: '0.95rem', width: 'auto' }}
+              disabled={loading}
+              onClick={() => setSaveMode('new')}
+            >
+              <FilePlus2 size={18} /> {loading && saveMode === 'new' ? 'Saving…' : 'Save & New'}
+            </button>
+          )}
           <button
             type="submit"
             className="btn-primary"
@@ -1614,7 +1670,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
             disabled={loading}
             onClick={() => setSaveMode('view')}
           >
-            <Save size={18} /> {loading && saveMode === 'view' ? 'Saving…' : 'Save & View'}
+            <Save size={18} /> {loading ? 'Saving…' : editingBillId ? 'Save Changes' : 'Save & View'}
           </button>
         </div>
       </form>

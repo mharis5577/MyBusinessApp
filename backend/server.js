@@ -219,6 +219,7 @@ app.put('/api/settings', async (req, res) => {
         header_layout = ?,
         signature_url = ?,
         show_paid_stamp = ?,
+        sound_effects = ?,
         updated_at = CURRENT_TIMESTAMP
        WHERE id = (SELECT id FROM settings LIMIT 1)`,
       [
@@ -247,6 +248,7 @@ app.put('/api/settings', async (req, res) => {
         header_layout || 'split',
         signature_url || '',
         show_paid_stamp === 0 || show_paid_stamp === false ? 0 : 1,
+        req.body.sound_effects === 0 || req.body.sound_effects === false ? 0 : 1,
       ]
     );
 
@@ -832,6 +834,19 @@ app.get('/api/bills/:id', async (req, res) => {
   }
 });
 
+// Toggle bill bookmark
+app.post('/api/bills/:id/bookmark', async (req, res) => {
+  try {
+    const bill = await dbGet('SELECT is_bookmarked FROM bills WHERE id = ?', [req.params.id]);
+    if (!bill) return res.status(404).json({ error: 'Bill not found' });
+    const next = bill.is_bookmarked ? 0 : 1;
+    await dbRun('UPDATE bills SET is_bookmarked = ? WHERE id = ?', [next, req.params.id]);
+    res.json({ id: Number(req.params.id), is_bookmarked: next });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Create & Auto Save Bill with Items (transactional)
 app.post('/api/bills', async (req, res) => {
   try {
@@ -1395,6 +1410,10 @@ app.get('/api/stats', async (req, res) => {
     );
     const todayTotals = await sumSaleCost(todaySales);
     const monthTotals = await sumSaleCost(monthSales);
+    const allSales = await dbAll(
+      "SELECT * FROM bills WHERE COALESCE(bill_type, 'customer') = 'customer' AND status != 'cancelled'"
+    );
+    const allTotals = await sumSaleCost(allSales);
 
     const helpBills = await dbAll(
       `SELECT * FROM bills
@@ -1423,6 +1442,9 @@ app.get('/api/stats', async (req, res) => {
       sales_month: monthTotals.sales,
       cost_month: monthTotals.cost,
       profit_month: monthTotals.profit,
+      sales_total: allTotals.sales,
+      cost_total: allTotals.cost,
+      profit_total: allTotals.profit,
       help_given: Math.round(help_given * 100) / 100,
       help_repaid: Math.round(help_repaid * 100) / 100,
       help_outstanding,

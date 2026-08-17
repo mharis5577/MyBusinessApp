@@ -1,5 +1,14 @@
 export const INVOICE_TEMPLATES = [
   {
+    id: 'chocolatier',
+    name: 'Royal Chocolatier',
+    tagline: 'Deep velvet cocoa & warm gold foil luxury',
+    primaryColor: '#2a1810',
+    headerBg: '#2a1810',
+    accentColor: '#d4af37',
+    previewBadge: 'Chocolatier',
+  },
+  {
     id: 'classic',
     name: 'Classic Teal',
     tagline: 'Signature clean styling with teal highlights',

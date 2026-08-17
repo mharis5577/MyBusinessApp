@@ -17,7 +17,10 @@ import {
   Banknote,
   MessageCircle,
   Calculator,
+  Download,
 } from 'lucide-react';
+import { downloadDailyProfitSummaryPdf } from '../utils/tableExport';
+import { playSuccessChime, playTapSound } from '../utils/audioEffects';
 import { formatCurrency, formatBillDateTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { isCancelled } from '../utils/billAdjust';
@@ -42,7 +45,6 @@ import {
 
 const CashflowPanel = lazy(() => import('./CashflowPanel'));
 const OverduePanel = lazy(() => import('./OverduePanel'));
-const DailyClosePanel = lazy(() => import('./DailyClosePanel'));
 
 function StatCard({ label, value, hint, icon: Icon }) {
   return (
@@ -91,6 +93,46 @@ function DashDropdown({ id, openId, onOpenChange, title, hint, icon: Icon, accen
   );
 }
 
+function useLiveClock() {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const timeStr = now.toLocaleTimeString('en-US', {
+    timeZone: 'Asia/Karachi',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  });
+
+  const dateStr = now.toLocaleDateString('en-US', {
+    timeZone: 'Asia/Karachi',
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+
+  const hour = parseInt(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Karachi',
+      hour: 'numeric',
+      hour12: false,
+    }).format(now),
+    10
+  );
+
+  let greeting = 'Good evening';
+  if (hour >= 5 && hour < 12) greeting = 'Good morning';
+  else if (hour >= 12 && hour < 17) greeting = 'Good afternoon';
+
+  return { timeStr, dateStr, greeting };
+}
+
 function formatHelpReturn(iso) {
   const [y, m, d] = String(iso || '').split('-').map(Number);
   if (!y || !m || !d) return '—';
@@ -100,6 +142,7 @@ function formatHelpReturn(iso) {
 
 export default function DashboardStats({ onNavigate, onViewBill, currencySymbol = 'Rs.', settings = {}, active = true }) {
   const toast = useToast();
+  const { timeStr, dateStr, greeting } = useLiveClock();
   const [stats, setStats] = useState(null);
   const [helpBills, setHelpBills] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -210,6 +253,41 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     setPayBill(bill);
   };
 
+  const [generatingReport, setGeneratingReport] = useState(false);
+
+  const handleDownloadDailyReport = async () => {
+    setGeneratingReport(true);
+    playTapSound();
+    try {
+      const res = await apiFetch('/api/bills');
+      const allBills = await res.json().catch(() => []);
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const todayBills = (allBills || []).filter((b) =>
+        String(b.bill_date || b.created_at || '').startsWith(todayIso)
+      );
+
+      await downloadDailyProfitSummaryPdf({
+        companyName: settings?.company_name || 'ELITE CHOCOLATE',
+        currencySymbol,
+        stats: {
+          sales_today: stats?.profit_today?.sales ?? stats?.sales_today ?? 0,
+          cost_today: stats?.profit_today?.cost ?? stats?.cost_today ?? 0,
+          profit_today: stats?.profit_today?.profit ?? stats?.profit_today ?? 0,
+          margin_today: stats?.profit_today?.margin ?? stats?.margin_today ?? 0,
+        },
+        bills: todayBills.length ? todayBills : (stats?.recent_bills || []),
+        filename: `Daily_Profit_Summary_${todayIso}.pdf`,
+      });
+      playSuccessChime();
+      toast.success('Daily profit summary PDF downloaded!');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to generate daily summary PDF');
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
@@ -231,6 +309,9 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     sales_month = 0,
     cost_month = 0,
     profit_month = 0,
+    sales_total = 0,
+    cost_total = 0,
+    profit_total = 0,
   } = stats || {};
 
   const help_given = liveHelpGiven || Number(stats?.help_given) || 0;
@@ -241,6 +322,9 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
 
   const lastBackup = getLastAutoBackupAt();
   const money = (n) => formatCurrency(currencySymbol, n, { maximumFractionDigits: 0 });
+  const margin_today = sales_today > 0 ? ((profit_today / sales_today) * 100).toFixed(1) : '0.0';
+  const margin_month = sales_month > 0 ? ((profit_month / sales_month) * 100).toFixed(1) : '0.0';
+  const margin_total = sales_total > 0 ? ((profit_total / sales_total) * 100).toFixed(1) : '0.0';
   const goGiveHelp = () => {
     try {
       sessionStorage.setItem(CREATE_BILL_TYPE_KEY, 'help');
@@ -258,14 +342,37 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     onNavigate('database');
   };
 
+  const toggleSection = (id) => {
+    setOpenSection((cur) => (cur === id ? null : id));
+  };
+
   return (
     <div className="dashboard-page">
       <div className="glass-panel panel-hero dashboard-hero">
-        <div className="dashboard-hero-copy">
-          <p className="dashboard-hero-eyebrow">Shop floor</p>
-          <h2 className="dashboard-hero-title">Today at the counter</h2>
-          <p className="dashboard-hero-sub">Create a bill, chase dues, or check help money given.</p>
+        <div className="dashboard-hero-header">
+          <div className="dashboard-hero-copy">
+            <div className="dashboard-hero-eyebrow-row">
+              <span className="dashboard-hero-eyebrow">{greeting}, Chocolatier</span>
+              <span className="live-status-pill">
+                <span className="live-dot" /> Live
+              </span>
+            </div>
+            <h2 className="dashboard-hero-title">Shop Overview & POS</h2>
+            <p className="dashboard-hero-sub">Create bills, track dues, and monitor live profits.</p>
+          </div>
+
+          <div className="dashboard-clock-card">
+            <div className="dashboard-clock-time">
+              <Clock size={16} className="clock-icon" />
+              <span>{timeStr}</span>
+            </div>
+            <div className="dashboard-clock-date">
+              <CalendarDays size={13} />
+              <span>{dateStr}</span>
+            </div>
+          </div>
         </div>
+
         <div className="hero-actions">
           <button type="button" className="btn-primary btn-hero" onClick={() => onNavigate('create')}>
             <PlusCircle size={18} /> Create bill
@@ -274,7 +381,10 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
             <button type="button" className="btn-secondary" onClick={() => onNavigate('database')}>
               <FileText size={16} /> Bills
             </button>
-            <button type="button" className="btn-secondary" onClick={() => setOpenSection('help')}>
+            <button type="button" className="btn-secondary" onClick={() => toggleSection('profit')}>
+              <TrendingUp size={16} /> Profits
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => toggleSection('help')}>
               <HeartHandshake size={16} /> Help
             </button>
             <button type="button" className="btn-secondary" onClick={() => onNavigate('aging')}>
@@ -285,26 +395,42 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
       </div>
 
       <div className="dashboard-peek" aria-label="Key figures">
-        <button type="button" className="dashboard-peek-item" onClick={() => setOpenSection('overview')}>
+        <button
+          type="button"
+          className={`dashboard-peek-item${openSection === 'profit' ? ' is-active' : ''}`}
+          onClick={() => toggleSection('profit')}
+        >
           <span className="dashboard-peek-label">Profit today</span>
           <span className="dashboard-peek-value">{money(profit_today)}</span>
         </button>
-        <button type="button" className="dashboard-peek-item" onClick={() => setOpenSection('overview')}>
+        <button
+          type="button"
+          className={`dashboard-peek-item${openSection === 'profit' ? ' is-active' : ''}`}
+          onClick={() => toggleSection('profit')}
+        >
+          <span className="dashboard-peek-label">Total Profit</span>
+          <span className="dashboard-peek-value">{money(profit_total)}</span>
+        </button>
+        <button
+          type="button"
+          className={`dashboard-peek-item${openSection === 'overview' ? ' is-active' : ''}`}
+          onClick={() => toggleSection('overview')}
+        >
           <span className="dashboard-peek-label">Due</span>
           <span className="dashboard-peek-value">{money(total_pending)}</span>
         </button>
         <button
           type="button"
-          className={`dashboard-peek-item${total_overdue > 0 ? ' is-alert' : ''}`}
-          onClick={() => setOpenSection('overdue')}
+          className={`dashboard-peek-item${openSection === 'overdue' ? ' is-active' : ''}`}
+          onClick={() => toggleSection('overdue')}
         >
           <span className="dashboard-peek-label">Overdue</span>
           <span className="dashboard-peek-value">{money(total_overdue)}</span>
         </button>
         <button
           type="button"
-          className={`dashboard-peek-item${help_outstanding > 0 ? ' is-help' : ''}`}
-          onClick={() => setOpenSection('help')}
+          className={`dashboard-peek-item${openSection === 'help' ? ' is-active' : ''}`}
+          onClick={() => toggleSection('help')}
         >
           <span className="dashboard-peek-label">{help_outstanding > 0 ? 'Help out' : 'Help given'}</span>
           <span className="dashboard-peek-value">{money(help_outstanding > 0 ? help_outstanding : help_given)}</span>
@@ -317,7 +443,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
           openId={openSection}
           onOpenChange={setOpenSection}
           title="Overview"
-          hint={`${total_bills} bills · help ${money(help_given)}${help_outstanding > 0 ? ` · out ${money(help_outstanding)}` : ''}`}
+          hint={`${total_bills} bills · Total Profit: ${money(profit_total)}${help_outstanding > 0 ? ` · help out ${money(help_outstanding)}` : ''}`}
           icon={TrendingUp}
         >
           <div className="stats-grid stats-grid-quiet">
@@ -332,6 +458,12 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
               value={money(profit_month)}
               hint={`Sales ${money(sales_month)} − cost ${money(cost_month)}`}
               icon={CalendarDays}
+            />
+            <StatCard
+              label="Total profit"
+              value={money(profit_total)}
+              hint={`All-time margin: ${margin_total}% · Sales ${money(sales_total)}`}
+              icon={TrendingUp}
             />
             <StatCard
               label="Collected"
@@ -584,16 +716,106 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
         </DashDropdown>
 
         <DashDropdown
-          id="closing"
+          id="profit"
           openId={openSection}
           onOpenChange={setOpenSection}
-          title="Day close"
-          hint="Cash vs collected today"
-          icon={Calculator}
+          title="Daily & total profit margins"
+          hint={`Today: ${money(profit_today)} (${margin_today}%) · Total Profit: ${money(profit_total)} (${margin_total}%)`}
+          icon={Wallet}
         >
-          <Suspense fallback={<p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading…</p>}>
-            <DailyClosePanel embedded currencySymbol={currencySymbol} />
-          </Suspense>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '0.25rem 0' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
+              {/* Today's Profit Box */}
+              <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 8px)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Today's Profit
+                  </span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 800, padding: '0.2rem 0.55rem', borderRadius: 999, background: profit_today >= 0 ? 'rgba(34, 197, 94, 0.14)' : 'rgba(239, 68, 68, 0.14)', color: profit_today >= 0 ? '#16a34a' : '#ef4444' }}>
+                    {margin_today}% Margin
+                  </span>
+                </div>
+                <div style={{ fontSize: '1.65rem', fontWeight: 900, color: profit_today >= 0 ? 'var(--text-primary)' : '#ef4444', fontFamily: 'var(--font-mono)' }}>
+                  {money(profit_today)}
+                </div>
+                <div style={{ marginTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.84rem', color: 'var(--text-secondary)', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Gross Sales:</span>
+                    <strong className="mono" style={{ color: 'var(--text-primary)' }}>{money(sales_today)}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Import Cost:</span>
+                    <strong className="mono" style={{ color: 'var(--text-primary)' }}>−{money(cost_today)}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Month's Profit Box */}
+              <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 8px)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    This Month ({new Date().toLocaleString('default', { month: 'short' })})
+                  </span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 800, padding: '0.2rem 0.55rem', borderRadius: 999, background: profit_month >= 0 ? 'rgba(34, 197, 94, 0.14)' : 'rgba(239, 68, 68, 0.14)', color: profit_month >= 0 ? '#16a34a' : '#ef4444' }}>
+                    {margin_month}% Margin
+                  </span>
+                </div>
+                <div style={{ fontSize: '1.65rem', fontWeight: 900, color: profit_month >= 0 ? 'var(--text-primary)' : '#ef4444', fontFamily: 'var(--font-mono)' }}>
+                  {money(profit_month)}
+                </div>
+                <div style={{ marginTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.84rem', color: 'var(--text-secondary)', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Monthly Sales:</span>
+                    <strong className="mono" style={{ color: 'var(--text-primary)' }}>{money(sales_month)}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Total Cost:</span>
+                    <strong className="mono" style={{ color: 'var(--text-primary)' }}>−{money(cost_month)}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Total All-Time Profit Box */}
+              <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 8px)', border: '1px solid rgba(212, 175, 55, 0.35)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Total All-Time Profit
+                  </span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 800, padding: '0.2rem 0.55rem', borderRadius: 999, background: profit_total >= 0 ? 'rgba(34, 197, 94, 0.18)' : 'rgba(239, 68, 68, 0.18)', color: profit_total >= 0 ? '#16a34a' : '#ef4444' }}>
+                    {margin_total}% Margin
+                  </span>
+                </div>
+                <div style={{ fontSize: '1.65rem', fontWeight: 900, color: profit_total >= 0 ? '#d4af37' : '#ef4444', fontFamily: 'var(--font-mono)' }}>
+                  {money(profit_total)}
+                </div>
+                <div style={{ marginTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.84rem', color: 'var(--text-secondary)', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Total Sales:</span>
+                    <strong className="mono" style={{ color: 'var(--text-primary)' }}>{money(sales_total)}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Total Import Cost:</span>
+                    <strong className="mono" style={{ color: 'var(--text-primary)' }}>−{money(cost_total)}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ width: 'auto', fontSize: '0.82rem', padding: '0.45rem 1rem' }}
+                disabled={generatingReport}
+                onClick={handleDownloadDailyReport}
+              >
+                <Download size={15} /> {generatingReport ? 'Generating PDF…' : 'Download Daily Executive PDF'}
+              </button>
+              <button type="button" className="btn-secondary" style={{ width: 'auto', fontSize: '0.82rem', padding: '0.45rem 0.9rem' }} onClick={() => onNavigate('cashflow')}>
+                View Full Cashflow <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
         </DashDropdown>
 
         <DashDropdown

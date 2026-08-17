@@ -63,6 +63,7 @@ function initTables() {
       { name: 'header_layout', type: 'TEXT DEFAULT "split"' },
       { name: 'signature_url', type: 'TEXT DEFAULT ""' },
       { name: 'show_paid_stamp', type: 'INTEGER DEFAULT 1' },
+      { name: 'sound_effects', type: 'INTEGER DEFAULT 1' },
     ];
 
     columnsToAdd.forEach((col) => {
@@ -185,6 +186,7 @@ function initTables() {
     db.run(`ALTER TABLE bills ADD COLUMN cancel_reason TEXT DEFAULT ''`, () => {});
     db.run(`ALTER TABLE bills ADD COLUMN cancelled_at TEXT DEFAULT ''`, () => {});
     db.run(`ALTER TABLE bills ADD COLUMN bill_time TEXT DEFAULT ''`, () => {});
+    db.run(`ALTER TABLE bills ADD COLUMN is_bookmarked INTEGER DEFAULT 0`, () => {});
 
     // Bill Items Table
     db.run(`

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle, FileText, ChevronDown } from 'lucide-react';
+import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle, FileText, ChevronDown, Bookmark } from 'lucide-react';
 import BillAdjustSheet from './BillAdjustSheet';
 import StatusBadge, { StatusSelect } from './StatusBadge';
 import TypeSelect from './TypeSelect';
@@ -123,6 +123,7 @@ export default function BillsDatabase({
     return 'all';
   });
   const [statusFilter, setStatusFilter] = useState('all');
+  const [showBookmarkedOnly, setShowBookmarkedOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [visibleCount, setVisibleCount] = useState(BILLS_PAGE_SIZE);
@@ -598,8 +599,38 @@ export default function BillsDatabase({
     }
   };
 
-  const visibleBills = bills.slice(0, visibleCount);
-  const hiddenCount = Math.max(0, bills.length - visibleCount);
+  const handleToggleBookmark = async (bill, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const nextVal = bill.is_bookmarked ? 0 : 1;
+    setBills((prev) =>
+      prev.map((b) => (b.id === bill.id ? { ...b, is_bookmarked: nextVal } : b))
+    );
+    try {
+      const res = await apiFetch(`/api/bills/${bill.id}/bookmark`, { method: 'POST' });
+      if (!res.ok) throw new Error('Bookmark toggle failed');
+      const data = await res.json();
+      setBills((prev) =>
+        prev.map((b) => (b.id === bill.id ? { ...b, is_bookmarked: data.is_bookmarked } : b))
+      );
+      toast.success(nextVal ? 'Bill bookmarked ⭐' : 'Bookmark removed');
+    } catch {
+      setBills((prev) =>
+        prev.map((b) => (b.id === bill.id ? { ...b, is_bookmarked: bill.is_bookmarked } : b))
+      );
+      toast.error('Failed to update bookmark');
+    }
+  };
+
+  const bookmarkedCount = bills.filter((b) => Boolean(b.is_bookmarked)).length;
+  const filteredBills = bills.filter((b) => {
+    if (showBookmarkedOnly && !b.is_bookmarked) return false;
+    return true;
+  });
+  const visibleBills = filteredBills.slice(0, visibleCount);
+  const hiddenCount = Math.max(0, filteredBills.length - visibleCount);
 
   return (
     <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -608,7 +639,7 @@ export default function BillsDatabase({
         <div>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 900 }}>Master Invoices & Bills Database</h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            Edit party names, city/country rates, quantities, and totals directly in the database
+            Edit party names, rates, quantities, and totals directly in the database
           </p>
         </div>
 
@@ -631,70 +662,98 @@ export default function BillsDatabase({
         </div>
       </div>
 
-      {/* Filter Toolbar: Category Pills + Search + Payment Status */}
-      <div className="surface-block filter-toolbar" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', padding: '0.85rem' }}>
-        {/* Category Pills */}
-        <div className="filter-pills" style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+      {/* Clean Modern Filter Panel */}
+      <div className="bills-filter-panel">
+        {/* Row 1: Search Input + Starred Filter Toggle */}
+        <div className="bills-search-row">
+          <div className="bills-search-input-wrap">
+            <Search size={16} className="bills-search-icon" aria-hidden />
+            <input
+              type="text"
+              className="bills-search-input"
+              placeholder="Search by party, city, notes or bill #…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="bills-search-clear"
+                onClick={() => setSearchQuery('')}
+                title="Clear search"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
           <button
             type="button"
-            className={`nav-btn ${billTypeFilter === 'all' ? 'active' : ''}`}
-            onClick={() => setBillTypeFilter('all')}
-            style={{ padding: '0.45rem 0.9rem', fontSize: '0.825rem' }}
+            className={`bills-bookmark-filter-btn${showBookmarkedOnly ? ' is-active' : ''}`}
+            onClick={() => setShowBookmarkedOnly(!showBookmarkedOnly)}
+            title={showBookmarkedOnly ? 'Show all bills' : 'Show only bookmarked bills'}
           >
-            All ({bills.length})
-          </button>
-          <button
-            type="button"
-            className={`nav-btn ${billTypeFilter === 'customer' ? 'active' : ''}`}
-            onClick={() => setBillTypeFilter('customer')}
-            style={{ padding: '0.45rem 0.9rem', fontSize: '0.825rem' }}
-          >
-            Sales
-          </button>
-          <button
-            type="button"
-            className={`nav-btn ${billTypeFilter === 'supplier' ? 'active' : ''}`}
-            onClick={() => setBillTypeFilter('supplier')}
-            style={{ padding: '0.45rem 0.9rem', fontSize: '0.825rem' }}
-          >
-            Saudia
-          </button>
-          <button
-            type="button"
-            className={`nav-btn ${billTypeFilter === 'help' ? 'active' : ''}`}
-            onClick={() => setBillTypeFilter('help')}
-            style={{ padding: '0.45rem 0.9rem', fontSize: '0.825rem' }}
-          >
-            Help
+            <Bookmark size={15} fill={showBookmarkedOnly ? '#d4af37' : 'none'} />
+            <span>Starred</span>
+            <span className="bills-bookmark-count">{bookmarkedCount}</span>
           </button>
         </div>
 
-        {/* Search */}
-        <div style={{ position: 'relative', flex: 1, minWidth: '160px', width: '100%' }}>
-          <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-          <input
-            type="text"
-            className="form-input"
-            style={{ paddingLeft: '2.4rem' }}
-            placeholder="Search party, city or bill #..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-
-        {/* Payment Status Pills */}
-        <div className="filter-pills" style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
-          {['all', 'paid', 'pending', 'overdue', 'cancelled'].map((st) => (
+        {/* Row 2: Segmented Category Tabs + Status Dropdown */}
+        <div className="bills-filter-controls">
+          <div className="bills-type-segmented" role="tablist" aria-label="Bill categories">
             <button
-              key={st}
               type="button"
-              className={`nav-btn ${statusFilter === st ? 'active' : ''}`}
-              onClick={() => setStatusFilter(st)}
-              style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', textTransform: 'capitalize' }}
+              role="tab"
+              aria-selected={billTypeFilter === 'all'}
+              className={`bills-type-tab${billTypeFilter === 'all' ? ' is-active' : ''}`}
+              onClick={() => setBillTypeFilter('all')}
             >
-              {st === 'pending' ? 'Due' : st}
+              All <span className="tab-badge">{bills.length}</span>
             </button>
-          ))}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={billTypeFilter === 'customer'}
+              className={`bills-type-tab${billTypeFilter === 'customer' ? ' is-active' : ''}`}
+              onClick={() => setBillTypeFilter('customer')}
+            >
+              Sales
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={billTypeFilter === 'supplier'}
+              className={`bills-type-tab${billTypeFilter === 'supplier' ? ' is-active' : ''}`}
+              onClick={() => setBillTypeFilter('supplier')}
+            >
+              Saudia
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={billTypeFilter === 'help'}
+              className={`bills-type-tab${billTypeFilter === 'help' ? ' is-active' : ''}`}
+              onClick={() => setBillTypeFilter('help')}
+            >
+              Help
+            </button>
+          </div>
+
+          <div className="bills-status-segmented">
+            <AppSelect
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={[
+                { value: 'all', label: 'All Statuses' },
+                { value: 'pending', label: 'Due / Unpaid' },
+                { value: 'paid', label: 'Paid / Cleared' },
+                { value: 'overdue', label: 'Overdue' },
+                { value: 'cancelled', label: 'Cancelled' },
+              ]}
+              style={{ minWidth: 155 }}
+            />
+          </div>
         </div>
       </div>
 
@@ -750,7 +809,29 @@ export default function BillsDatabase({
                         />
                       )}
                     </td>
-                    <td className="invoice-mono">{bill.invoice_number}</td>
+                    <td className="invoice-mono">
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
+                        <button
+                          type="button"
+                          className="btn-bookmark-icon"
+                          onClick={(e) => handleToggleBookmark(bill, e)}
+                          title={bill.is_bookmarked ? 'Remove bookmark' : 'Bookmark bill'}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            padding: 2,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            color: bill.is_bookmarked ? '#d4af37' : 'var(--text-muted)',
+                            transition: 'transform 0.15s ease, color 0.15s ease',
+                          }}
+                        >
+                          <Bookmark size={15} fill={bill.is_bookmarked ? '#d4af37' : 'none'} />
+                        </button>
+                        <span>{bill.invoice_number}</span>
+                      </div>
+                    </td>
                     <td>
                       <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>{bill.customer_name}</div>
                       {(billBalance(bill) > 0 || Number(bill.amount_paid) > 0) && (
@@ -777,14 +858,14 @@ export default function BillsDatabase({
                       )}
                     </td>
                     <td style={{ textAlign: 'center' }}>
-                      <div style={{ display: 'flex', justifyContent: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
-                        <button className="btn-secondary" style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto' }} onClick={() => onViewBill(bill)}>
+                      <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                        <button className="btn-secondary" style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto' }} onClick={() => onViewBill(bill)} title="View bill">
                           <Eye size={14} /> View
                         </button>
                         {!isCancelled(bill) && (
                           <button
                             className="btn-secondary"
-                            style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto', opacity: canTakePayment(bill) ? 1 : 0.45 }}
+                            style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto' }}
                             onClick={() => openPayModal(bill)}
                             disabled={!canTakePayment(bill)}
                             title={
@@ -795,27 +876,6 @@ export default function BillsDatabase({
                           >
                             <Banknote size={14} /> Pay
                           </button>
-                        )}
-                        {canTakePayment(bill) &&
-                          bill.bill_type !== 'supplier' && (
-                          <>
-                            <button
-                              className="btn-secondary"
-                              style={{ padding: '0.35rem 0.55rem', width: 'auto', color: '#25D366' }}
-                              onClick={() => handleRemind(bill, 'whatsapp')}
-                              title="WhatsApp reminder"
-                            >
-                              <MessageSquare size={14} />
-                            </button>
-                            <button
-                              className="btn-secondary"
-                              style={{ padding: '0.35rem 0.55rem', width: 'auto' }}
-                              onClick={() => handleRemind(bill, 'sms')}
-                              title="SMS reminder"
-                            >
-                              <Smartphone size={14} />
-                            </button>
-                          </>
                         )}
                         {!isCancelled(bill) && (
                           <button className="btn-secondary" style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', width: 'auto' }} onClick={() => handleOpenEditModal(bill)}>
@@ -859,7 +919,26 @@ export default function BillsDatabase({
               <div className="mobile-card bills-bill-card" key={`m-${bill.id}`}>
                 <div className="bills-card-head">
                   <div className="bills-card-who">
-                    <div className="mobile-card-title">{bill.customer_name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <div className="mobile-card-title">{bill.customer_name}</div>
+                      <button
+                        type="button"
+                        className="btn-bookmark-icon"
+                        onClick={(e) => handleToggleBookmark(bill, e)}
+                        title={bill.is_bookmarked ? 'Remove bookmark' : 'Bookmark bill'}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: 2,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          color: bill.is_bookmarked ? '#d4af37' : 'var(--text-muted)',
+                        }}
+                      >
+                        <Bookmark size={16} fill={bill.is_bookmarked ? '#d4af37' : 'none'} />
+                      </button>
+                    </div>
                     <div className="bills-card-inv invoice-mono">{bill.invoice_number}</div>
                     <div className="mobile-card-meta">{formatBillDateTime(bill)}</div>
                   </div>

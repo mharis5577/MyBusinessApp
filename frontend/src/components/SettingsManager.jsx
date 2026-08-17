@@ -16,7 +16,10 @@ import {
   Palette,
   ImagePlus,
   Layout,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
+import { playSuccessChime, setSoundEnabled } from '../utils/audioEffects';
 import { compressImageToDataUrl } from '../utils/imageCompress';
 import { checkBiometricAvailable } from '../utils/appSecurity';
 import { cancelDueReminders, requestDueReminderPermission, syncDueReminders, sendTestDueNotification } from '../utils/dueReminders';
@@ -910,6 +913,48 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
               }}
             >
               <Bell size={14} /> Send test notification
+            </button>
+          )}
+        </div>
+
+        <div className="surface-block" style={{ marginTop: '0.75rem', padding: '0.9rem 1rem' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', fontSize: '0.9rem', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              style={{ marginTop: 3 }}
+              checked={settings.sound_effects !== 0 && settings.sound_effects !== false}
+              onChange={(e) => {
+                const on = e.target.checked;
+                handleChange('sound_effects', on ? 1 : 0);
+                setSoundEnabled(on);
+                if (on) {
+                  playSuccessChime();
+                  toast.success('Audio sound effects enabled');
+                } else {
+                  toast.info('Audio sound effects disabled');
+                }
+              }}
+            />
+            <span>
+              <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Volume2 size={16} /> Luxury Audio & Sound Effects
+              </strong>
+              <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                Subtle luxury clicks on button taps and melodic chimes on payment, saving bills, and starring. Can be turned off anytime.
+              </span>
+            </span>
+          </label>
+          {(settings.sound_effects !== 0 && settings.sound_effects !== false) && (
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ width: 'auto', marginTop: '0.75rem', fontSize: '0.78rem' }}
+              onClick={() => {
+                playSuccessChime();
+                toast.success('Playing audio chime preview 🔔');
+              }}
+            >
+              <Volume2 size={14} /> Test sound effect
             </button>
           )}
         </div>

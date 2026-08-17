@@ -168,3 +168,170 @@ export async function downloadTablePdf({
   await downloadBlob(blob, filename, 'application/pdf');
   return 'downloaded';
 }
+
+/**
+ * Generate a luxury 1-page Daily Profit & Sales Summary PDF report.
+ */
+export async function downloadDailyProfitSummaryPdf({
+  companyName = 'ELITE CHOCOLATE',
+  currencySymbol = 'Rs.',
+  stats = {},
+  bills = [],
+  filename = 'Daily_Profit_Summary.pdf',
+}) {
+  const { jsPDF } = await import('jspdf');
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'pt',
+    format: 'a4',
+    compress: true,
+  });
+
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const margin = 32;
+  const usableW = pageWidth - margin * 2;
+  let y = margin;
+
+  // 1. Top Brand Banner
+  pdf.setFillColor(20, 13, 9);
+  pdf.roundedRect(margin, y, usableW, 58, 6, 6, 'F');
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(15);
+  pdf.setTextColor(212, 175, 55);
+  pdf.text(String(companyName).toUpperCase(), margin + 14, y + 24);
+
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(9);
+  pdf.setTextColor(230, 220, 210);
+  pdf.text('DAILY PERFORMANCE & PROFIT EXECUTIVE REPORT', margin + 14, y + 42);
+
+  const nowStr = new Date().toLocaleDateString('en-PK', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(10);
+  pdf.setTextColor(255, 255, 255);
+  pdf.text(nowStr, pageWidth - margin - 14, y + 33, { align: 'right' });
+
+  y += 72;
+
+  // 2. KPI Cards Grid (4 boxes)
+  const kpis = [
+    { label: 'SALES TODAY', value: `${currencySymbol} ${exportMoney(stats.sales_today || 0)}`, color: [0, 179, 166] },
+    { label: 'IMPORT / STOCK COST', value: `${currencySymbol} ${exportMoney(stats.cost_today || 0)}`, color: [100, 100, 100] },
+    { label: 'NET PROFIT TODAY', value: `${currencySymbol} ${exportMoney(stats.profit_today || 0)}`, color: [34, 197, 94] },
+    { label: 'PROFIT MARGIN', value: `${Number(stats.margin_today || 0).toFixed(1)}%`, color: [212, 175, 55] },
+  ];
+
+  const cardW = (usableW - 18) / 2;
+  const cardH = 46;
+
+  kpis.forEach((kpi, idx) => {
+    const col = idx % 2;
+    const row = Math.floor(idx / 2);
+    const cx = margin + col * (cardW + 18);
+    const cy = y + row * (cardH + 10);
+
+    pdf.setFillColor(248, 247, 244);
+    pdf.setDrawColor(220, 218, 210);
+    pdf.roundedRect(cx, cy, cardW, cardH, 4, 4, 'FD');
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(110, 110, 110);
+    pdf.text(kpi.label, cx + 10, cy + 16);
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(13);
+    pdf.setTextColor(kpi.color[0], kpi.color[1], kpi.color[2]);
+    pdf.text(kpi.value, cx + 10, cy + 34);
+  });
+
+  y += cardH * 2 + 22;
+
+  // 3. Additional Financial Metrics Row
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(10);
+  pdf.setTextColor(20, 20, 20);
+  pdf.text("Today's Bills & Invoices", margin, y);
+  y += 12;
+
+  // 4. Bills Table
+  const headers = ['Type', 'Invoice #', 'Customer / Party', 'Amount', 'Status'];
+  const colWeights = [1.2, 1.6, 2.8, 1.8, 1.2];
+  const weightSum = colWeights.reduce((a, b) => a + b, 0);
+  const colWidths = colWeights.map((w) => (usableW * w) / weightSum);
+  const colX = [];
+  {
+    let x = margin;
+    for (let i = 0; i < headers.length; i += 1) {
+      colX.push(x);
+      x += colWidths[i];
+    }
+  }
+
+  // Header band
+  pdf.setFillColor(20, 13, 9);
+  pdf.rect(margin, y, usableW, 20, 'F');
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(8);
+  pdf.setTextColor(212, 175, 55);
+  headers.forEach((h, i) => {
+    pdf.text(h, colX[i] + 4, y + 13);
+  });
+  y += 20;
+
+  const todayBills = (bills || []).slice(0, 18);
+  if (!todayBills.length) {
+    pdf.setFont('helvetica', 'italic');
+    pdf.setFontSize(9);
+    pdf.setTextColor(130, 130, 130);
+    pdf.text('No bills generated today so far.', margin + 8, y + 18);
+    y += 30;
+  } else {
+    todayBills.forEach((b, rIdx) => {
+      const bg = rIdx % 2 === 0 ? 255 : 249;
+      pdf.setFillColor(bg, bg, bg);
+      pdf.rect(margin, y, usableW, 20, 'F');
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(8);
+      pdf.setTextColor(30, 30, 30);
+
+      const typeStr = (b.bill_type || 'sale').toUpperCase();
+      const invStr = String(b.invoice_number || '');
+      const custStr = String(b.customer_name || 'Walk-in');
+      const amtStr = `${currencySymbol} ${exportMoney(b.total_amount || 0)}`;
+      const statusStr = (b.status || 'paid').toUpperCase();
+
+      pdf.text(typeStr, colX[0] + 4, y + 13);
+      pdf.text(invStr, colX[1] + 4, y + 13);
+      pdf.text(custStr.substring(0, 24), colX[2] + 4, y + 13);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text(amtStr, colX[3] + 4, y + 13);
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(statusStr, colX[4] + 4, y + 13);
+
+      y += 20;
+    });
+  }
+
+  // Footer Note
+  pdf.setDrawColor(212, 175, 55);
+  pdf.setLineWidth(1);
+  pdf.line(margin, y + 8, pageWidth - margin, y + 8);
+
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(7.5);
+  pdf.setTextColor(140, 140, 140);
+  pdf.text('Generated with Elite Chocolate POS & Business Suite · Confidential Business Report', margin, y + 22);
+
+  const blob = pdf.output('blob');
+  await downloadBlob(blob, filename, 'application/pdf');
+  return 'downloaded';
+}
+

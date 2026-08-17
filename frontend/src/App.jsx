@@ -14,6 +14,7 @@ import {
   MoreHorizontal,
   Fingerprint,
   Clock,
+  Sparkles,
 } from 'lucide-react';
 import DashboardStats from './components/DashboardStats';
 import MoreMenu from './components/MoreMenu';
@@ -22,6 +23,7 @@ import BrandMark, { BrandWordmark } from './components/BrandMark';
 import DataSafetySheet, { hasSeenDataSafety } from './components/DataSafetySheet';
 import ErrorBoundary from './components/ErrorBoundary';
 import { apiFetch } from './api/client';
+import { playTapSound, playSuccessChime } from './utils/audioEffects';
 import { useToast } from './toast/ToastContext';
 import { maybeAutoBackup } from './utils/backupManager';
 import { dueRemindersEnabled, syncDueReminders } from './utils/dueReminders';
@@ -67,7 +69,7 @@ const KEEP_ALIVE_TABS = ['dashboard', 'create', 'database'];
 function getInitialTheme() {
   try {
     const saved = localStorage.getItem(THEME_KEY);
-    if (saved === 'light' || saved === 'dark') return saved;
+    if (saved === 'light' || saved === 'dark' || saved === 'chocolatier') return saved;
   } catch (_) {
     /* ignore */
   }
@@ -120,6 +122,7 @@ export default function App() {
 
   const goToTab = useCallback((tab) => {
     if (!tab || tab === currentTab) return;
+    playTapSound();
     const from = TAB_ORDER.indexOf(currentTab);
     const to = TAB_ORDER.indexOf(tab);
     setTabDir(from >= 0 && to >= 0 && to < from ? 'back' : 'forward');
@@ -304,6 +307,7 @@ export default function App() {
 
   const handleBillGenerated = (newBill) => {
     setSelectedBill(newBill);
+    playSuccessChime();
     goToTab('preview');
   };
 
@@ -335,8 +339,27 @@ export default function App() {
     }
   };
 
+  const handleEditBill = async (bill) => {
+    try {
+      const full = await loadFullBill(bill);
+      if (!full?.id) {
+        toast.error('Could not open this bill for editing');
+        return;
+      }
+      setDraftBill({ ...full, isEditing: true });
+      goToTab('create');
+    } catch (err) {
+      toast.error(err?.message || 'Could not open this bill for editing');
+    }
+  };
+
   const toggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+    playTapSound();
+    setTheme((prev) => {
+      if (prev === 'light') return 'dark';
+      if (prev === 'dark') return 'chocolatier';
+      return 'light';
+    });
   };
 
   const handleInstallApp = async () => {
@@ -490,8 +513,20 @@ export default function App() {
           >
             <Settings size={18} />
           </button>
-          <button type="button" className="nav-btn icon-only" onClick={toggleTheme} title="Toggle theme">
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          <button
+            type="button"
+            className="nav-btn icon-only"
+            onClick={toggleTheme}
+            title={theme === 'chocolatier' ? 'Theme: Chocolatier Velvet' : theme === 'dark' ? 'Theme: Dark Mode' : 'Theme: Light Mode'}
+            aria-label="Toggle App Theme"
+          >
+            {theme === 'dark' ? (
+              <Sun size={18} />
+            ) : theme === 'chocolatier' ? (
+              <Sparkles size={18} style={{ color: '#d4af37' }} />
+            ) : (
+              <Moon size={18} />
+            )}
           </button>
         </div>
       </header>
@@ -570,6 +605,7 @@ export default function App() {
                   bill={selectedBill}
                   onBack={() => goToTab('database')}
                   onDuplicate={handleDuplicateBill}
+                  onEdit={handleEditBill}
                   onBillUpdated={setSelectedBill}
                   currencySymbol={settings.currency_symbol || 'Rs.'}
                   urduLabels={Boolean(settings.urdu_labels)}
@@ -582,6 +618,8 @@ export default function App() {
                   currencySymbol={settings.currency_symbol || 'Rs.'}
                   settings={settings}
                   onViewBill={handleViewBill}
+                  onDuplicateBill={handleDuplicateBill}
+                  onNavigate={(tab) => goToTab(tab)}
                 />
               )}
 

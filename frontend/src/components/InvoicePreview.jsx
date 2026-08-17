@@ -20,6 +20,9 @@ import {
   ChevronDown,
   Palette,
   Check,
+  Sparkles,
+  Edit3,
+  Bookmark,
 } from 'lucide-react';
 import {
   INVOICE_TEMPLATES,
@@ -61,7 +64,7 @@ const BILL_VIEW_KEY = 'cocoadesk-bill-view';
 function loadBillView() {
   try {
     const v = localStorage.getItem(BILL_VIEW_KEY);
-    if (v === 'mobile' || v === 'desktop' || v === 'thermal') return v;
+    if (v === 'mobile' || v === 'desktop' || v === 'thermal' || v === 'story') return v;
   } catch {
     /* ignore */
   }
@@ -150,7 +153,7 @@ function InvMenuItem({ icon: Icon, label, onClick, disabled, danger = false, bus
   );
 }
 
-export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdated, currencySymbol = 'Rs.', urduLabels = false, settings: settingsProp = {} }) {
+export default function InvoicePreview({ bill, onBack, onDuplicate, onEdit, onBillUpdated, currencySymbol = 'Rs.', urduLabels = false, settings: settingsProp = {} }) {
   const toast = useToast();
   const [settings, setSettings] = useState(settingsProp || {});
   const [template, setTemplateState] = useState(() =>
@@ -224,6 +227,30 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
       })
       .catch((err) => console.error(err));
   }, [settingsProp]);
+
+  const [isBookmarked, setIsBookmarked] = useState(Boolean(bill?.is_bookmarked));
+
+  useEffect(() => {
+    setIsBookmarked(Boolean(liveBill?.is_bookmarked));
+  }, [liveBill?.id, liveBill?.is_bookmarked]);
+
+  const handleToggleBookmark = async () => {
+    if (!liveBill?.id) return;
+    const nextVal = isBookmarked ? 0 : 1;
+    setIsBookmarked(Boolean(nextVal));
+    setLiveBill((prev) => (prev ? { ...prev, is_bookmarked: nextVal } : prev));
+    try {
+      const res = await apiFetch(`/api/bills/${liveBill.id}/bookmark`, { method: 'POST' });
+      if (!res.ok) throw new Error('Bookmark toggle failed');
+      const data = await res.json();
+      setIsBookmarked(Boolean(data.is_bookmarked));
+      setLiveBill((prev) => (prev ? { ...prev, is_bookmarked: data.is_bookmarked } : prev));
+      toast.success(nextVal ? 'Bill bookmarked ⭐' : 'Bookmark removed');
+    } catch {
+      setIsBookmarked(Boolean(liveBill?.is_bookmarked));
+      toast.error('Failed to update bookmark');
+    }
+  };
 
   const toggleDeveloperCredit = async (checked) => {
     setShowDeveloperCredit(checked);
@@ -579,8 +606,22 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
         ? 'overdue'
         : 'pending';
 
-  const viewLabel = billView === 'mobile' ? 'Mobile' : billView === 'thermal' ? 'Thermal' : 'Desktop';
-  const ViewIcon = billView === 'mobile' ? Smartphone : billView === 'thermal' ? Receipt : Monitor;
+  const viewLabel =
+    billView === 'mobile'
+      ? 'Mobile'
+      : billView === 'thermal'
+        ? 'Thermal'
+        : billView === 'story'
+          ? 'Story (9:16)'
+          : 'Desktop';
+  const ViewIcon =
+    billView === 'mobile'
+      ? Smartphone
+      : billView === 'thermal'
+        ? Receipt
+        : billView === 'story'
+          ? Sparkles
+          : Monitor;
   const currentTemplate = getInvoiceTemplate(template);
   const canRemind = balance > 0 && !cancelled && liveBill.bill_type !== 'supplier';
 
@@ -625,6 +666,11 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
               icon={Receipt}
               label="Thermal receipt"
               onClick={() => runMenuAction(() => setBillView('thermal'))}
+            />
+            <InvMenuItem
+              icon={Sparkles}
+              label="Story Card (9:16)"
+              onClick={() => runMenuAction(() => setBillView('story'))}
             />
           </InvDropdown>
 
@@ -722,6 +768,18 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
           </InvDropdown>
 
           <InvDropdown id="manage" openId={menuOpen} setOpenId={setMenuOpen} label="Manage" icon={Copy} disabled={busy} danger>
+            <InvMenuItem
+              icon={Bookmark}
+              label={isBookmarked ? 'Bookmarked (Starred) ⭐' : 'Bookmark this bill'}
+              onClick={() => runMenuAction(() => handleToggleBookmark())}
+            />
+            {(onEdit || onDuplicate) && (
+              <InvMenuItem
+                icon={Edit3}
+                label="Edit bill"
+                onClick={() => runMenuAction(() => (onEdit ? onEdit(liveBill) : onDuplicate(liveBill)))}
+              />
+            )}
             {onDuplicate && (
               <InvMenuItem
                 icon={Copy}
@@ -967,21 +1025,57 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
             <DeveloperCredit compact className="inv-developer-credit thermal-developer-credit" />
           ) : null}
         </div>
+      ) : billView === 'story' ? (
+        <div id="printable-invoice" className="story-card-sheet">
+          <div className="story-card-top">
+            <span className="story-card-badge">Order Summary</span>
+            <div style={{ margin: '0.5rem auto' }}>
+              <BrandMark size={46} logoUrl={settings.logo_url} />
+            </div>
+            <h2 className="story-card-company">{companyName}</h2>
+            <p style={{ fontSize: '0.78rem', color: '#d4af37', letterSpacing: '0.15em', textTransform: 'uppercase', marginTop: '0.2rem' }}>
+              {liveBill.invoice_number} · {formatBillDateTime(liveBill)}
+            </p>
+            <p style={{ fontSize: '1.05rem', fontWeight: 700, color: '#fdfbf7', marginTop: '0.45rem' }}>
+              Prepared for {liveBill.customer_name}
+            </p>
+          </div>
+
+          <div className="story-card-middle">
+            <div className="story-card-items-wrap">
+              {liveBill.items?.map((item, idx) => {
+                const rem = remainingQty(item);
+                return (
+                  <div key={idx} className="story-card-item-row">
+                    <span>{rem}× {item.description}</span>
+                    <strong style={{ fontFamily: 'var(--font-mono)', color: '#d4af37' }}>
+                      {formatCurrency(currencySymbol, rem * (Number(item.unit_price) || 0))}
+                    </strong>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="story-card-total-box">
+              <span style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>Total</span>
+              <span className="story-card-total-val">{formatCurrency(currencySymbol, liveBill.total_amount)}</span>
+            </div>
+          </div>
+
+          <div className="story-card-bottom">
+            <p className="story-card-thanks">"Thank you for choosing {companyName}!"</p>
+            <p className="story-card-contact">{settings.company_phone} · {settings.company_address}</p>
+            {showDeveloperCredit ? (
+              <DeveloperCredit compact className="inv-developer-credit" style={{ marginTop: '0.65rem' }} />
+            ) : null}
+          </div>
+        </div>
       ) : (
         <div
           id="printable-invoice"
           style={settings.custom_brand_color ? { '--inv-custom-accent': settings.custom_brand_color } : undefined}
           className={`invoice-sheet inv-template-${template} inv-header--${settings.header_layout || 'split'} ${billView === 'mobile' ? 'invoice-sheet--phone' : ''} ${urdu ? 'invoice-bilingual' : ''} ${cancelled ? 'is-cancelled' : ''}`}
         >
-          {displayStatus === 'paid' && settings.show_paid_stamp !== 0 && settings.show_paid_stamp !== false && (
-            <div className="inv-paid-stamp-wrapper">
-              <div className="inv-paid-stamp">
-                <span className="inv-paid-stamp-title">{urdu ? 'PAID / وصول شدہ' : 'PAID'}</span>
-                <span className="inv-paid-stamp-sub">VERIFIED & CLEARED</span>
-                <span className="inv-paid-stamp-date">{formatBillDateTime(liveBill)}</span>
-              </div>
-            </div>
-          )}
           <div className="inv-watermark" aria-hidden="true">
             <BrandMark size={240} logoUrl={settings.logo_url} />
           </div>
@@ -1088,6 +1182,15 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
           </table>
 
           <div className="inv-totals-wrap">
+            {displayStatus === 'paid' && settings.show_paid_stamp !== 0 && settings.show_paid_stamp !== false && (
+              <div className="inv-paid-stamp-wrapper">
+                <div className="inv-paid-stamp">
+                  <span className="inv-paid-stamp-title">{urdu ? 'PAID / وصول شدہ' : 'PAID'}</span>
+                  <span className="inv-paid-stamp-sub">VERIFIED & CLEARED</span>
+                  <span className="inv-paid-stamp-date">{formatBillDateTime(liveBill)}</span>
+                </div>
+              </div>
+            )}
             <div className="inv-totals">
               <div className="inv-total-row">
                 <BiLabel en="Subtotal" ur="ذیلی کل" urdu={urdu} />
