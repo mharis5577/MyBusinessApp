@@ -3,8 +3,28 @@ import React from 'react';
 /**
  * Elite Chocolate mark — same artwork as public/favicon.svg
  */
-export default function BrandMark({ size = 36, className = '', style }) {
+export default function BrandMark({ size = 36, className = '', style, logoUrl = '' }) {
   const px = typeof size === 'number' ? size : 36;
+  if (logoUrl) {
+    return (
+      <img
+        src={logoUrl}
+        alt="Logo"
+        className={`brand-logo-img ${className}`.trim()}
+        width={px}
+        height={px}
+        style={{
+          width: px,
+          height: px,
+          objectFit: 'contain',
+          borderRadius: 8,
+          flexShrink: 0,
+          display: 'block',
+          ...style,
+        }}
+      />
+    );
+  }
   return (
     <svg
       className={`brand-logo-svg ${className}`.trim()}

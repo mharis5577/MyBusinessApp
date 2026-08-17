@@ -170,6 +170,11 @@ app.put('/api/settings', async (req, res) => {
       biometric_lock,
       due_reminders,
       show_developer_credit,
+      default_invoice_template,
+      custom_brand_color,
+      header_layout,
+      signature_url,
+      show_paid_stamp,
     } = req.body;
 
     const pay = serializePaymentMethods(
@@ -209,6 +214,11 @@ app.put('/api/settings', async (req, res) => {
         biometric_lock = ?,
         due_reminders = ?,
         show_developer_credit = ?,
+        default_invoice_template = ?,
+        custom_brand_color = ?,
+        header_layout = ?,
+        signature_url = ?,
+        show_paid_stamp = ?,
         updated_at = CURRENT_TIMESTAMP
        WHERE id = (SELECT id FROM settings LIMIT 1)`,
       [
@@ -232,6 +242,11 @@ app.put('/api/settings', async (req, res) => {
         biometric_lock ? 1 : 0,
         due_reminders ? 1 : 0,
         show_developer_credit === 0 || show_developer_credit === false ? 0 : 1,
+        default_invoice_template || 'classic',
+        custom_brand_color || '',
+        header_layout || 'split',
+        signature_url || '',
+        show_paid_stamp === 0 || show_paid_stamp === false ? 0 : 1,
       ]
     );
 

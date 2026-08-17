@@ -18,7 +18,15 @@ import {
   Monitor,
   Receipt,
   ChevronDown,
+  Palette,
+  Check,
 } from 'lucide-react';
+import {
+  INVOICE_TEMPLATES,
+  loadInvoiceTemplate,
+  saveInvoiceTemplate,
+  getInvoiceTemplate,
+} from '../utils/invoiceTemplates';
 import BillAdjustSheet from './BillAdjustSheet';
 import SendBillSheet from './SendBillSheet';
 import BrandMark, { DeveloperCredit } from './BrandMark';
@@ -145,6 +153,9 @@ function InvMenuItem({ icon: Icon, label, onClick, disabled, danger = false, bus
 export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdated, currencySymbol = 'Rs.', urduLabels = false, settings: settingsProp = {} }) {
   const toast = useToast();
   const [settings, setSettings] = useState(settingsProp || {});
+  const [template, setTemplateState] = useState(() =>
+    loadInvoiceTemplate(settingsProp?.default_invoice_template || 'classic')
+  );
   const [billView, setBillViewState] = useState(() => loadBillView());
   const [sharing, setSharing] = useState(null);
   const [liveBill, setLiveBill] = useState(bill);
@@ -160,6 +171,11 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
   const [deleting, setDeleting] = useState(false);
   const [showDeveloperCredit, setShowDeveloperCredit] = useState(true);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
+
+  const setInvoiceTemplate = useCallback((tplId) => {
+    setTemplateState(tplId);
+    saveInvoiceTemplate(tplId);
+  }, []);
 
   const setBillView = useCallback((view) => {
     const next = view === 'mobile' || view === 'thermal' ? view : 'desktop';
@@ -192,6 +208,9 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
     if (settingsProp && Object.keys(settingsProp).length) {
       setSettings(settingsProp);
       setShowDeveloperCredit(settingsProp.show_developer_credit !== 0 && settingsProp.show_developer_credit !== false);
+      if (settingsProp.default_invoice_template) {
+        setTemplateState((cur) => (cur === 'classic' ? settingsProp.default_invoice_template : cur));
+      }
       return;
     }
     apiFetch('/api/settings')
@@ -199,6 +218,9 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
       .then((data) => {
         setSettings(data || {});
         setShowDeveloperCredit(data?.show_developer_credit !== 0 && data?.show_developer_credit !== false);
+        if (data?.default_invoice_template) {
+          setTemplateState((cur) => (cur === 'classic' ? data.default_invoice_template : cur));
+        }
       })
       .catch((err) => console.error(err));
   }, [settingsProp]);
@@ -559,6 +581,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
 
   const viewLabel = billView === 'mobile' ? 'Mobile' : billView === 'thermal' ? 'Thermal' : 'Desktop';
   const ViewIcon = billView === 'mobile' ? Smartphone : billView === 'thermal' ? Receipt : Monitor;
+  const currentTemplate = getInvoiceTemplate(template);
   const canRemind = balance > 0 && !cancelled && liveBill.bill_type !== 'supplier';
 
   const runMenuAction = (fn) => {
@@ -603,6 +626,45 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
               label="Thermal receipt"
               onClick={() => runMenuAction(() => setBillView('thermal'))}
             />
+          </InvDropdown>
+
+          <InvDropdown
+            id="template"
+            openId={menuOpen}
+            setOpenId={setMenuOpen}
+            label={currentTemplate.name}
+            icon={Palette}
+            disabled={busy || billView === 'thermal'}
+          >
+            {INVOICE_TEMPLATES.map((tmpl) => {
+              const isSel = template === tmpl.id;
+              return (
+                <button
+                  key={tmpl.id}
+                  type="button"
+                  role="menuitem"
+                  className={`inv-dd-item ${isSel ? 'is-active' : ''}`}
+                  onClick={() => runMenuAction(() => setInvoiceTemplate(tmpl.id))}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: '0.75rem' }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    <span
+                      style={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: '50%',
+                        backgroundColor: tmpl.primaryColor,
+                        border: tmpl.id === 'minimal' ? '1px solid #71717a' : 'none',
+                        display: 'inline-block',
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span>{tmpl.name}</span>
+                  </div>
+                  {isSel ? <Check size={14} style={{ color: 'var(--primary, #00b3a6)', marginLeft: 'auto' }} /> : null}
+                </button>
+              );
+            })}
           </InvDropdown>
 
           <button type="button" className="btn-primary invoice-send-in-grid" onClick={() => setSendOpen(true)} disabled={busy}>
@@ -819,7 +881,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
       {billView === 'thermal' ? (
         <div id="printable-invoice" className={`thermal-sheet ${urdu ? 'invoice-bilingual' : ''} ${cancelled ? 'is-cancelled' : ''}`}>
           <div className="thermal-head">
-            <BrandMark size={36} />
+            <BrandMark size={36} logoUrl={settings.logo_url} />
             <h3 className="thermal-brand">{companyName}</h3>
             <p className="thermal-meta">{settings.company_phone}</p>
             <p className="thermal-meta">{settings.company_address}</p>
@@ -908,15 +970,25 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
       ) : (
         <div
           id="printable-invoice"
-          className={`invoice-sheet ${billView === 'mobile' ? 'invoice-sheet--phone' : ''} ${urdu ? 'invoice-bilingual' : ''} ${cancelled ? 'is-cancelled' : ''}`}
+          style={settings.custom_brand_color ? { '--inv-custom-accent': settings.custom_brand_color } : undefined}
+          className={`invoice-sheet inv-template-${template} inv-header--${settings.header_layout || 'split'} ${billView === 'mobile' ? 'invoice-sheet--phone' : ''} ${urdu ? 'invoice-bilingual' : ''} ${cancelled ? 'is-cancelled' : ''}`}
         >
+          {displayStatus === 'paid' && settings.show_paid_stamp !== 0 && settings.show_paid_stamp !== false && (
+            <div className="inv-paid-stamp-wrapper">
+              <div className="inv-paid-stamp">
+                <span className="inv-paid-stamp-title">{urdu ? 'PAID / وصول شدہ' : 'PAID'}</span>
+                <span className="inv-paid-stamp-sub">VERIFIED & CLEARED</span>
+                <span className="inv-paid-stamp-date">{formatBillDateTime(liveBill)}</span>
+              </div>
+            </div>
+          )}
           <div className="inv-watermark" aria-hidden="true">
-            <BrandMark size={240} />
+            <BrandMark size={240} logoUrl={settings.logo_url} />
           </div>
           <div className="inv-topbar" />
           <header className="inv-header">
             <div className="inv-brand-block">
-              <BrandMark size={64} />
+              <BrandMark size={settings.header_layout === 'centered' ? 80 : 64} logoUrl={settings.logo_url} />
               <div>
                 {companyIsElite ? (
                   <>
@@ -1115,6 +1187,17 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onBillUpdate
           {liveBill.notes && (
             <div className="inv-notes">
               <strong><BiLabel en="Notes" ur="نوٹس" urdu={urdu} />:</strong> {liveBill.notes}
+            </div>
+          )}
+
+          {settings.signature_url && (
+            <div className="inv-signature-block">
+              <div className="inv-signature-box">
+                <img src={settings.signature_url} alt="Authorized Stamp / Signature" className="inv-signature-img" />
+                <div className="inv-signature-line">
+                  <BiLabel en="Authorized Sign / Stamp" ur="مجاز دستخط / مہر" urdu={urdu} />
+                </div>
+              </div>
             </div>
           )}
 

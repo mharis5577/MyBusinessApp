@@ -1715,6 +1715,523 @@ body {
   text-align: left;
 }
 
+/* ==========================================================================
+   INVOICE TEMPLATES & STYLES
+   ========================================================================== */
+
+/* 1. Classic Teal (Default) */
+.invoice-sheet.inv-template-classic .inv-topbar {
+  background: linear-gradient(90deg, #111111 0%, #00b3a6 70%, #f4f2eb 100%);
+}
+.invoice-sheet.inv-template-classic .inv-elite {
+  color: #00b3a6;
+}
+
+/* 2. Executive Navy */
+.invoice-sheet.inv-template-executive .inv-topbar {
+  height: 6px;
+  background: linear-gradient(90deg, #1e293b 0%, #2563eb 60%, #38bdf8 100%);
+}
+.invoice-sheet.inv-template-executive .inv-header {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%) !important;
+  border-bottom: 2px solid #334155;
+  color: #ffffff;
+}
+.invoice-sheet.inv-template-executive .inv-elite {
+  color: #38bdf8 !important;
+  letter-spacing: 0.3em;
+}
+.invoice-sheet.inv-template-executive .inv-company {
+  color: #ffffff !important;
+  font-weight: 700;
+}
+.invoice-sheet.inv-template-executive .inv-eyebrow {
+  color: #94a3b8 !important;
+}
+.invoice-sheet.inv-template-executive .inv-contact {
+  color: #cbd5e1 !important;
+}
+.invoice-sheet.inv-template-executive .inv-doc-label {
+  color: #38bdf8 !important;
+}
+.invoice-sheet.inv-template-executive .inv-number {
+  color: #ffffff !important;
+}
+.invoice-sheet.inv-template-executive .inv-table th {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-bottom: 2px solid #cbd5e1;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-executive .inv-table td.strong {
+  color: #1e3a8a;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-executive .inv-total-row.is-grand {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin-top: 0.35rem;
+}
+.invoice-sheet.inv-template-executive .inv-total-row.is-grand span {
+  color: #ffffff;
+}
+.invoice-sheet.inv-template-executive .inv-paybox {
+  background: #f8fafc;
+  border-left: 4px solid #2563eb;
+  border-color: #e2e8f0;
+}
+.invoice-sheet.inv-template-executive .inv-paybox strong {
+  color: #1e293b;
+}
+
+/* 3. Emerald Luxury */
+.invoice-sheet.inv-template-emerald .inv-topbar {
+  height: 6px;
+  background: linear-gradient(90deg, #064e3b 0%, #059669 60%, #d97706 100%);
+}
+.invoice-sheet.inv-template-emerald .inv-header {
+  background: linear-gradient(135deg, #064e3b 0%, #065f46 100%) !important;
+  border-bottom: 2px solid #047857;
+  color: #ffffff;
+}
+.invoice-sheet.inv-template-emerald .inv-elite {
+  color: #fbbf24 !important;
+  letter-spacing: 0.3em;
+}
+.invoice-sheet.inv-template-emerald .inv-company {
+  color: #ffffff !important;
+  font-weight: 700;
+}
+.invoice-sheet.inv-template-emerald .inv-eyebrow {
+  color: #a7f3d0 !important;
+}
+.invoice-sheet.inv-template-emerald .inv-contact {
+  color: #d1fae5 !important;
+}
+.invoice-sheet.inv-template-emerald .inv-doc-label {
+  color: #fbbf24 !important;
+}
+.invoice-sheet.inv-template-emerald .inv-number {
+  color: #ffffff !important;
+}
+.invoice-sheet.inv-template-emerald .inv-table th {
+  background: #ecfdf5;
+  color: #064e3b;
+  border-bottom: 2px solid #a7f3d0;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-emerald .inv-table td.strong {
+  color: #065f46;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-emerald .inv-total-row.is-grand {
+  background: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin-top: 0.35rem;
+}
+.invoice-sheet.inv-template-emerald .inv-total-row.is-grand span {
+  color: #ffffff;
+}
+.invoice-sheet.inv-template-emerald .inv-paybox {
+  background: #f0fdf4;
+  border-left: 4px solid #059669;
+  border-color: #d1fae5;
+}
+.invoice-sheet.inv-template-emerald .inv-paybox strong {
+  color: #064e3b;
+}
+
+/* 4. Minimal Monochrome */
+.invoice-sheet.inv-template-minimal .inv-topbar {
+  height: 4px;
+  background: #18181b;
+}
+.invoice-sheet.inv-template-minimal .inv-header {
+  background: #ffffff !important;
+  border-bottom: 2px solid #18181b;
+}
+.invoice-sheet.inv-template-minimal .inv-elite {
+  color: #71717a !important;
+  letter-spacing: 0.3em;
+}
+.invoice-sheet.inv-template-minimal .inv-company {
+  color: #18181b !important;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-minimal .inv-doc-label {
+  color: #18181b !important;
+}
+.invoice-sheet.inv-template-minimal .inv-number {
+  color: #18181b !important;
+}
+.invoice-sheet.inv-template-minimal .inv-table th {
+  background: #ffffff;
+  color: #18181b;
+  border-bottom: 2px solid #18181b;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-minimal .inv-table td {
+  border-bottom: 1px solid #e4e4e7;
+}
+.invoice-sheet.inv-template-minimal .inv-total-row.is-grand {
+  border-top: 2px solid #18181b;
+  border-bottom: 2px solid #18181b;
+  background: transparent;
+  color: #18181b;
+  padding: 0.65rem 0.25rem;
+  margin-top: 0.35rem;
+}
+.invoice-sheet.inv-template-minimal .inv-total-row.is-grand span {
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-minimal .inv-paybox {
+  background: #fafafa;
+  border-left: 3px solid #18181b;
+}
+
+/* 5. Sunset Amber */
+.invoice-sheet.inv-template-sunset .inv-topbar {
+  height: 6px;
+  background: linear-gradient(90deg, #ea580c 0%, #f97316 60%, #db2777 100%);
+}
+.invoice-sheet.inv-template-sunset .inv-header {
+  background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%) !important;
+  border-bottom: 2px solid #fed7aa;
+}
+.invoice-sheet.inv-template-sunset .inv-elite {
+  color: #ea580c !important;
+  letter-spacing: 0.28em;
+}
+.invoice-sheet.inv-template-sunset .inv-company {
+  color: #7c2d12 !important;
+  font-weight: 700;
+}
+.invoice-sheet.inv-template-sunset .inv-doc-label {
+  color: #c2410c !important;
+}
+.invoice-sheet.inv-template-sunset .inv-number {
+  color: #9a3412 !important;
+}
+.invoice-sheet.inv-template-sunset .inv-table th {
+  background: #ffedd5;
+  color: #9a3412;
+  border-bottom: 2px solid #fdba74;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-sunset .inv-table td.strong {
+  color: #c2410c;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-sunset .inv-total-row.is-grand {
+  background: linear-gradient(135deg, #ea580c 0%, #c2410c 100%);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin-top: 0.35rem;
+}
+.invoice-sheet.inv-template-sunset .inv-total-row.is-grand span {
+  color: #ffffff;
+}
+.invoice-sheet.inv-template-sunset .inv-paybox {
+  background: #fff7ed;
+  border-left: 4px solid #ea580c;
+  border-color: #fed7aa;
+}
+.invoice-sheet.inv-template-sunset .inv-paybox strong {
+  color: #9a3412;
+}
+
+/* 6. Royal Crimson */
+.invoice-sheet.inv-template-crimson .inv-topbar {
+  height: 6px;
+  background: linear-gradient(90deg, #881337 0%, #be123c 60%, #e11d48 100%);
+}
+.invoice-sheet.inv-template-crimson .inv-header {
+  background: linear-gradient(135deg, #881337 0%, #9f1239 100%) !important;
+  border-bottom: 2px solid #be123c;
+  color: #ffffff;
+}
+.invoice-sheet.inv-template-crimson .inv-elite {
+  color: #fda4af !important;
+  letter-spacing: 0.3em;
+}
+.invoice-sheet.inv-template-crimson .inv-company {
+  color: #ffffff !important;
+  font-weight: 700;
+}
+.invoice-sheet.inv-template-crimson .inv-eyebrow {
+  color: #fecdd3 !important;
+}
+.invoice-sheet.inv-template-crimson .inv-contact {
+  color: #ffe4e6 !important;
+}
+.invoice-sheet.inv-template-crimson .inv-doc-label {
+  color: #fda4af !important;
+}
+.invoice-sheet.inv-template-crimson .inv-number {
+  color: #ffffff !important;
+}
+.invoice-sheet.inv-template-crimson .inv-table th {
+  background: #fff1f2;
+  color: #881337;
+  border-bottom: 2px solid #fecdd3;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-crimson .inv-table td.strong {
+  color: #9f1239;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-crimson .inv-total-row.is-grand {
+  background: linear-gradient(135deg, #881337 0%, #9f1239 100%);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin-top: 0.35rem;
+}
+.invoice-sheet.inv-template-crimson .inv-total-row.is-grand span {
+  color: #ffffff;
+}
+.invoice-sheet.inv-template-crimson .inv-paybox {
+  background: #fff1f2;
+  border-left: 4px solid #be123c;
+  border-color: #fecdd3;
+}
+.invoice-sheet.inv-template-crimson .inv-paybox strong {
+  color: #881337;
+}
+
+/* Template Picker in Settings */
+.template-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.65rem;
+}
+
+.template-card {
+  background: var(--surface-secondary, rgba(255, 255, 255, 0.05));
+  border: 2px solid var(--border-color);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.template-card:hover {
+  border-color: var(--primary, #00b3a6);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.template-card.is-active {
+  border-color: var(--primary, #00b3a6);
+  background: var(--surface-active, rgba(0, 179, 166, 0.08));
+}
+
+.template-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.template-swatch-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.template-swatch-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.template-card-tagline {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+/* Header Layouts */
+.invoice-sheet.inv-header--banner .inv-header {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem 1.75rem;
+  border-bottom: 2px solid rgba(17, 17, 17, 0.12);
+}
+
+.invoice-sheet.inv-header--banner .inv-brand-block {
+  gap: 1.15rem;
+}
+
+.invoice-sheet.inv-header--banner .inv-doc-block {
+  background: rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(8px);
+  padding: 0.65rem 1.15rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  text-align: right;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.invoice-sheet.inv-header--centered .inv-header {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 1.15rem;
+  padding: 1.85rem 1.5rem 1.35rem;
+}
+
+.invoice-sheet.inv-header--centered .inv-brand-block {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.65rem;
+}
+
+.invoice-sheet.inv-header--centered .inv-doc-block {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-top: 1px dashed rgba(17, 17, 17, 0.15);
+  padding-top: 0.85rem;
+  width: 100%;
+  max-width: 340px;
+}
+
+/* Digital Paid Stamp */
+.inv-paid-stamp-wrapper {
+  position: absolute;
+  top: 1.5rem;
+  right: 2rem;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.inv-paid-stamp {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 3px double #16a34a;
+  border-radius: 8px;
+  padding: 0.35rem 0.85rem;
+  color: #16a34a;
+  font-family: var(--font-display, sans-serif);
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  transform: rotate(-14deg);
+  background: rgba(220, 252, 231, 0.82);
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.25);
+  opacity: 0.94;
+  user-select: none;
+}
+
+.inv-paid-stamp-title {
+  font-size: 1.15rem;
+  line-height: 1.1;
+}
+
+.inv-paid-stamp-sub {
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+.inv-paid-stamp-date {
+  font-size: 0.58rem;
+  font-family: var(--font-mono, monospace);
+  margin-top: 1px;
+  opacity: 0.8;
+}
+
+.invoice-sheet--phone .inv-paid-stamp-wrapper {
+  top: 0.75rem;
+  right: 1rem;
+  transform: scale(0.85);
+  transform-origin: top right;
+}
+
+/* Signature Block */
+.inv-signature-block {
+  display: flex;
+  justify-content: flex-end;
+  padding: 1rem 1.5rem 0;
+  margin-top: 0.5rem;
+}
+
+.inv-signature-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 150px;
+  text-align: center;
+}
+
+.inv-signature-img {
+  max-height: 52px;
+  max-width: 140px;
+  object-fit: contain;
+  margin-bottom: 4px;
+}
+
+.inv-signature-line {
+  width: 100%;
+  border-top: 1px solid #71717a;
+  margin-top: 4px;
+  padding-top: 3px;
+  font-size: 0.7rem;
+  color: #71717a;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+/* Custom Brand Color Overrides */
+.invoice-sheet[style*="--inv-custom-accent"] .inv-topbar {
+  background: var(--inv-custom-accent) !important;
+}
+
+.invoice-sheet[style*="--inv-custom-accent"] .inv-elite {
+  color: var(--inv-custom-accent) !important;
+}
+
+.invoice-sheet[style*="--inv-custom-accent"] .inv-doc-label {
+  color: var(--inv-custom-accent) !important;
+}
+
+.invoice-sheet[style*="--inv-custom-accent"] .inv-total-row.is-grand {
+  background: var(--inv-custom-accent) !important;
+  color: #ffffff !important;
+}
+
+.invoice-sheet[style*="--inv-custom-accent"] .inv-total-row.is-grand span {
+  color: #ffffff !important;
+}
+
+.invoice-sheet[style*="--inv-custom-accent"] .inv-paybox {
+  border-left-color: var(--inv-custom-accent) !important;
+}
+
 @media (max-width: 600px) {
   .invoice-sheet {
     border-radius: 14px;

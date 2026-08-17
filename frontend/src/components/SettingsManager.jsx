@@ -13,7 +13,11 @@ import {
   Fingerprint,
   Bell,
   Plus,
+  Palette,
+  ImagePlus,
+  Layout,
 } from 'lucide-react';
+import { compressImageToDataUrl } from '../utils/imageCompress';
 import { checkBiometricAvailable } from '../utils/appSecurity';
 import { cancelDueReminders, requestDueReminderPermission, syncDueReminders, sendTestDueNotification } from '../utils/dueReminders';
 import { formatCurrency } from '../utils/pakistan';
@@ -40,6 +44,8 @@ import { readPickedFileText } from '../utils/downloadFile';
 import { DeveloperCredit } from './BrandMark';
 import AppSelect from './AppSelect';
 import { emptyPaymentMethod, getPaymentMethods, withPaymentMethods } from '../utils/paymentMethods';
+import { INVOICE_TEMPLATES } from '../utils/invoiceTemplates';
+import { getDefaultLogoDataUrl, getDefaultStampDataUrl } from '../utils/defaultBranding';
 
 export default function SettingsManager({ onSettingsUpdated, focusBackup = false, onFocusHandled, appSettings = null }) {
   const toast = useToast();
@@ -66,6 +72,11 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
     due_reminders: 0,
     urdu_labels: 0,
     show_developer_credit: 1,
+    default_invoice_template: 'classic',
+    custom_brand_color: '',
+    header_layout: 'split',
+    signature_url: '',
+    show_paid_stamp: 1,
     low_stock_threshold: 5,
   });
 
@@ -246,6 +257,30 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
       }
       return { ...prev, payment_methods: list.filter((m) => m.id !== id) };
     });
+  };
+
+  const handleLogoPick = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressImageToDataUrl(file, { maxWidth: 400, quality: 0.85 });
+      handleChange('logo_url', dataUrl);
+      toast.success('Logo uploaded');
+    } catch (err) {
+      toast.error('Could not load logo: ' + (err.message || err));
+    }
+  };
+
+  const handleSignaturePick = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressImageToDataUrl(file, { maxWidth: 400, quality: 0.85 });
+      handleChange('signature_url', dataUrl);
+      toast.success('Signature / Stamp uploaded');
+    } catch (err) {
+      toast.error('Could not load signature: ' + (err.message || err));
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -896,6 +931,260 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
           />
           Show developer name on invoices / bills
         </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginTop: '0.75rem', fontSize: '0.9rem', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={settings.show_paid_stamp !== 0 && settings.show_paid_stamp !== false}
+            onChange={(e) => handleChange('show_paid_stamp', e.target.checked ? 1 : 0)}
+          />
+          Show digital "PAID / وصول شدہ" stamp watermark on fully paid bills
+        </label>
+
+        {/* Business Logo & Signature / Stamp Upload */}
+        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+            <ImagePlus size={16} style={{ color: 'var(--primary, #00b3a6)' }} />
+            <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>Company Logo & Signature / Stamp</h4>
+          </div>
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
+            Upload your shop or company logo to replace the default icon, and an optional digital signature or official stamp.
+          </p>
+          <div className="responsive-grid" style={{ display: 'grid', gap: '1rem' }}>
+            {/* Logo Upload Card */}
+            <div className="surface-block" style={{ padding: '0.85rem 1rem', border: '1px solid var(--border-color)', borderRadius: 10 }}>
+              <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: '0.45rem' }}>Company Logo</strong>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+                {settings.logo_url ? (
+                  <img
+                    src={settings.logo_url}
+                    alt="Logo preview"
+                    style={{ width: 52, height: 52, objectFit: 'contain', borderRadius: 8, background: '#ffffff', border: '1px solid var(--border-color)' }}
+                  />
+                ) : (
+                  <div style={{ width: 52, height: 52, borderRadius: 8, background: 'var(--surface-secondary)', display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.7rem' }}>
+                    Default logo
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <label className="btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', padding: '0.35rem 0.65rem' }}>
+                    <ImagePlus size={14} />
+                    {settings.logo_url ? 'Upload Custom' : 'Upload Logo'}
+                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoPick} />
+                  </label>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem' }}
+                    onClick={() => {
+                      handleChange('logo_url', getDefaultLogoDataUrl(settings.company_name));
+                      toast.success('Default brand logo applied');
+                    }}
+                  >
+                    Use Default Logo
+                  </button>
+                  {settings.logo_url && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem', color: 'var(--danger)' }}
+                      onClick={() => handleChange('logo_url', '')}
+                    >
+                      <Trash2 size={13} /> Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Signature / Stamp Upload Card */}
+            <div className="surface-block" style={{ padding: '0.85rem 1rem', border: '1px solid var(--border-color)', borderRadius: 10 }}>
+              <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: '0.45rem' }}>Digital Signature / Official Stamp</strong>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+                {settings.signature_url ? (
+                  <img
+                    src={settings.signature_url}
+                    alt="Signature preview"
+                    style={{ width: 52, height: 52, objectFit: 'contain', borderRadius: 8, background: '#ffffff', border: '1px solid var(--border-color)' }}
+                  />
+                ) : (
+                  <div style={{ width: 52, height: 52, borderRadius: 8, background: 'var(--surface-secondary)', display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.7rem', textAlign: 'center' }}>
+                    No stamp
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <label className="btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', padding: '0.35rem 0.65rem' }}>
+                    <ImagePlus size={14} />
+                    {settings.signature_url ? 'Upload Custom' : 'Upload Image'}
+                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleSignaturePick} />
+                  </label>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem' }}
+                    onClick={() => {
+                      handleChange('signature_url', getDefaultStampDataUrl(settings.company_name));
+                      toast.success('Default official seal stamp applied');
+                    }}
+                  >
+                    Use Default Stamp
+                  </button>
+                  {settings.signature_url && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem', color: 'var(--danger)' }}
+                      onClick={() => handleChange('signature_url', '')}
+                    >
+                      <Trash2 size={13} /> Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Custom Brand Accent Color Picker */}
+        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+            <Palette size={16} style={{ color: 'var(--primary, #00b3a6)' }} />
+            <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>Custom Brand Color</h4>
+          </div>
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
+            Override the bill accent color with your business's exact color palette.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+            {[
+              { label: 'Default', hex: '' },
+              { label: 'Teal', hex: '#00b3a6' },
+              { label: 'Sapphire', hex: '#2563eb' },
+              { label: 'Emerald', hex: '#059669' },
+              { label: 'Ruby', hex: '#dc2626' },
+              { label: 'Amber', hex: '#ea580c' },
+              { label: 'Purple', hex: '#7c3aed' },
+              { label: 'Slate', hex: '#0f172a' },
+            ].map((swatch) => {
+              const active = (settings.custom_brand_color || '') === swatch.hex;
+              return (
+                <button
+                  key={swatch.label}
+                  type="button"
+                  onClick={() => handleChange('custom_brand_color', swatch.hex)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '0.35rem 0.7rem',
+                    borderRadius: 20,
+                    border: active ? '2px solid var(--primary, #00b3a6)' : '1px solid var(--border-color)',
+                    background: active ? 'var(--surface-active, rgba(0, 179, 166, 0.12))' : 'var(--surface-secondary)',
+                    cursor: 'pointer',
+                    fontSize: '0.8rem',
+                    fontWeight: active ? 700 : 500,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: '50%',
+                      backgroundColor: swatch.hex || '#00b3a6',
+                      border: swatch.hex ? 'none' : '1px dashed #888',
+                      display: 'inline-block',
+                    }}
+                  />
+                  <span>{swatch.label}</span>
+                </button>
+              );
+            })}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 6 }}>
+              <input
+                type="color"
+                value={settings.custom_brand_color || '#00b3a6'}
+                onChange={(e) => handleChange('custom_brand_color', e.target.value)}
+                style={{ width: 32, height: 32, padding: 0, border: 'none', borderRadius: 6, cursor: 'pointer', background: 'transparent' }}
+                title="Pick exact hex color"
+              />
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                {settings.custom_brand_color || 'Template Default'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Header Layout Selector */}
+        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+            <Layout size={16} style={{ color: 'var(--primary, #00b3a6)' }} />
+            <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>Header Layout Style</h4>
+          </div>
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
+            Choose how your logo, business details, and invoice meta are organized at the top of the bill.
+          </p>
+          <div className="template-picker-grid">
+            {[
+              { id: 'split', name: 'Modern Split (Default)', desc: 'Logo and company details on the left, invoice summary on the right.' },
+              { id: 'banner', name: 'Full Banner', desc: 'Prominent header banner with glassmorphism invoice card.' },
+              { id: 'centered', name: 'Centered Letterhead', desc: 'Elegant boutique style with centered logo and business title.' },
+            ].map((layout) => {
+              const active = (settings.header_layout || 'split') === layout.id;
+              return (
+                <button
+                  key={layout.id}
+                  type="button"
+                  className={`template-card ${active ? 'is-active' : ''}`}
+                  onClick={() => handleChange('header_layout', layout.id)}
+                >
+                  <div className="template-card-header">
+                    <strong style={{ fontSize: '0.86rem' }}>{layout.name}</strong>
+                    {active ? <Check size={16} style={{ color: 'var(--primary, #00b3a6)' }} /> : null}
+                  </div>
+                  <div className="template-card-tagline">{layout.desc}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Default Bill Template Picker */}
+        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+            <Palette size={16} style={{ color: 'var(--primary, #00b3a6)' }} />
+            <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>Default Bill Style & Template</h4>
+          </div>
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
+            Choose the company-wide default look for invoices, bills, and payment advices. You can also switch styles on any bill anytime.
+          </p>
+          <div className="template-picker-grid">
+            {INVOICE_TEMPLATES.map((tmpl) => {
+              const active = (settings.default_invoice_template || 'classic') === tmpl.id;
+              return (
+                <button
+                  key={tmpl.id}
+                  type="button"
+                  className={`template-card ${active ? 'is-active' : ''}`}
+                  onClick={() => handleChange('default_invoice_template', tmpl.id)}
+                >
+                  <div className="template-card-header">
+                    <div className="template-swatch-badge">
+                      <span
+                        className="template-swatch-dot"
+                        style={{
+                          backgroundColor: tmpl.primaryColor,
+                          border: tmpl.id === 'minimal' ? '1px solid #71717a' : 'none',
+                        }}
+                      />
+                      <span>{tmpl.name}</span>
+                    </div>
+                    {active ? <Check size={16} style={{ color: 'var(--primary, #00b3a6)' }} /> : null}
+                  </div>
+                  <div className="template-card-tagline">{tmpl.tagline}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>

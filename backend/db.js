@@ -58,6 +58,11 @@ function initTables() {
       { name: 'due_reminders', type: 'INTEGER DEFAULT 0' },
       { name: 'payment_methods', type: 'TEXT DEFAULT "[]"' },
       { name: 'show_developer_credit', type: 'INTEGER DEFAULT 1' },
+      { name: 'default_invoice_template', type: 'TEXT DEFAULT "classic"' },
+      { name: 'custom_brand_color', type: 'TEXT DEFAULT ""' },
+      { name: 'header_layout', type: 'TEXT DEFAULT "split"' },
+      { name: 'signature_url', type: 'TEXT DEFAULT ""' },
+      { name: 'show_paid_stamp', type: 'INTEGER DEFAULT 1' },
     ];
 
     columnsToAdd.forEach((col) => {
