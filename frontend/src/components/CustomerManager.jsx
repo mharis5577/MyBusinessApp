@@ -1,36 +1,60 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Users, Plus, Trash2, Mail, Phone, Tag, Check, PackagePlus, BookOpen, GitMerge, MessageCircle, Bell, ChevronDown, ChevronRight, HeartHandshake, Star, Repeat, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  Users,
+  Plus,
+  Trash2,
+  Mail,
+  Phone,
+  Tag,
+  Check,
+  PackagePlus,
+  BookOpen,
+  GitMerge,
+  MessageCircle,
+  Bell,
+  ChevronRight,
+  HeartHandshake,
+  Star,
+  Repeat,
+  Search,
+  UserPlus,
+  X,
+  Shield,
+  CreditCard,
+  Building2,
+  CheckCircle2,
+  AlertCircle
+} from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { playTapSound, playSuccessChime } from '../utils/audioEffects';
 import { normalizePartyName } from '../utils/aging';
-import {
-  buildClientStatementText,
-} from '../utils/clientStatement';
-import {
-  openWhatsAppReminder,
-  normalizeWhatsAppPhone,
-} from '../utils/paymentReminder';
-import {
-  billTypeBadgeClass,
-  billTypeShortLabel,
-  isHelpBill,
-} from '../utils/billTypes';
+import { buildClientStatementText } from '../utils/clientStatement';
+import { openWhatsAppReminder, normalizeWhatsAppPhone } from '../utils/paymentReminder';
+import { billTypeBadgeClass, billTypeShortLabel, isHelpBill } from '../utils/billTypes';
 import EmptyState from './EmptyState';
 import ConfirmDialog from './ConfirmDialog';
 import AppSelect from './AppSelect';
 import PayeeBankSelect from './PayeeBankSelect';
 import { getPaymentMethods } from '../utils/paymentMethods';
 
-export default function CustomerManager({ currencySymbol = 'Rs.', settings = {}, onViewBill, onDuplicateBill, onNavigate }) {
+export default function CustomerManager({
+  currencySymbol = 'Rs.',
+  settings = {},
+  onViewBill,
+  onDuplicateBill,
+  onNavigate,
+}) {
   const toast = useToast();
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerRates, setCustomerRates] = useState([]);
   const [ledger, setLedger] = useState(null);
-  const [partyFilter, setPartyFilter] = useState('all');
+  const [partyFilter, setPartyFilter] = useState('all'); // 'all' | 'customer' | 'supplier' | 'dues' | 'vip'
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showAddModal, setShowAddModal] = useState(false);
   const [shopSettings, setShopSettings] = useState(settings || {});
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -46,7 +70,6 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
   const [payeeAccountTitle, setPayeeAccountTitle] = useState('');
   const [payeeAccountNumber, setPayeeAccountNumber] = useState('');
   const [payeePaymentNotes, setPayeePaymentNotes] = useState('');
-  const addDropRef = useRef(null);
 
   // Merge tool
   const [mergePrimary, setMergePrimary] = useState('');
@@ -116,27 +139,17 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
     apiFetchProducts();
   }, []);
 
-  const openCall = (c, e) => {
-    e.stopPropagation();
-    const digits = String(c.phone || '').replace(/[^\d+]/g, '');
-    if (!digits) {
-      toast.error('No phone number on this client');
-      return;
-    }
-    window.location.href = `tel:${digits}`;
-  };
-
   const openWhatsApp = (c, e) => {
-    e.stopPropagation();
+    if (e) e.stopPropagation();
     if (!normalizeWhatsAppPhone(c.phone)) {
-      toast.error('No phone number on this client');
+      toast.error('No valid phone number on this client');
       return;
     }
     openWhatsAppReminder(c.phone, `Assalam o Alaikum ${c.name},`);
   };
 
   const remindUnpaid = async (c, e) => {
-    e.stopPropagation();
+    if (e) e.stopPropagation();
     if (!normalizeWhatsAppPhone(c.phone)) {
       toast.error('No phone number on this client');
       return;
@@ -169,6 +182,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
   };
 
   const handleSelectCustomer = (c) => {
+    playTapSound();
     setSelectedCustomer(c);
     apiFetchCustomerRates(c.id);
     apiFetchLedger(c.name);
@@ -204,11 +218,11 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name,
-          email,
-          phone,
-          address,
-          tax_id: taxId,
+          name: name.trim(),
+          email: email.trim(),
+          phone: phone.trim(),
+          address: address.trim(),
+          tax_id: taxId.trim(),
           party_type: partyType,
           payee_bank_name: payeeBankName,
           payee_account_title: payeeAccountTitle,
@@ -217,6 +231,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
         }),
       });
       if (res.ok) {
+        const created = await res.json();
         setName('');
         setEmail('');
         setPhone('');
@@ -227,9 +242,10 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
         setPayeeAccountTitle('');
         setPayeeAccountNumber('');
         setPayeePaymentNotes('');
-        toast.success('Client profile saved');
+        setShowAddModal(false);
+        playSuccessChime();
+        toast.success(`Added ${created?.name || 'Client'} to directory!`);
         apiFetchCustomers();
-        if (addDropRef.current) addDropRef.current.open = false;
       } else {
         const err = await res.json().catch(() => ({}));
         toast.error(err.error || 'Could not save client');
@@ -239,7 +255,8 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
     }
   };
 
-  const askDeleteCustomer = (customer) => {
+  const askDeleteCustomer = (customer, e) => {
+    if (e) e.stopPropagation();
     setDeleteTarget(customer);
   };
 
@@ -266,17 +283,34 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
   };
 
   const filteredCustomers = useMemo(() => {
-    const rows =
-      partyFilter === 'all'
-        ? customers
-        : customers.filter((c) => (c.party_type === 'supplier' ? 'supplier' : 'customer') === partyFilter);
+    let rows = customers;
+
+    if (partyFilter === 'customer') {
+      rows = rows.filter((c) => (c.party_type || 'customer') !== 'supplier');
+    } else if (partyFilter === 'supplier') {
+      rows = rows.filter((c) => c.party_type === 'supplier');
+    } else if (partyFilter === 'vip') {
+      rows = rows.filter((c) => Number(c.sales_outstanding) > 5000 || Number(c.total_revenue || 0) > 10000);
+    } else if (partyFilter === 'dues') {
+      rows = rows.filter((c) => (Number(c.sales_outstanding) || 0) > 0 || (Number(c.help_outstanding) || 0) > 0 || (Number(c.buying_outstanding) || 0) > 0);
+    }
+
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase().trim();
+      rows = rows.filter((c) =>
+        String(c.name || '').toLowerCase().includes(q) ||
+        String(c.phone || '').includes(q) ||
+        String(c.email || '').toLowerCase().includes(q)
+      );
+    }
+
     return [...rows].sort((a, b) => {
       const aOut = (Number(a.sales_outstanding) || 0) + (Number(a.help_outstanding) || 0) + (Number(a.buying_outstanding) || 0);
       const bOut = (Number(b.sales_outstanding) || 0) + (Number(b.help_outstanding) || 0) + (Number(b.buying_outstanding) || 0);
       if (aOut !== bOut) return bOut - aOut;
       return String(a.name).localeCompare(String(b.name));
     });
-  }, [customers, partyFilter]);
+  }, [customers, partyFilter, searchTerm]);
 
   const extraPayeeBanks = useMemo(
     () => [
@@ -429,264 +463,254 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
     }
   };
 
+  const getInitials = (clientName) => {
+    if (!clientName) return 'CL';
+    const parts = clientName.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div className="responsive-grid" style={{ gap: '1.5rem' }}>
-        {/* Add Customer Form — collapsed until the header is tapped */}
-        <form onSubmit={handleAddCustomer} className="glass-panel client-add-panel">
-          <details className="client-add-drop" ref={addDropRef}>
-            <summary className="client-add-summary">
-              <span className="client-add-summary-lead">
-                <Users size={18} />
-                <span>
-                  <strong>Add Client Profile</strong>
-                  <span className="client-add-hint">Tap to enter name, phone, bank…</span>
-                </span>
+      {/* 1. Header Toolbar & Search & Action Bar */}
+      <div className="glass-panel" style={{ padding: '1.25rem 1.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Users size={22} style={{ color: 'var(--accent-teal)' }} />
+              <h2 style={{ fontSize: '1.35rem', fontWeight: 800, margin: 0, letterSpacing: '-0.02em' }}>
+                Client Directory
+              </h2>
+              <span className="dash-pill-badge" style={{ background: 'rgba(45, 212, 191, 0.15)', color: 'var(--accent-teal)' }}>
+                {customers.length} Profiles
               </span>
-              <ChevronDown size={18} className="client-add-chevron" aria-hidden />
-            </summary>
-            <div className="client-add-body">
-              <div className="form-group">
-                <label className="form-label">Client / Company Name *</label>
-                <input className="form-input" type="text" placeholder="e.g. Peshawar Retail Client" value={name} onChange={(e) => setName(e.target.value)} required />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Party type</label>
-                <AppSelect
-                  value={partyType}
-                  onChange={setPartyType}
-                  aria-label="Party type"
-                  options={[
-                    { value: 'customer', label: 'Customer (sale / retail)' },
-                    { value: 'supplier', label: 'Supplier (Saudia / buying)' },
-                  ]}
-                />
-              </div>
-
-              <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <div className="form-group">
-                  <label className="form-label">Phone</label>
-                  <input className="form-input" type="text" placeholder="+92 300 0000000" value={phone} onChange={(e) => setPhone(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Email</label>
-                  <input className="form-input" type="email" placeholder="client@domain.pk" value={email} onChange={(e) => setEmail(e.target.value)} />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Address</label>
-                <textarea className="form-textarea" rows={2} placeholder="City, Location" value={address} onChange={(e) => setAddress(e.target.value)} />
-              </div>
-
-              <div className="client-add-bank">
-                <p className="client-add-bank-title">
-                  Supplier Pay To bank (optional — for Saudia / buying bills)
-                </p>
-                <div className="form-group">
-                  <label className="form-label">Payee Bank Name</label>
-                  <PayeeBankSelect
-                    value={payeeBankName}
-                    onChange={setPayeeBankName}
-                    extraBanks={extraPayeeBanks}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Payee Account Title</label>
-                  <input className="form-input" type="text" placeholder="Account holder name" value={payeeAccountTitle} onChange={(e) => setPayeeAccountTitle(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">IBAN / Account Number</label>
-                  <input className="form-input" type="text" placeholder="SA…" value={payeeAccountNumber} onChange={(e) => setPayeeAccountNumber(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Payment Notes (SWIFT, etc.)</label>
-                  <input className="form-input" type="text" placeholder="SWIFT / remittance notes" value={payeePaymentNotes} onChange={(e) => setPayeePaymentNotes(e.target.value)} />
-                </div>
-              </div>
-
-              <button type="submit" className="btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>
-                <Plus size={16} /> Save Client Profile
-              </button>
             </div>
-          </details>
-        </form>
+            <p style={{ margin: '0.2rem 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+              Manage online clients, track outstanding balances, WhatsApp statements, and custom rates.
+            </p>
+          </div>
 
-        <div className="glass-panel" style={{ padding: '1.5rem' }}>
-          <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '0.75rem' }}>Saved Client Directory</h3>
-          <div className="party-filter-row">
+          <button
+            type="button"
+            className="btn-primary"
+            style={{ width: 'auto', padding: '0.55rem 1.2rem', fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+            onClick={() => setShowAddModal(true)}
+          >
+            <UserPlus size={16} /> + Add Client Profile
+          </button>
+        </div>
+
+        {/* Search & Filter Chips Row */}
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ position: 'relative', flex: '1 1 260px' }}>
+            <Search size={16} style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              className="form-input"
+              style={{ paddingLeft: '2.4rem', height: '2.4rem', fontSize: '0.84rem' }}
+              placeholder="Search by client name, phone or email…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          <div className="party-filter-row" style={{ margin: 0 }}>
             {[
-              ['all', 'All'],
+              ['all', `All (${customers.length})`],
               ['customer', 'Customers'],
+              ['dues', 'Has Dues'],
+              ['vip', 'VIPs'],
               ['supplier', 'Suppliers'],
             ].map(([key, label]) => (
               <button
                 key={key}
                 type="button"
-                className={`party-filter-chip ${partyFilter === key ? 'active' : ''}`}
-                onClick={() => setPartyFilter(key)}
+                className={`party-filter-chip${partyFilter === key ? ' active' : ''}`}
+                onClick={() => {
+                  playTapSound();
+                  setPartyFilter(key);
+                }}
               >
                 {label}
               </button>
             ))}
           </div>
-          {filteredCustomers.length === 0 ? (
-            <EmptyState title="No clients here" body="Add a customer or supplier to track dues." icon={Users} />
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '420px', overflowY: 'auto' }}>
-              {filteredCustomers.map((c) => {
-                const isSelected = selectedCustomer?.id === c.id;
-                const pt = c.party_type === 'supplier' ? 'supplier' : 'customer';
-                return (
-                  <div
-                    key={c.id}
-                    className={`client-dir-card${isSelected ? ' is-selected' : ''}`}
-                    onClick={() => handleSelectCustomer(c)}
-                  >
-                    <div className="client-dir-main">
-                      <h4>
-                        {c.name}
-                        <span className={`type-badge ${pt}`}>{pt === 'supplier' ? 'Supplier' : 'Customer'}</span>
-                        {(Number(c.sales_outstanding) > 5000 || Number(c.total_revenue || 0) > 10000) && (
+        </div>
+      </div>
+
+      {/* 2. Client Directory Responsive Grid */}
+      {filteredCustomers.length === 0 ? (
+        <div className="glass-panel" style={{ padding: '2.5rem 1.5rem', textAlign: 'center' }}>
+          <EmptyState
+            title={searchTerm ? 'No matching clients found' : 'No clients in this list'}
+            body={searchTerm ? `Try searching with a different keyword.` : 'Add a new client profile to get started.'}
+            icon={Users}
+            actionLabel={searchTerm ? 'Clear Search' : '+ Add Client'}
+            onAction={searchTerm ? () => setSearchTerm('') : () => setShowAddModal(true)}
+          />
+        </div>
+      ) : (
+        <div className="client-directory-grid">
+          {filteredCustomers.map((c) => {
+            const isSelected = selectedCustomer?.id === c.id;
+            const pt = c.party_type === 'supplier' ? 'supplier' : 'customer';
+            const salesDue = Number(c.sales_outstanding) || 0;
+            const helpDue = Number(c.help_outstanding) || 0;
+            const buyingDue = Number(c.buying_outstanding) || 0;
+            const isVip = salesDue > 5000 || Number(c.total_revenue || 0) > 10000;
+            const initials = getInitials(c.name);
+
+            return (
+              <div
+                key={c.id}
+                className={`client-dir-card${isSelected ? ' is-selected' : ''}`}
+                onClick={() => handleSelectCustomer(c)}
+              >
+                <div>
+                  {/* Card Header: Avatar & Title */}
+                  <div className="client-dir-header">
+                    <div className={`client-avatar-badge${isVip ? ' is-vip' : ''}`}>
+                      {initials}
+                    </div>
+
+                    <div className="client-dir-title-box">
+                      <div className="client-dir-name-row">
+                        <span className="client-dir-name" title={c.name}>{c.name}</span>
+                        {isVip && (
                           <span className="vip-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: '0.68rem', fontWeight: 800, padding: '0.1rem 0.45rem', borderRadius: 999, background: 'rgba(212, 175, 55, 0.18)', color: '#d4af37', border: '1px solid rgba(212, 175, 55, 0.4)' }}>
                             <Star size={10} fill="#d4af37" /> VIP
                           </span>
                         )}
-                      </h4>
-                      {c.phone ? (
-                        <div className="client-dir-meta">
-                          <Phone size={12} /> {c.phone}
-                        </div>
-                      ) : null}
-                      {c.email ? (
-                        <div className="client-dir-meta">
-                          <Mail size={12} /> {c.email}
-                        </div>
-                      ) : null}
-                      {(Number(c.sales_outstanding) > 0 || Number(c.help_outstanding) > 0 || Number(c.buying_outstanding) > 0) && (
-                        <div className="client-out-line">
-                          {Number(c.sales_outstanding) > 0 ? (
-                            <span>Sales due {formatCurrency(currencySymbol, c.sales_outstanding, { maximumFractionDigits: 0 })}</span>
-                          ) : null}
-                          {Number(c.help_outstanding) > 0 ? (
-                            <span className="is-help">
-                              <HeartHandshake size={12} /> Help out {formatCurrency(currencySymbol, c.help_outstanding, { maximumFractionDigits: 0 })}
-                            </span>
-                          ) : null}
-                          {Number(c.buying_outstanding) > 0 ? (
-                            <span>Buying due {formatCurrency(currencySymbol, c.buying_outstanding, { maximumFractionDigits: 0 })}</span>
-                          ) : null}
-                        </div>
-                      )}
-                      {c.payee_account_number && (
-                        <div className="client-dir-meta is-muted">
-                          Pay To: {c.payee_bank_name || 'Bank'} · {c.payee_account_number}
-                        </div>
-                      )}
-                    </div>
+                        <span className={`type-badge ${pt}`}>
+                          {pt === 'supplier' ? 'Supplier' : 'Customer'}
+                        </span>
+                      </div>
 
-                    <div className="client-dir-actions" onClick={(e) => e.stopPropagation()}>
-                      {c.phone && (
-                        <>
-                          <button type="button" className="client-dir-icon-btn" title="Call" onClick={(e) => openCall(c, e)}>
-                            <Phone size={14} />
-                          </button>
-                          <button type="button" className="client-dir-icon-btn is-wa" title="WhatsApp" onClick={(e) => openWhatsApp(c, e)}>
-                            <MessageCircle size={14} />
-                          </button>
-                          {pt === 'customer' && (
-                            <button type="button" className="client-dir-icon-btn" title="WhatsApp statement" onClick={(e) => remindUnpaid(c, e)}>
-                              <Bell size={14} />
-                            </button>
-                          )}
-                        </>
-                      )}
-                      <button
-                        type="button"
-                        className="client-dir-icon-btn is-danger"
-                        title="Delete"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          askDeleteCustomer(c);
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {/* Contact items with clean ellipsis */}
+                      <div className="client-dir-meta-row">
+                        {c.phone ? (
+                          <div className="client-meta-item" title={c.phone}>
+                            <Phone size={12} style={{ color: 'var(--text-muted)' }} />
+                            <span>{c.phone}</span>
+                          </div>
+                        ) : null}
+
+                        {c.email ? (
+                          <div className="client-meta-item" title={c.email}>
+                            <Mail size={12} style={{ color: 'var(--text-muted)' }} />
+                            <span>{c.email}</span>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
 
-      <div className="glass-panel" style={{ padding: '1.5rem' }}>
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.55rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <GitMerge size={18} /> Merge duplicate clients
-        </h3>
-        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-          Reassign bills and rates to the primary profile, then delete duplicates. Type MERGE to confirm.
-        </p>
-        {mergeSuggestions.length > 0 && (
-          <div style={{ marginBottom: '0.75rem', fontSize: '0.8rem', color: 'var(--warning)' }}>
-            Suggested pairs: {mergeSuggestions.map((g) => g.map((c) => c.name).join(' / ')).join(' · ')}
-          </div>
-        )}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
-          <div className="form-group">
-            <label className="form-label">Primary (keep)</label>
-            <AppSelect
-              value={mergePrimary}
-              onChange={setMergePrimary}
-              placeholder="— Select —"
-              options={[
-                { value: '', label: '— Select —' },
-                ...customers.map((c) => ({ value: String(c.id), label: c.name })),
-              ]}
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Duplicates (remove)</label>
-            <div style={{ maxHeight: 140, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              {customers
-                .filter((c) => String(c.id) !== String(mergePrimary))
-                .map((c) => (
-                  <label key={c.id} style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', fontSize: '0.85rem', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={mergeDupes.includes(c.id)}
-                      onChange={() => toggleMergeDupe(c.id)}
-                    />
-                    {c.name}
-                  </label>
-                ))}
-            </div>
-          </div>
-        </div>
-        <div className="form-group">
-          <label className="form-label">Type MERGE</label>
-          <input className="form-input" value={mergeConfirm} onChange={(e) => setMergeConfirm(e.target.value)} placeholder="MERGE" autoComplete="off" />
-        </div>
-        <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={merging} onClick={handleMerge}>
-          <GitMerge size={16} /> Merge now
-        </button>
-      </div>
+                  {/* Financial Status Badge */}
+                  <div>
+                    {pt === 'customer' ? (
+                      salesDue > 0 ? (
+                        <span className="client-health-badge is-due">
+                          <AlertCircle size={13} /> Sales Due: {formatCurrency(currencySymbol, salesDue, { maximumFractionDigits: 0 })}
+                        </span>
+                      ) : helpDue > 0 ? (
+                        <span className="client-health-badge is-help">
+                          <HeartHandshake size={13} /> Help Lent: {formatCurrency(currencySymbol, helpDue, { maximumFractionDigits: 0 })}
+                        </span>
+                      ) : (
+                        <span className="client-health-badge is-clear">
+                          <CheckCircle2 size={13} /> All Clear · No Dues
+                        </span>
+                      )
+                    ) : (
+                      buyingDue > 0 ? (
+                        <span className="client-health-badge is-due">
+                          <Building2 size={13} /> Saudia Payable: {formatCurrency(currencySymbol, buyingDue, { maximumFractionDigits: 0 })}
+                        </span>
+                      ) : (
+                        <span className="client-health-badge is-clear">
+                          <CheckCircle2 size={13} /> Supplier Settled
+                        </span>
+                      )
+                    )}
+                  </div>
+                </div>
 
-      {/* Client Product & Negotiated Rates Manager */}
+                {/* Bottom Action Bar */}
+                <div className="client-dir-actions-row" onClick={(e) => e.stopPropagation()}>
+                  {c.phone && (
+                    <>
+                      <button
+                        type="button"
+                        className="client-act-btn is-wa"
+                        title="Chat on WhatsApp"
+                        onClick={(e) => openWhatsApp(c, e)}
+                      >
+                        <MessageCircle size={14} /> WA
+                      </button>
+
+                      {pt === 'customer' && (
+                        <button
+                          type="button"
+                          className="client-act-btn"
+                          title="Send Unpaid Statement via WhatsApp"
+                          onClick={(e) => remindUnpaid(c, e)}
+                        >
+                          <Bell size={13} /> Statement
+                        </button>
+                      )}
+                    </>
+                  )}
+
+                  <button
+                    type="button"
+                    className="client-act-btn"
+                    style={{ background: isSelected ? 'rgba(45, 212, 191, 0.15)' : undefined, color: isSelected ? 'var(--accent-teal)' : undefined }}
+                    onClick={() => handleSelectCustomer(c)}
+                  >
+                    <BookOpen size={13} /> Ledger
+                  </button>
+
+                  <button
+                    type="button"
+                    className="client-act-btn is-danger"
+                    title="Delete Client"
+                    onClick={(e) => askDeleteCustomer(c, e)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 3. Selected Client Inspector Panel (Ledger & Custom Rates) */}
       <div className="glass-panel" style={{ padding: '1.5rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.85rem' }}>
           <div>
             <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Tag size={20} /> Client-Specific Products & Custom Rates
-            </h3>
-            <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)' }}>
+              <Tag size={20} style={{ color: 'var(--accent-teal)' }} />
               {selectedCustomer
-                ? `Managing products & negotiated wholesale rates for: ${selectedCustomer.name}`
-                : 'Select a client from directory above to add new products or assign negotiated rates'}
+                ? `Client Profile: ${selectedCustomer.name}`
+                : 'Client Profile & Custom Rates'}
+            </h3>
+            <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0' }}>
+              {selectedCustomer
+                ? `Viewing ledger, 1-Click order duplicates, and negotiated wholesale rates for ${selectedCustomer.name}.`
+                : 'Click any client card in the directory above to view their full ledger and custom pricing.'}
             </p>
           </div>
+
           {(rateMsg || newProdMsg) && (
             <div style={{ background: 'rgba(16,185,129,0.2)', color: 'var(--success)', padding: '0.35rem 0.75rem', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
               <Check size={14} /> {rateMsg || newProdMsg}
@@ -697,16 +721,16 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
         {selectedCustomer ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {ledger && (
-              <div className="surface-block" style={{ padding: '1.1rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                  <h4 style={{ fontSize: '0.95rem', fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <BookOpen size={16} /> Client ledger — {ledger.customer_name}
+              <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 12px)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                  <h4 style={{ fontSize: '0.98rem', fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <BookOpen size={16} style={{ color: 'var(--accent-teal)' }} /> Transaction Ledger ({ledger.totals?.bill_count || 0} Bills)
                   </h4>
                   {ledger?.bills?.length > 0 && (
                     <button
                       type="button"
                       className="btn-primary"
-                      style={{ width: 'auto', padding: '0.35rem 0.75rem', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                      style={{ width: 'auto', padding: '0.38rem 0.85rem', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
                       onClick={handleReorderLastBill}
                       title="Duplicate last order items to a new bill"
                     >
@@ -714,42 +738,45 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
                     </button>
                   )}
                 </div>
+
                 <div className="client-ledger-stats">
                   <div>
-                    <div className="client-ledger-label">Sales due</div>
+                    <div className="client-ledger-label">Sales Due</div>
                     <div className="client-ledger-value" style={{ color: (ledger.totals.sales_outstanding || ledger.totals.outstanding) > 0 ? 'var(--status-due)' : undefined }}>
                       {formatCurrency(currencySymbol, ledger.totals.sales_outstanding ?? ledger.totals.outstanding)}
                     </div>
                   </div>
                   <div>
-                    <div className="client-ledger-label">Help out</div>
+                    <div className="client-ledger-label">Help Lent</div>
                     <div className="client-ledger-value" style={{ color: (ledger.totals.help_outstanding || 0) > 0 ? 'var(--status-due)' : undefined }}>
                       {formatCurrency(currencySymbol, ledger.totals.help_outstanding || 0)}
                     </div>
                   </div>
-                  {(ledger.totals.buying_outstanding || 0) > 0 ? (
+                  {selectedCustomer.party_type === 'supplier' && (ledger.totals.buying_outstanding || 0) > 0 && (
                     <div>
-                      <div className="client-ledger-label">Buying due</div>
+                      <div className="client-ledger-label">Saudia Payable</div>
                       <div className="client-ledger-value">{formatCurrency(currencySymbol, ledger.totals.buying_outstanding)}</div>
                     </div>
-                  ) : null}
+                  )}
                   <div>
-                    <div className="client-ledger-label">Paid</div>
+                    <div className="client-ledger-label">Total Paid</div>
                     <div className="client-ledger-value" style={{ color: 'var(--status-paid)' }}>
                       {formatCurrency(currencySymbol, ledger.totals.paid)}
                     </div>
                   </div>
                   <div>
-                    <div className="client-ledger-label">Bills</div>
+                    <div className="client-ledger-label">Total Invoices</div>
                     <div className="client-ledger-value">{ledger.totals.bill_count}</div>
                   </div>
                 </div>
+
                 {(ledger.totals.help_given || 0) > 0 && (
                   <p className="client-ledger-help-note">
                     Help given {formatCurrency(currencySymbol, ledger.totals.help_given)} · returned {formatCurrency(currencySymbol, ledger.totals.help_repaid || 0)}
                   </p>
                 )}
-                <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+
+                <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.65rem' }}>
                   {(ledger.bills || []).slice(0, 16).map((b) => {
                     const due = Math.max(0, Number(b.balance_due ?? (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0)));
                     const help = isHelpBill(b);
@@ -780,11 +807,11 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
               </div>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '1.5rem' }}>
-              
+            {/* Custom Rates & Product Assignment */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1.25rem' }}>
               {/* Option A: Assign rate for existing catalog product */}
-              <form onSubmit={handleSaveRate} className="surface-block" style={{ padding: '1.25rem' }}>
-                <h4 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.85rem' }}>A. Set Rate for Existing Catalog Item</h4>
+              <form onSubmit={handleSaveRate} className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md)' }}>
+                <h4 style={{ fontSize: '0.95rem', fontWeight: 800, marginBottom: '0.85rem' }}>A. Set Rate for Existing Catalog Item</h4>
 
                 <div className="form-group">
                   <label className="form-label">Select Catalog Product *</label>
@@ -797,7 +824,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
                       { value: '', label: '-- Choose Product --' },
                       ...products.map((p) => ({
                         value: String(p.id),
-                        label: `${p.name} (Standard Price: ${currencySymbol}${p.price})`,
+                        label: `${p.name} (Std: ${currencySymbol}${p.price})`,
                       })),
                     ]}
                   />
@@ -833,7 +860,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="e.g. Special Chocolate Gift Box"
+                    placeholder="e.g. Custom Gift Box"
                     value={newProdName}
                     onChange={(e) => setNewProdName(e.target.value)}
                     required
@@ -842,7 +869,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                   <div className="form-group">
-                    <label className="form-label">Standard Catalog Price ({currencySymbol}) *</label>
+                    <label className="form-label">Standard Price ({currencySymbol})</label>
                     <input
                       type="number"
                       step="0.01"
@@ -855,7 +882,7 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
                     />
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Price for {selectedCustomer.name} ({currencySymbol}) *</label>
+                    <label className="form-label">Client Price ({currencySymbol})</label>
                     <input
                       type="number"
                       step="0.01"
@@ -873,17 +900,16 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
                   <PackagePlus size={16} /> Create & Assign Product
                 </button>
               </form>
-
             </div>
 
             {/* Active Rates List */}
-            <div className="surface-block" style={{ padding: '1.25rem' }}>
-              <h4 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.85rem' }}>
+            <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md)' }}>
+              <h4 style={{ fontSize: '0.95rem', fontWeight: 800, marginBottom: '0.85rem' }}>
                 Active Special Rates for {selectedCustomer.name} ({customerRates.length})
               </h4>
 
               {customerRates.length === 0 ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>
                   No custom product rates set for {selectedCustomer.name}. Standard catalog prices will apply.
                 </p>
               ) : (
@@ -912,12 +938,204 @@ export default function CustomerManager({ currencySymbol = 'Rs.', settings = {},
             </div>
           </div>
         ) : (
-          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-            👈 Click on any client profile from the directory above to add new products or manage negotiated rates.
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+            👈 Click on any client profile from the directory above to view their ledger or assign custom rates.
           </div>
         )}
       </div>
 
+      {/* 4. Merge Duplicate Clients Tool */}
+      <div className="glass-panel" style={{ padding: '1.25rem 1.5rem' }}>
+        <h3 style={{ fontSize: '1.05rem', fontWeight: 800, marginBottom: '0.45rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <GitMerge size={17} style={{ color: 'var(--accent-teal)' }} /> Merge Duplicate Clients
+        </h3>
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+          Reassign bills and rates to the primary profile, then delete duplicates. Type MERGE to confirm.
+        </p>
+        {mergeSuggestions.length > 0 && (
+          <div style={{ marginBottom: '0.75rem', fontSize: '0.8rem', color: 'var(--warning)', background: 'rgba(245, 158, 11, 0.1)', padding: '0.4rem 0.75rem', borderRadius: 6 }}>
+            Suggested duplicates to combine: {mergeSuggestions.map((g) => g.map((c) => c.name).join(' / ')).join(' · ')}
+          </div>
+        )}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
+          <div className="form-group">
+            <label className="form-label">Primary Profile (keep)</label>
+            <AppSelect
+              value={mergePrimary}
+              onChange={setMergePrimary}
+              placeholder="— Select Primary Client —"
+              options={[
+                { value: '', label: '— Select Primary Client —' },
+                ...customers.map((c) => ({ value: String(c.id), label: c.name })),
+              ]}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Duplicates to Merge (remove)</label>
+            <div style={{ maxHeight: 130, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem', background: 'var(--surface-muted)', padding: '0.5rem', borderRadius: 8 }}>
+              {customers
+                .filter((c) => String(c.id) !== String(mergePrimary))
+                .map((c) => (
+                  <label key={c.id} style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', fontSize: '0.83rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={mergeDupes.includes(c.id)}
+                      onChange={() => toggleMergeDupe(c.id)}
+                    />
+                    {c.name}
+                  </label>
+                ))}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+          <div className="form-group" style={{ margin: 0, width: '160px' }}>
+            <label className="form-label">Type MERGE</label>
+            <input className="form-input" value={mergeConfirm} onChange={(e) => setMergeConfirm(e.target.value)} placeholder="MERGE" autoComplete="off" />
+          </div>
+          <button type="button" className="btn-primary" style={{ width: 'auto', padding: '0.55rem 1.1rem' }} disabled={merging} onClick={handleMerge}>
+            <GitMerge size={15} /> Merge now
+          </button>
+        </div>
+      </div>
+
+      {/* 5. Add Client Profile Modal */}
+      {showAddModal && (
+        <div className="client-modal-overlay" onClick={() => setShowAddModal(false)}>
+          <div className="client-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <UserPlus size={20} style={{ color: 'var(--accent-teal)' }} />
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>Add New Client Profile</h3>
+              </div>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ width: 'auto', padding: '0.35rem 0.55rem' }}
+                onClick={() => setShowAddModal(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddCustomer} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <div className="form-group">
+                <label className="form-label">Client / Company Name *</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder="e.g. Ali Retail Client"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Party Type</label>
+                <AppSelect
+                  value={partyType}
+                  onChange={setPartyType}
+                  options={[
+                    { value: 'customer', label: 'Online Customer (Retail / Sales)' },
+                    { value: 'supplier', label: 'Supplier (Saudia / Buying)' },
+                  ]}
+                />
+              </div>
+
+              <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="form-group">
+                  <label className="form-label">WhatsApp / Phone</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    placeholder="+92 300 0000000"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Email Address</label>
+                  <input
+                    className="form-input"
+                    type="email"
+                    placeholder="client@domain.pk"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Shipping / City Address</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  placeholder="City, delivery address or location"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                />
+              </div>
+
+              {/* Show Bank Details ONLY for Suppliers */}
+              {partyType === 'supplier' && (
+                <div style={{ background: 'var(--surface-muted)', padding: '0.85rem', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                  <p style={{ fontSize: '0.8rem', fontWeight: 800, margin: '0 0 0.65rem', color: 'var(--text-primary)' }}>
+                    Supplier Pay To Bank Details (for Saudia payments)
+                  </p>
+                  <div className="form-group">
+                    <label className="form-label">Payee Bank Name</label>
+                    <PayeeBankSelect
+                      value={payeeBankName}
+                      onChange={setPayeeBankName}
+                      extraBanks={extraPayeeBanks}
+                    />
+                  </div>
+                  <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div className="form-group">
+                      <label className="form-label">Account Title</label>
+                      <input
+                        className="form-input"
+                        type="text"
+                        placeholder="Account title"
+                        value={payeeAccountTitle}
+                        onChange={(e) => setPayeeAccountTitle(e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">IBAN / Account #</label>
+                      <input
+                        className="form-input"
+                        type="text"
+                        placeholder="SA…"
+                        value={payeeAccountNumber}
+                        onChange={(e) => setPayeeAccountNumber(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ width: 'auto' }}
+                  onClick={() => setShowAddModal(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn-primary" style={{ width: 'auto' }}>
+                  <Plus size={16} /> Save Client Profile
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         title={`Delete ${deleteTarget?.name || 'client'}?`}
