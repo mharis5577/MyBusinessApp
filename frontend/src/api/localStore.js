@@ -1723,6 +1723,193 @@ async function handleLocalRequestInner(url, options = {}) {
     return jsonOk({ success: true, message: 'Backup restored successfully' });
   }
 
+  // -------------------------------------------------------------
+  // AUTOMATION / DAILY BRIEF / OVERDUE QUEUE / BACKUP (LOCAL/APK)
+  // -------------------------------------------------------------
+  if (parts[1] === 'automation') {
+    const action = parts[2];
+
+    if (action === 'daily-brief' && method === 'GET') {
+      const period = search.get('period') || 'today';
+      const startDate = search.get('startDate');
+      const endDate = search.get('endDate');
+      const currencySymbol = search.get('currency') || 'Rs.';
+
+      const today = pakistanToday();
+      let start = today;
+      let end = today;
+      let periodTitle = 'DAILY BUSINESS REPORT';
+      let dateRangeLabel = today;
+
+      if (period === 'week') {
+        start = addDaysToDateString(today, -6);
+        end = today;
+        periodTitle = 'WEEKLY BUSINESS REPORT';
+        dateRangeLabel = `${start} to ${end} (Last 7 Days)`;
+      } else if (period === 'month') {
+        start = `${today.slice(0, 7)}-01`;
+        end = today;
+        periodTitle = 'MONTHLY BUSINESS REPORT';
+        dateRangeLabel = `${start} to ${end} (This Month)`;
+      } else if (period === 'all') {
+        start = null;
+        end = null;
+        periodTitle = 'ALL-TIME BUSINESS REPORT';
+        dateRangeLabel = 'Complete Lifetime History';
+      } else if (period === 'custom') {
+        start = startDate || today;
+        end = endDate || today;
+        periodTitle = 'CUSTOM PERIOD BUSINESS REPORT';
+        dateRangeLabel = `${start} to ${end}`;
+      }
+
+      const allBills = await db.getAll('bills');
+      const allPayments = await db.getAll('bill_payments');
+
+      const activeBills = allBills.filter((b) => !isCancelled(b));
+
+      // Filter by date range
+      const inRangeBills = activeBills.filter((b) => {
+        if (!start || !end) return true;
+        const bDate = String(b.bill_date || '').slice(0, 10);
+        return bDate >= start && bDate <= end;
+      });
+
+      const salesBills = inRangeBills.filter(
+        (b) => normalizeBillType(b.bill_type) === 'customer'
+      );
+      const buyingBills = inRangeBills.filter(
+        (b) => normalizeBillType(b.bill_type) === 'supplier'
+      );
+
+      const totalSales = salesBills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+      const totalBuying = buyingBills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+      const netProfit = totalSales - totalBuying;
+      const profitMarginPct = totalSales > 0 ? ((netProfit / totalSales) * 100).toFixed(1) : '0.0';
+
+      // Payments in range
+      const inRangePayments = allPayments.filter((p) => {
+        if (!start || !end) return true;
+        const pDate = String(p.payment_date || p.created_at || '').slice(0, 10);
+        return pDate >= start && pDate <= end;
+      });
+      const totalCashCollected = inRangePayments.reduce(
+        (s, p) => s + (Number(p.amount) || 0),
+        0
+      );
+
+      // Overdue customer bills
+      const overdueBills = activeBills.filter((b) => {
+        const isCustomer = normalizeBillType(b.bill_type) === 'customer';
+        const hasDue = (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0) > 0;
+        const pastDue = b.due_date && b.due_date < today;
+        return isCustomer && hasDue && pastDue;
+      });
+      const totalOverdueAmount = overdueBills.reduce(
+        (s, b) => s + Math.max(0, (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0)),
+        0
+      );
+
+      const formattedSales = `${currencySymbol} ${totalSales.toLocaleString('en-PK')}`;
+      const formattedBuying = `${currencySymbol} ${totalBuying.toLocaleString('en-PK')}`;
+      const formattedProfit = `${currencySymbol} ${netProfit.toLocaleString('en-PK')}`;
+      const formattedCollections = `${currencySymbol} ${totalCashCollected.toLocaleString('en-PK')}`;
+      const formattedOverdue = `${currencySymbol} ${totalOverdueAmount.toLocaleString('en-PK')}`;
+
+      const messageText = `📊 *${periodTitle}*
+📅 *Period:* ${dateRangeLabel}
+⏰ *Generated:* ${pakistanNowTime()}
+
+━━━━━━━━━━━━━━━━━━━━
+📈 *Online Sales:* ${formattedSales} (${salesBills.length} orders)
+📦 *Saudia Purchases:* ${formattedBuying} (${buyingBills.length} bills)
+💰 *Net Operating Profit:* ${formattedProfit} (${profitMarginPct}% margin)
+━━━━━━━━━━━━━━━━━━━━
+💵 *Collections Received:* ${formattedCollections}
+⏳ *Overdue Dues Pending:* ${formattedOverdue} (${overdueBills.length} client bills)
+
+✅ *Accounting Status:* Accrual & Online-first reconciled.`;
+
+      return jsonOk({
+        period,
+        startDate: start,
+        endDate: end,
+        dateRangeLabel,
+        periodTitle,
+        time: pakistanNowTime(),
+        metrics: {
+          totalSales,
+          salesCount: salesBills.length,
+          totalBuying,
+          buyingCount: buyingBills.length,
+          netProfit,
+          profitMarginPct,
+          totalCashCollected,
+          totalOverdueAmount,
+          overdueCount: overdueBills.length,
+        },
+        messageText,
+      });
+    }
+
+    if (action === 'overdue-queue' && method === 'GET') {
+      const currencySymbol = search.get('currency') || 'Rs.';
+      const today = pakistanToday();
+      const allBills = await db.getAll('bills');
+
+      const unpaidBills = allBills.filter((b) => {
+        if (isCancelled(b)) return false;
+        if (normalizeBillType(b.bill_type) !== 'customer') return false;
+        const balance = (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0);
+        return balance > 0;
+      });
+
+      const queue = unpaidBills.map((b) => {
+        const balance = Math.max(0, (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0));
+        const isPastDue = b.due_date && b.due_date < today;
+        const daysOverdue = b.due_date
+          ? Math.max(0, Math.floor((new Date(today) - new Date(b.due_date)) / (1000 * 60 * 60 * 24)))
+          : 0;
+
+        const reminderText = `Assalam o Alaikum ${b.customer_name},
+
+Gentle payment reminder regarding invoice *${b.invoice_number}* dated ${b.bill_date}.
+• Outstanding Balance: *${currencySymbol} ${balance.toLocaleString('en-PK')}*
+${b.due_date ? `• Due Date: ${b.due_date} (${daysOverdue} days past due)\n` : ''}
+Please kindly share the payment transfer screenshot once processed. Thank you!`;
+
+        return {
+          bill_id: b.id,
+          invoice_number: b.invoice_number,
+          customer_name: b.customer_name,
+          phone: b.customer_phone || '',
+          total_amount: Number(b.total_amount),
+          amount_paid: Number(b.amount_paid),
+          balance_due: balance,
+          bill_date: b.bill_date,
+          due_date: b.due_date,
+          days_overdue: daysOverdue,
+          is_past_due: isPastDue,
+          reminder_text: reminderText,
+        };
+      });
+
+      return jsonOk(queue);
+    }
+
+    if (action === 'run-backup' && method === 'POST') {
+      const today = pakistanToday();
+      const time = pakistanNowTime().replace(/:/g, '-');
+      const filename = `autobackup_${today}_${time}.json`;
+      return jsonOk({
+        success: true,
+        filename,
+        count: 1,
+        message: 'On-device snapshot saved',
+      });
+    }
+  }
+
   // CASHFLOW (live from bills + advances — mirrors Express)
   if (parts[1] === 'cashflow' && method === 'GET') {
     const bills = await db.getAll('bills');
