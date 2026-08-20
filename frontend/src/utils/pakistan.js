@@ -58,6 +58,17 @@ export function addDaysToDateString(dateStr, days) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+/** Get previous month as YYYY-MM string */
+export function getPreviousYearMonth(ymStr = pakistanYearMonth()) {
+  const [y, m] = String(ymStr || '').split('-').map(Number);
+  if (!y || !m) return '';
+  const dt = new Date(Date.UTC(y, m - 2, 1));
+  const yyyy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  return `${yyyy}-${mm}`;
+}
+
+
 export function formatPkMoney(amount, options = {}) {
   const { minimumFractionDigits = 0, maximumFractionDigits = 2 } = options;
   // en-US grouping avoids en-PK narrow-space artifacts (e.g. "234, 250")

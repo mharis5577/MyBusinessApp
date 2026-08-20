@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import db, { dbAll, dbGet, dbRun } from './db.js';
-import { pakistanToday, pakistanYearMonth, pakistanNowTime, addDaysToDateString } from './pakistan.js';
+import { pakistanToday, pakistanYearMonth, pakistanNowTime, addDaysToDateString, getPreviousYearMonth } from './pakistan.js';
 import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from './utils/paymentMethods.js';
 import { normalizeBillType, invoicePrefixForType, partyTypeForBill, outstandingByPartyName } from './utils/billTypes.js';
 import { saleOverviewTotals } from './utils/dashboardStats.js';
@@ -1417,6 +1417,23 @@ app.get('/api/stats', async (req, res) => {
       [`${monthPrefix}%`],
       [`${monthPrefix}%`]
     );
+    const prevMonthPrefix = getPreviousYearMonth(monthPrefix);
+    const lastMonthTotals = await calcPeriodProfit(
+      'bill_date LIKE ?',
+      'bill_date LIKE ?',
+      [`${prevMonthPrefix}%`],
+      [`${prevMonthPrefix}%`]
+    );
+    const sales_mom_pct = lastMonthTotals.sales > 0
+      ? Number((((monthTotals.sales - lastMonthTotals.sales) / lastMonthTotals.sales) * 100).toFixed(1))
+      : null;
+    const profit_mom_pct = lastMonthTotals.profit !== 0
+      ? Number((((monthTotals.profit - lastMonthTotals.profit) / Math.abs(lastMonthTotals.profit)) * 100).toFixed(1))
+      : null;
+    const cost_mom_pct = lastMonthTotals.cost > 0
+      ? Number((((monthTotals.cost - lastMonthTotals.cost) / lastMonthTotals.cost) * 100).toFixed(1))
+      : null;
+
     const allTotals = await calcPeriodProfit('', '');
 
     const helpBills = await dbAll(
@@ -1452,6 +1469,12 @@ app.get('/api/stats', async (req, res) => {
       cost_month: monthTotals.cost,
       profit_month: monthTotals.profit,
       margin_month: monthTotals.margin,
+      sales_last_month: lastMonthTotals.sales,
+      cost_last_month: lastMonthTotals.cost,
+      profit_last_month: lastMonthTotals.profit,
+      sales_mom_pct,
+      profit_mom_pct,
+      cost_mom_pct,
       sales_total: allTotals.sales,
       cost_total: allTotals.cost,
       profit_total: allTotals.profit,

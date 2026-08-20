@@ -273,6 +273,10 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     sales_total = 0,
     cost_total = 0,
     profit_total = 0,
+    sales_mom_pct = null,
+    profit_mom_pct = null,
+    sales_last_month = 0,
+    profit_last_month = 0,
   } = stats || {};
 
   const help_given = liveHelpGiven || Number(stats?.help_given) || 0;
@@ -541,6 +545,24 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
                 >
                   {money(currentProfit)}
                 </span>
+                {profitPeriod === 'month' && sales_mom_pct != null && (
+                  <span
+                    style={{
+                      fontSize: '0.78rem',
+                      fontWeight: 800,
+                      padding: '0.2rem 0.6rem',
+                      borderRadius: 999,
+                      background: Number(profit_mom_pct || sales_mom_pct) >= 0 ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                      color: Number(profit_mom_pct || sales_mom_pct) >= 0 ? '#16a34a' : '#ef4444',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.25rem',
+                    }}
+                  >
+                    {Number(profit_mom_pct ?? sales_mom_pct) >= 0 ? '▲ +' : '▼ '}
+                    {profit_mom_pct ?? sales_mom_pct}% vs Last Month
+                  </span>
+                )}
               </div>
 
               <div className="profit-hero-breakdown">

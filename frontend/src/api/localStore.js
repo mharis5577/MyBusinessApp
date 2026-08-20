@@ -2,7 +2,7 @@
  * On-device IndexedDB store for Capacitor / VITE_DATA_MODE=local builds.
  * Mirrors the Express /api shapes used by the UI.
  */
-import { pakistanToday, pakistanYearMonth, pakistanNowTime, addDaysToDateString } from '../utils/pakistan';
+import { pakistanToday, pakistanYearMonth, pakistanNowTime, addDaysToDateString, getPreviousYearMonth } from '../utils/pakistan';
 import { allItemsReturned, isCancelled, recalcBillTotals, remainingQty } from '../utils/billAdjust';
 import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from '../utils/paymentMethods';
 import { normalizeBillType, invoicePrefixForType, partyTypeForBill, outstandingByPartyName } from '../utils/billTypes';
@@ -1405,6 +1405,18 @@ async function handleLocalRequestInner(url, options = {}) {
       return d >= weekStart && d <= today;
     });
     const monthTotals = calcPeriodProfit((b) => String(b.bill_date || '').startsWith(monthPrefix));
+    const prevMonthPrefix = getPreviousYearMonth(monthPrefix);
+    const lastMonthTotals = calcPeriodProfit((b) => String(b.bill_date || '').startsWith(prevMonthPrefix));
+    const sales_mom_pct = lastMonthTotals.sales > 0
+      ? Number((((monthTotals.sales - lastMonthTotals.sales) / lastMonthTotals.sales) * 100).toFixed(1))
+      : null;
+    const profit_mom_pct = lastMonthTotals.profit !== 0
+      ? Number((((monthTotals.profit - lastMonthTotals.profit) / Math.abs(lastMonthTotals.profit)) * 100).toFixed(1))
+      : null;
+    const cost_mom_pct = lastMonthTotals.cost > 0
+      ? Number((((monthTotals.cost - lastMonthTotals.cost) / lastMonthTotals.cost) * 100).toFixed(1))
+      : null;
+
     const allTotals = calcPeriodProfit(() => true);
 
     const recent = [...bills].sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)).slice(0, 5);
@@ -1446,6 +1458,12 @@ async function handleLocalRequestInner(url, options = {}) {
       cost_month: monthTotals.cost,
       profit_month: monthTotals.profit,
       margin_month: monthTotals.margin,
+      sales_last_month: lastMonthTotals.sales,
+      cost_last_month: lastMonthTotals.cost,
+      profit_last_month: lastMonthTotals.profit,
+      sales_mom_pct,
+      profit_mom_pct,
+      cost_mom_pct,
       sales_total: allTotals.sales,
       cost_total: allTotals.cost,
       profit_total: allTotals.profit,

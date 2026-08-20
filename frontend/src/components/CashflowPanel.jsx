@@ -1,10 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowDownUp, BarChart2, ChevronRight, RefreshCw, TrendingUp, DollarSign, Wallet, Calendar } from 'lucide-react';
+import {
+  ArrowDownUp,
+  BarChart2,
+  ChevronRight,
+  RefreshCw,
+  TrendingUp,
+  DollarSign,
+  Wallet,
+  Calendar,
+  Download,
+  FileSpreadsheet,
+} from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import EmptyState from './EmptyState';
 import { billTypeBadgeClass, billTypeShortLabel, isHelpBill } from '../utils/billTypes';
+import { downloadCashflowReportPdf, downloadCashflowCsv } from '../utils/tableExport';
 
 function CashflowChart({ data = [], currencySymbol = 'Rs.' }) {
   const [timeRange, setTimeRange] = useState('7d');
@@ -474,6 +486,8 @@ export default function CashflowPanel({
   const toast = useToast();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -497,6 +511,44 @@ export default function CashflowPanel({
     if (!row?.id) return;
     if (onViewBill) onViewBill(row);
     else if (onNavigate) onNavigate('database');
+  };
+
+  const handleExportPdf = async () => {
+    setExportingPdf(true);
+    try {
+      await downloadCashflowReportPdf({
+        companyName: 'ELITE CHOCOLATE',
+        currencySymbol,
+        cashflow: data,
+        dailyTrend: data?.daily_trend || [],
+        moneyFlow: data?.money_flow || [],
+        filename: `Cashflow_Statement_${new Date().toISOString().slice(0, 10)}.pdf`,
+      });
+      toast.success('Cashflow PDF Statement downloaded!');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to generate PDF statement');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
+  const handleExportCsv = async () => {
+    setExportingCsv(true);
+    try {
+      await downloadCashflowCsv({
+        moneyFlow: data?.money_flow || [],
+        dailyTrend: data?.daily_trend || [],
+        currencySymbol,
+        filename: `Cashflow_Transactions_${new Date().toISOString().slice(0, 10)}.csv`,
+      });
+      toast.success('Cashflow CSV exported!');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to export CSV');
+    } finally {
+      setExportingCsv(false);
+    }
   };
 
   if (loading && !data) {
@@ -537,18 +589,59 @@ export default function CashflowPanel({
             </h3>
             <p className="panel-flat-sub">Sales in vs Saudia buying · Help money is separate</p>
           </div>
-          <button type="button" className="btn-secondary" style={{ width: 'auto', minHeight: 36, padding: '0.35rem 0.7rem', fontSize: '0.75rem' }} onClick={load}>
-            <RefreshCw size={14} /> Refresh
-          </button>
+          <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn-primary"
+              style={{ width: 'auto', minHeight: 34, padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
+              disabled={exportingPdf}
+              onClick={handleExportPdf}
+            >
+              <Download size={14} /> {exportingPdf ? 'Exporting PDF…' : 'PDF Statement'}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ width: 'auto', minHeight: 34, padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
+              disabled={exportingCsv}
+              onClick={handleExportCsv}
+            >
+              <FileSpreadsheet size={14} /> {exportingCsv ? 'Exporting CSV…' : 'CSV Excel'}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ width: 'auto', minHeight: 34, padding: '0.35rem 0.7rem', fontSize: '0.75rem' }}
+              onClick={load}
+            >
+              <RefreshCw size={14} /> Refresh
+            </button>
+          </div>
         </div>
       )}
 
       {embedded && (
         <div className="dash-dropdown-toolbar">
           <span>Sales · Saudia · Help out {formatCurrency(currencySymbol, helpOutShow)}</span>
-          <button type="button" className="btn-secondary" style={{ width: 'auto', minHeight: 32, padding: '0.3rem 0.65rem', fontSize: '0.72rem' }} onClick={load}>
-            <RefreshCw size={13} /> Refresh
-          </button>
+          <div style={{ display: 'flex', gap: '0.35rem' }}>
+            <button
+              type="button"
+              className="btn-primary"
+              style={{ width: 'auto', minHeight: 30, padding: '0.25rem 0.6rem', fontSize: '0.72rem' }}
+              disabled={exportingPdf}
+              onClick={handleExportPdf}
+            >
+              <Download size={13} /> PDF
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ width: 'auto', minHeight: 30, padding: '0.25rem 0.6rem', fontSize: '0.72rem' }}
+              onClick={load}
+            >
+              <RefreshCw size={13} /> Refresh
+            </button>
+          </div>
         </div>
       )}
 
