@@ -2,6 +2,7 @@
  * On-device IndexedDB store for Capacitor / VITE_DATA_MODE=local builds.
  * Mirrors the Express /api shapes used by the UI.
  */
+import { openDB } from 'idb';
 import { pakistanToday, pakistanYearMonth, pakistanNowTime, addDaysToDateString, getPreviousYearMonth } from '../utils/pakistan';
 import { allItemsReturned, isCancelled, recalcBillTotals, remainingQty } from '../utils/billAdjust';
 import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from '../utils/paymentMethods';
