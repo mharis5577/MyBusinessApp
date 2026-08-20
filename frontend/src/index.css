@@ -4812,59 +4812,6 @@ body {
   gap: 1rem;
 }
 
-/* Senior UI Aesthetics: Floating Mobile Action Bar (FAB) */
-.mobile-fab-bar {
-  display: none;
-}
-@media (max-width: 768px) {
-  .mobile-fab-bar {
-    position: fixed;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 900;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.4rem 0.55rem;
-    background: rgba(15, 23, 42, 0.9);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 999px;
-    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
-    animation: fab-rise 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
-  .mobile-fab-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.5rem 0.85rem;
-    border-radius: 999px;
-    font-size: 0.8rem;
-    font-weight: 800;
-    border: none;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: transform 0.15s ease, background 0.15s ease;
-  }
-  .mobile-fab-btn.is-primary {
-    background: var(--accent-teal, #00b3a6);
-    color: #ffffff;
-    box-shadow: 0 4px 14px rgba(0, 179, 166, 0.35);
-  }
-  .mobile-fab-btn.is-secondary {
-    background: rgba(255, 255, 255, 0.12);
-    color: #ffffff;
-  }
-  .mobile-fab-btn:active {
-    transform: scale(0.94);
-  }
-}
-@keyframes fab-rise {
-  from { opacity: 0; transform: translate(-50%, 20px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
-}
 
 /* Senior UI: Actionable Stat Card Badges */
 .stat-card-action-badge {

@@ -968,30 +968,6 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
         </div>
       )}
 
-      {/* Mobile Floating Action Bar (FAB) */}
-      <div className="mobile-fab-bar">
-        <button
-          type="button"
-          className="mobile-fab-btn is-primary"
-          onClick={() => onNavigate('create')}
-        >
-          <PlusCircle size={15} /> New Bill
-        </button>
-        <button
-          type="button"
-          className="mobile-fab-btn is-secondary"
-          onClick={() => onNavigate('database')}
-        >
-          <FileText size={14} /> Bills
-        </button>
-        <button
-          type="button"
-          className="mobile-fab-btn is-secondary"
-          onClick={() => setActiveTab('cashflow')}
-        >
-          <ArrowDownUp size={14} /> Cashflow
-        </button>
-      </div>
 
       <QuickPaySheet
         open={Boolean(payBill)}
