@@ -23,7 +23,8 @@ import {
   CreditCard,
   Building2,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  ChevronDown
 } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
@@ -54,6 +55,8 @@ export default function CustomerManager({
   const [ledger, setLedger] = useState(null);
   const [partyFilter, setPartyFilter] = useState('all'); // 'all' | 'customer' | 'supplier' | 'dues' | 'vip'
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState('dues'); // 'dues' | 'vip' | 'name'
+  const [isDirExpanded, setIsDirExpanded] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [shopSettings, setShopSettings] = useState(settings || {});
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -305,12 +308,20 @@ export default function CustomerManager({
     }
 
     return [...rows].sort((a, b) => {
+      if (sortBy === 'name') {
+        return String(a.name).localeCompare(String(b.name));
+      }
+      if (sortBy === 'vip') {
+        const aVip = (Number(a.sales_outstanding) > 5000 || Number(a.total_revenue || 0) > 10000) ? 1 : 0;
+        const bVip = (Number(b.sales_outstanding) > 5000 || Number(b.total_revenue || 0) > 10000) ? 1 : 0;
+        if (aVip !== bVip) return bVip - aVip;
+      }
       const aOut = (Number(a.sales_outstanding) || 0) + (Number(a.help_outstanding) || 0) + (Number(a.buying_outstanding) || 0);
       const bOut = (Number(b.sales_outstanding) || 0) + (Number(b.help_outstanding) || 0) + (Number(b.buying_outstanding) || 0);
       if (aOut !== bOut) return bOut - aOut;
       return String(a.name).localeCompare(String(b.name));
     });
-  }, [customers, partyFilter, searchTerm]);
+  }, [customers, partyFilter, searchTerm, sortBy]);
 
   const extraPayeeBanks = useMemo(
     () => [
@@ -465,13 +476,16 @@ export default function CustomerManager({
 
   const getInitials = (clientName) => {
     if (!clientName) return 'CL';
-    const parts = clientName.trim().split(/\s+/);
+    // Clean out parentheses, brackets, numbers, and symbols
+    const clean = String(clientName).replace(/[\(\)\[\]\{\}\-_0-9]/g, '').trim();
+    const parts = clean.split(/\s+/).filter(Boolean);
+    if (!parts.length) return clientName.slice(0, 2).toUpperCase();
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '3.5rem' }}>
       {/* 1. Header Toolbar & Search & Action Bar */}
       <div className="glass-panel" style={{ padding: '1.25rem 1.5rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
@@ -547,152 +561,229 @@ export default function CustomerManager({
         </div>
       </div>
 
-      {/* 2. Client Directory Responsive Grid */}
-      {filteredCustomers.length === 0 ? (
-        <div className="glass-panel" style={{ padding: '2.5rem 1.5rem', textAlign: 'center' }}>
-          <EmptyState
-            title={searchTerm ? 'No matching clients found' : 'No clients in this list'}
-            body={searchTerm ? `Try searching with a different keyword.` : 'Add a new client profile to get started.'}
-            icon={Users}
-            actionLabel={searchTerm ? 'Clear Search' : '+ Add Client'}
-            onAction={searchTerm ? () => setSearchTerm('') : () => setShowAddModal(true)}
-          />
+      {/* 2. Client Directory Contained Window with Dropdown Accordion */}
+      <div className="glass-panel" style={{ padding: '1.25rem 1.5rem', overflow: 'hidden' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            cursor: 'pointer',
+            userSelect: 'none',
+            flexWrap: 'wrap',
+            gap: '0.75rem',
+            paddingBottom: isDirExpanded ? '0.85rem' : '0',
+            borderBottom: isDirExpanded ? '1px solid var(--border-color)' : 'none',
+          }}
+          onClick={() => setIsDirExpanded(!isDirExpanded)}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+            <ChevronDown
+              size={18}
+              style={{
+                transform: isDirExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                transition: 'transform 0.2s ease',
+                color: 'var(--accent-teal)'
+              }}
+            />
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
+              Saved Client Profiles ({filteredCustomers.length})
+            </h3>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
+            {/* Quick Jump to Client Dropdown */}
+            <div style={{ width: '200px' }}>
+              <AppSelect
+                value={selectedCustomer ? String(selectedCustomer.id) : ''}
+                onChange={(val) => {
+                  const found = customers.find((c) => String(c.id) === String(val));
+                  if (found) handleSelectCustomer(found);
+                }}
+                placeholder="⚡ Jump to Client…"
+                options={[
+                  { value: '', label: '⚡ Jump to Client…' },
+                  ...customers.map((c) => ({
+                    value: String(c.id),
+                    label: `${c.name}${Number(c.sales_outstanding) > 0 ? ` (Due: ${currencySymbol}${c.sales_outstanding})` : ''}`
+                  }))
+                ]}
+              />
+            </div>
+
+            {/* Sort Dropdown */}
+            <div style={{ width: '150px' }}>
+              <AppSelect
+                value={sortBy}
+                onChange={setSortBy}
+                options={[
+                  { value: 'dues', label: 'Highest Dues' },
+                  { value: 'vip', label: 'VIP Clients' },
+                  { value: 'name', label: 'Name (A-Z)' },
+                ]}
+              />
+            </div>
+          </div>
         </div>
-      ) : (
-        <div className="client-directory-grid">
-          {filteredCustomers.map((c) => {
-            const isSelected = selectedCustomer?.id === c.id;
-            const pt = c.party_type === 'supplier' ? 'supplier' : 'customer';
-            const salesDue = Number(c.sales_outstanding) || 0;
-            const helpDue = Number(c.help_outstanding) || 0;
-            const buyingDue = Number(c.buying_outstanding) || 0;
-            const isVip = salesDue > 5000 || Number(c.total_revenue || 0) > 10000;
-            const initials = getInitials(c.name);
 
-            return (
+        {isDirExpanded && (
+          <div style={{ marginTop: '1rem' }}>
+            {filteredCustomers.length === 0 ? (
+              <div style={{ padding: '2rem 1rem', textAlign: 'center' }}>
+                <EmptyState
+                  title={searchTerm ? 'No matching clients found' : 'No clients in this list'}
+                  body={searchTerm ? `Try searching with a different keyword.` : 'Add a new client profile to get started.'}
+                  icon={Users}
+                  actionLabel={searchTerm ? 'Clear Search' : '+ Add Client'}
+                  onAction={searchTerm ? () => setSearchTerm('') : () => setShowAddModal(true)}
+                />
+              </div>
+            ) : (
               <div
-                key={c.id}
-                className={`client-dir-card${isSelected ? ' is-selected' : ''}`}
-                onClick={() => handleSelectCustomer(c)}
+                className="client-directory-grid"
+                style={{
+                  maxHeight: '440px',
+                  overflowY: 'auto',
+                  paddingRight: '6px',
+                  paddingBottom: '2.5rem',
+                }}
               >
-                <div>
-                  {/* Card Header: Avatar & Title */}
-                  <div className="client-dir-header">
-                    <div className={`client-avatar-badge${isVip ? ' is-vip' : ''}`}>
-                      {initials}
-                    </div>
+                {filteredCustomers.map((c) => {
+                  const isSelected = selectedCustomer?.id === c.id;
+                  const pt = c.party_type === 'supplier' ? 'supplier' : 'customer';
+                  const salesDue = Number(c.sales_outstanding) || 0;
+                  const helpDue = Number(c.help_outstanding) || 0;
+                  const buyingDue = Number(c.buying_outstanding) || 0;
+                  const isVip = salesDue > 5000 || Number(c.total_revenue || 0) > 10000;
+                  const initials = getInitials(c.name);
 
-                    <div className="client-dir-title-box">
-                      <div className="client-dir-name-row">
-                        <span className="client-dir-name" title={c.name}>{c.name}</span>
-                        {isVip && (
-                          <span className="vip-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: '0.68rem', fontWeight: 800, padding: '0.1rem 0.45rem', borderRadius: 999, background: 'rgba(212, 175, 55, 0.18)', color: '#d4af37', border: '1px solid rgba(212, 175, 55, 0.4)' }}>
-                            <Star size={10} fill="#d4af37" /> VIP
-                          </span>
+                  return (
+                    <div
+                      key={c.id}
+                      className={`client-dir-card${isSelected ? ' is-selected' : ''}`}
+                      onClick={() => handleSelectCustomer(c)}
+                    >
+                      <div>
+                        {/* Card Header: Avatar & Title */}
+                        <div className="client-dir-header">
+                          <div className={`client-avatar-badge${isVip ? ' is-vip' : ''}`}>
+                            {initials}
+                          </div>
+
+                          <div className="client-dir-title-box">
+                            <div className="client-dir-name-row">
+                              <span className="client-dir-name" title={c.name}>{c.name}</span>
+                              {isVip && (
+                                <span className="vip-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: '0.68rem', fontWeight: 800, padding: '0.1rem 0.45rem', borderRadius: 999, background: 'rgba(212, 175, 55, 0.18)', color: '#d4af37', border: '1px solid rgba(212, 175, 55, 0.4)' }}>
+                                  <Star size={10} fill="#d4af37" /> VIP
+                                </span>
+                              )}
+                              <span className={`type-badge ${pt}`}>
+                                {pt === 'supplier' ? 'Supplier' : 'Customer'}
+                              </span>
+                            </div>
+
+                            {/* Contact items with clean ellipsis */}
+                            <div className="client-dir-meta-row">
+                              {c.phone ? (
+                                <div className="client-meta-item" title={c.phone}>
+                                  <Phone size={12} style={{ color: 'var(--text-muted)' }} />
+                                  <span>{c.phone}</span>
+                                </div>
+                              ) : null}
+
+                              {c.email ? (
+                                <div className="client-meta-item" title={c.email}>
+                                  <Mail size={12} style={{ color: 'var(--text-muted)' }} />
+                                  <span>{c.email}</span>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Financial Status Badge */}
+                        <div>
+                          {pt === 'customer' ? (
+                            salesDue > 0 ? (
+                              <span className="client-health-badge is-due">
+                                <AlertCircle size={13} /> Sales Due: {formatCurrency(currencySymbol, salesDue, { maximumFractionDigits: 0 })}
+                              </span>
+                            ) : helpDue > 0 ? (
+                              <span className="client-health-badge is-help">
+                                <HeartHandshake size={13} /> Help Lent: {formatCurrency(currencySymbol, helpDue, { maximumFractionDigits: 0 })}
+                              </span>
+                            ) : (
+                              <span className="client-health-badge is-clear">
+                                <CheckCircle2 size={13} /> All Clear · No Dues
+                              </span>
+                            )
+                          ) : (
+                            buyingDue > 0 ? (
+                              <span className="client-health-badge is-due">
+                                <Building2 size={13} /> Saudia Payable: {formatCurrency(currencySymbol, buyingDue, { maximumFractionDigits: 0 })}
+                              </span>
+                            ) : (
+                              <span className="client-health-badge is-clear">
+                                <CheckCircle2 size={13} /> Supplier Settled
+                              </span>
+                            )
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Bottom Action Bar */}
+                      <div className="client-dir-actions-row" onClick={(e) => e.stopPropagation()}>
+                        {c.phone && (
+                          <>
+                            <button
+                              type="button"
+                              className="client-act-btn is-wa"
+                              title="Chat on WhatsApp"
+                              onClick={(e) => openWhatsApp(c, e)}
+                            >
+                              <MessageCircle size={14} /> WA
+                            </button>
+
+                            {pt === 'customer' && (
+                              <button
+                                type="button"
+                                className="client-act-btn"
+                                title="Send Unpaid Statement via WhatsApp"
+                                onClick={(e) => remindUnpaid(c, e)}
+                              >
+                                <Bell size={13} /> Statement
+                              </button>
+                            )}
+                          </>
                         )}
-                        <span className={`type-badge ${pt}`}>
-                          {pt === 'supplier' ? 'Supplier' : 'Customer'}
-                        </span>
-                      </div>
 
-                      {/* Contact items with clean ellipsis */}
-                      <div className="client-dir-meta-row">
-                        {c.phone ? (
-                          <div className="client-meta-item" title={c.phone}>
-                            <Phone size={12} style={{ color: 'var(--text-muted)' }} />
-                            <span>{c.phone}</span>
-                          </div>
-                        ) : null}
-
-                        {c.email ? (
-                          <div className="client-meta-item" title={c.email}>
-                            <Mail size={12} style={{ color: 'var(--text-muted)' }} />
-                            <span>{c.email}</span>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Financial Status Badge */}
-                  <div>
-                    {pt === 'customer' ? (
-                      salesDue > 0 ? (
-                        <span className="client-health-badge is-due">
-                          <AlertCircle size={13} /> Sales Due: {formatCurrency(currencySymbol, salesDue, { maximumFractionDigits: 0 })}
-                        </span>
-                      ) : helpDue > 0 ? (
-                        <span className="client-health-badge is-help">
-                          <HeartHandshake size={13} /> Help Lent: {formatCurrency(currencySymbol, helpDue, { maximumFractionDigits: 0 })}
-                        </span>
-                      ) : (
-                        <span className="client-health-badge is-clear">
-                          <CheckCircle2 size={13} /> All Clear · No Dues
-                        </span>
-                      )
-                    ) : (
-                      buyingDue > 0 ? (
-                        <span className="client-health-badge is-due">
-                          <Building2 size={13} /> Saudia Payable: {formatCurrency(currencySymbol, buyingDue, { maximumFractionDigits: 0 })}
-                        </span>
-                      ) : (
-                        <span className="client-health-badge is-clear">
-                          <CheckCircle2 size={13} /> Supplier Settled
-                        </span>
-                      )
-                    )}
-                  </div>
-                </div>
-
-                {/* Bottom Action Bar */}
-                <div className="client-dir-actions-row" onClick={(e) => e.stopPropagation()}>
-                  {c.phone && (
-                    <>
-                      <button
-                        type="button"
-                        className="client-act-btn is-wa"
-                        title="Chat on WhatsApp"
-                        onClick={(e) => openWhatsApp(c, e)}
-                      >
-                        <MessageCircle size={14} /> WA
-                      </button>
-
-                      {pt === 'customer' && (
                         <button
                           type="button"
                           className="client-act-btn"
-                          title="Send Unpaid Statement via WhatsApp"
-                          onClick={(e) => remindUnpaid(c, e)}
+                          style={{ background: isSelected ? 'rgba(45, 212, 191, 0.15)' : undefined, color: isSelected ? 'var(--accent-teal)' : undefined }}
+                          onClick={() => handleSelectCustomer(c)}
                         >
-                          <Bell size={13} /> Statement
+                          <BookOpen size={13} /> Ledger
                         </button>
-                      )}
-                    </>
-                  )}
 
-                  <button
-                    type="button"
-                    className="client-act-btn"
-                    style={{ background: isSelected ? 'rgba(45, 212, 191, 0.15)' : undefined, color: isSelected ? 'var(--accent-teal)' : undefined }}
-                    onClick={() => handleSelectCustomer(c)}
-                  >
-                    <BookOpen size={13} /> Ledger
-                  </button>
-
-                  <button
-                    type="button"
-                    className="client-act-btn is-danger"
-                    title="Delete Client"
-                    onClick={(e) => askDeleteCustomer(c, e)}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
+                        <button
+                          type="button"
+                          className="client-act-btn is-danger"
+                          title="Delete Client"
+                          onClick={(e) => askDeleteCustomer(c, e)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
-      )}
+            )}
+          </div>
+        )}
+      </div>
 
       {/* 3. Selected Client Inspector Panel (Ledger & Custom Rates) */}
       <div className="glass-panel" style={{ padding: '1.5rem' }}>
