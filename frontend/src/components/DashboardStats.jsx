@@ -12,12 +12,12 @@ import {
   CalendarDays,
   Shield,
   ChevronRight,
-  ChevronDown,
   HeartHandshake,
   Banknote,
   MessageCircle,
-  Calculator,
   Download,
+  SlidersHorizontal,
+  CheckCircle2,
 } from 'lucide-react';
 import { downloadDailyProfitSummaryPdf } from '../utils/tableExport';
 import { playSuccessChime, playTapSound } from '../utils/audioEffects';
@@ -45,51 +45,26 @@ import {
 
 const CashflowPanel = lazy(() => import('./CashflowPanel'));
 const OverduePanel = lazy(() => import('./OverduePanel'));
+const DailyClosePanel = lazy(() => import('./DailyClosePanel'));
 
-function StatCard({ label, value, hint, icon: Icon }) {
+function StatCard({ label, value, hint, icon: Icon, highlight = false, onClick }) {
   return (
-    <div className="stat-card">
+    <div
+      className={`stat-card${highlight ? ' stat-card-highlight' : ''}${onClick ? ' is-clickable' : ''}`}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      style={{ cursor: onClick ? 'pointer' : 'default' }}
+    >
       <div className="stat-card-head">
         <span className="stat-card-label">{label}</span>
-        <Icon size={15} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+        <Icon size={15} style={{ color: highlight ? 'var(--status-overdue)' : 'var(--text-muted)', flexShrink: 0 }} />
       </div>
       <div className="stat-card-value" title={String(value)}>
         {value}
       </div>
       <div className="stat-card-hint">{hint}</div>
     </div>
-  );
-}
-
-function DashDropdown({ id, openId, onOpenChange, title, hint, icon: Icon, accent = '', children }) {
-  const open = openId === id;
-
-  return (
-    <details
-      className={`dash-dropdown${accent ? ` is-${accent}` : ''}`}
-      open={open}
-      onToggle={(e) => {
-        const nextOpen = e.currentTarget.open;
-        if (nextOpen) onOpenChange(id);
-        else if (openId === id) onOpenChange(null);
-      }}
-    >
-      <summary className="dash-dropdown-summary">
-        <span className="dash-dropdown-lead">
-          {Icon ? (
-            <span className="dash-dropdown-icon" aria-hidden>
-              <Icon size={16} />
-            </span>
-          ) : null}
-          <span className="dash-dropdown-copy">
-            <strong>{title}</strong>
-            {hint ? <span className="dash-dropdown-hint">{hint}</span> : null}
-          </span>
-        </span>
-        <ChevronDown className="dash-dropdown-chevron" size={17} aria-hidden />
-      </summary>
-      {open ? <div className="dash-dropdown-body">{children}</div> : null}
-    </details>
   );
 }
 
@@ -146,9 +121,10 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
   const [stats, setStats] = useState(null);
   const [helpBills, setHelpBills] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [openSection, setOpenSection] = useState('overview');
+  const [activeTab, setActiveTab] = useState('overview');
+  const [profitPeriod, setProfitPeriod] = useState('today');
   const [payBill, setPayBill] = useState(null);
-  const seededOpenRef = useRef(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
 
   const fetchStats = async (soft = false) => {
     if (!soft) setLoading(true);
@@ -194,49 +170,32 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
   const liveHelpRepaid = helpBills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
   const liveHelpOut = Math.round(Math.max(0, liveHelpGiven - liveHelpRepaid) * 100) / 100;
 
-  useEffect(() => {
-    if (loading) return;
-    if (seededOpenRef.current) return;
-    seededOpenRef.current = true;
-    const overdue = Number(stats?.total_overdue) || 0;
-    if (overdue > 0) setOpenSection('overdue');
-    else if (helpBills.length > 0) setOpenSection('help');
-    else setOpenSection('overview');
-  }, [loading, stats, helpBills.length]);
-
   const loadFullHelp = async (row) => {
     try {
       const res = await apiFetch(`/api/bills/${row.id}`);
-      const bill = await res.json();
-      if (res.ok && bill?.id) return bill;
+      const data = await res.json();
+      if (res.ok && data?.id) return data;
     } catch {
-      /* use row */
+      /* ignore */
     }
     return row;
   };
 
   const openHelpBill = async (row) => {
-    if (!onViewBill && onNavigate) {
-      onNavigate('database');
-      return;
-    }
-    const bill = await loadFullHelp(row);
-    onViewBill(bill);
+    const full = await loadFullHelp(row);
+    if (onViewBill) onViewBill(full);
+    else if (onNavigate) onNavigate('database');
   };
 
   const remindHelp = async (row) => {
     const bill = await loadFullHelp(row);
-    const due = billBalance(bill);
-    if (due <= 0) {
-      toast.info('Already returned.');
-      return;
-    }
-    if (!normalizeWhatsAppPhone(bill.customer_phone)) {
-      toast.error('No phone on this person — add it on the bill first.');
+    const raw = bill.customer_phone;
+    if (!raw || !normalizeWhatsAppPhone(raw)) {
+      toast.info('Add a phone number on this bill to send WhatsApp.');
       return;
     }
     const text = buildPaymentReminderText({
-      bill: { ...bill, balance_due: due },
+      bill,
       settings,
       currencySymbol,
       urdu: Boolean(settings.urdu_labels),
@@ -253,8 +212,6 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     setPayBill(bill);
   };
 
-  const [generatingReport, setGeneratingReport] = useState(false);
-
   const handleDownloadDailyReport = async () => {
     setGeneratingReport(true);
     playTapSound();
@@ -270,10 +227,10 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
         companyName: settings?.company_name || 'ELITE CHOCOLATE',
         currencySymbol,
         stats: {
-          sales_today: stats?.profit_today?.sales ?? stats?.sales_today ?? 0,
-          cost_today: stats?.profit_today?.cost ?? stats?.cost_today ?? 0,
-          profit_today: stats?.profit_today?.profit ?? stats?.profit_today ?? 0,
-          margin_today: stats?.profit_today?.margin ?? stats?.margin_today ?? 0,
+          sales_today: stats?.sales_today ?? 0,
+          cost_today: stats?.cost_today ?? 0,
+          profit_today: stats?.profit_today ?? 0,
+          margin_today: stats?.margin_today ?? 0,
         },
         bills: todayBills.length ? todayBills : (stats?.recent_bills || []),
         filename: `Daily_Profit_Summary_${todayIso}.pdf`,
@@ -302,10 +259,14 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     total_pending = 0,
     total_overdue = 0,
     total_bills = 0,
+    overdue_bills_count = 0,
     recent_bills = [],
     sales_today = 0,
     cost_today = 0,
     profit_today = 0,
+    sales_week = 0,
+    cost_week = 0,
+    profit_week = 0,
     sales_month = 0,
     cost_month = 0,
     profit_month = 0,
@@ -322,9 +283,12 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
 
   const lastBackup = getLastAutoBackupAt();
   const money = (n) => formatCurrency(currencySymbol, n, { maximumFractionDigits: 0 });
+
   const margin_today = sales_today > 0 ? ((profit_today / sales_today) * 100).toFixed(1) : '0.0';
+  const margin_week = sales_week > 0 ? ((profit_week / sales_week) * 100).toFixed(1) : '0.0';
   const margin_month = sales_month > 0 ? ((profit_month / sales_month) * 100).toFixed(1) : '0.0';
   const margin_total = sales_total > 0 ? ((profit_total / sales_total) * 100).toFixed(1) : '0.0';
+
   const goGiveHelp = () => {
     try {
       sessionStorage.setItem(CREATE_BILL_TYPE_KEY, 'help');
@@ -333,6 +297,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     }
     onNavigate('create');
   };
+
   const goHelpBills = () => {
     try {
       sessionStorage.setItem(BILLS_TYPE_FILTER_KEY, 'help');
@@ -342,9 +307,50 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     onNavigate('database');
   };
 
-  const toggleSection = (id) => {
-    setOpenSection((cur) => (cur === id ? null : id));
-  };
+  const currentSales =
+    profitPeriod === 'today'
+      ? sales_today
+      : profitPeriod === 'week'
+      ? sales_week
+      : profitPeriod === 'month'
+      ? sales_month
+      : sales_total;
+
+  const currentCost =
+    profitPeriod === 'today'
+      ? cost_today
+      : profitPeriod === 'week'
+      ? cost_week
+      : profitPeriod === 'month'
+      ? cost_month
+      : cost_total;
+
+  const currentProfit =
+    profitPeriod === 'today'
+      ? profit_today
+      : profitPeriod === 'week'
+      ? profit_week
+      : profitPeriod === 'month'
+      ? profit_month
+      : profit_total;
+
+  const currentMargin =
+    profitPeriod === 'today'
+      ? margin_today
+      : profitPeriod === 'week'
+      ? margin_week
+      : profitPeriod === 'month'
+      ? margin_month
+      : margin_total;
+
+  const periodTitle =
+    profitPeriod === 'today'
+      ? "Today's Profit"
+      : profitPeriod === 'week'
+      ? 'This Week (7 Days)'
+      : profitPeriod === 'month'
+      ? `This Month (${new Date().toLocaleString('default', { month: 'short' })})`
+      : 'Total All-Time Profit';
 
   return (
     <div className="dashboard-page">
@@ -379,292 +385,438 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
           </button>
           <div className="hero-actions-secondary">
             <button type="button" className="btn-secondary" onClick={() => onNavigate('database')}>
-              <FileText size={16} /> Bills
-            </button>
-            <button type="button" className="btn-secondary" onClick={() => toggleSection('profit')}>
-              <TrendingUp size={16} /> Profits
-            </button>
-            <button type="button" className="btn-secondary" onClick={() => toggleSection('help')}>
-              <HeartHandshake size={16} /> Help
+              <FileText size={15} /> All Bills
             </button>
             <button type="button" className="btn-secondary" onClick={() => onNavigate('aging')}>
-              <CalendarDays size={16} /> Collections
+              <CalendarDays size={15} /> Aging Report
             </button>
           </div>
         </div>
       </div>
 
-      <div className="dashboard-peek" aria-label="Key figures">
+      <div className="dashboard-nav-pills" role="tablist" aria-label="Dashboard views">
         <button
           type="button"
-          className={`dashboard-peek-item${openSection === 'profit' ? ' is-active' : ''}`}
-          onClick={() => toggleSection('profit')}
+          role="tab"
+          aria-selected={activeTab === 'overview'}
+          className={`dash-pill-btn${activeTab === 'overview' ? ' is-active' : ''}`}
+          onClick={() => {
+            playTapSound();
+            setActiveTab('overview');
+          }}
         >
-          <span className="dashboard-peek-label">Profit today</span>
-          <span className="dashboard-peek-value">{money(profit_today)}</span>
+          <TrendingUp size={15} /> Overview & Profit
         </button>
         <button
           type="button"
-          className={`dashboard-peek-item${openSection === 'profit' ? ' is-active' : ''}`}
-          onClick={() => toggleSection('profit')}
+          role="tab"
+          aria-selected={activeTab === 'cashflow'}
+          className={`dash-pill-btn${activeTab === 'cashflow' ? ' is-active' : ''}`}
+          onClick={() => {
+            playTapSound();
+            setActiveTab('cashflow');
+          }}
         >
-          <span className="dashboard-peek-label">Total Profit</span>
-          <span className="dashboard-peek-value">{money(profit_total)}</span>
+          <ArrowDownUp size={15} /> Cashflow
         </button>
         <button
           type="button"
-          className={`dashboard-peek-item${openSection === 'overview' ? ' is-active' : ''}`}
-          onClick={() => toggleSection('overview')}
+          role="tab"
+          aria-selected={activeTab === 'dues'}
+          className={`dash-pill-btn${activeTab === 'dues' ? ' is-active' : ''}`}
+          onClick={() => {
+            playTapSound();
+            setActiveTab('dues');
+          }}
         >
-          <span className="dashboard-peek-label">Due</span>
-          <span className="dashboard-peek-value">{money(total_pending)}</span>
+          <HeartHandshake size={15} /> Dues & Help
+          {(total_overdue > 0 || help_outstanding > 0) && (
+            <span className={`dash-pill-badge${total_overdue > 0 ? ' is-alert' : ''}`}>
+              {total_overdue > 0 ? money(total_overdue) : help_count}
+            </span>
+          )}
         </button>
         <button
           type="button"
-          className={`dashboard-peek-item${openSection === 'overdue' ? ' is-active' : ''}`}
-          onClick={() => toggleSection('overdue')}
+          role="tab"
+          aria-selected={activeTab === 'recent'}
+          className={`dash-pill-btn${activeTab === 'recent' ? ' is-active' : ''}`}
+          onClick={() => {
+            playTapSound();
+            setActiveTab('recent');
+          }}
         >
-          <span className="dashboard-peek-label">Overdue</span>
-          <span className="dashboard-peek-value">{money(total_overdue)}</span>
+          <FileText size={15} /> Recent Bills
+          {recent_bills.length > 0 && (
+            <span className="dash-pill-badge">{recent_bills.length}</span>
+          )}
         </button>
         <button
           type="button"
-          className={`dashboard-peek-item${openSection === 'help' ? ' is-active' : ''}`}
-          onClick={() => toggleSection('help')}
+          role="tab"
+          aria-selected={activeTab === 'tools'}
+          className={`dash-pill-btn${activeTab === 'tools' ? ' is-active' : ''}`}
+          onClick={() => {
+            playTapSound();
+            setActiveTab('tools');
+          }}
         >
-          <span className="dashboard-peek-label">{help_outstanding > 0 ? 'Help out' : 'Help given'}</span>
-          <span className="dashboard-peek-value">{money(help_outstanding > 0 ? help_outstanding : help_given)}</span>
+          <SlidersHorizontal size={15} /> Tools & Backup
         </button>
       </div>
 
-      <div className="dashboard-dropdowns">
-        <DashDropdown
-          id="overview"
-          openId={openSection}
-          onOpenChange={setOpenSection}
-          title="Overview"
-          hint={`${total_bills} bills · Total Profit: ${money(profit_total)}${help_outstanding > 0 ? ` · help out ${money(help_outstanding)}` : ''}`}
-          icon={TrendingUp}
-        >
+      {activeTab === 'overview' && (
+        <div className="dashboard-tab-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="profit-hero-card">
+            <div className="profit-hero-header">
+              <div className="profit-hero-title-group">
+                <Wallet size={18} style={{ color: 'var(--accent-teal)' }} />
+                <span className="profit-hero-title">Net Profit Margins</span>
+              </div>
+
+              <div className="profit-period-segmented" role="group" aria-label="Profit Time Period">
+                <button
+                  type="button"
+                  className={`profit-period-btn${profitPeriod === 'today' ? ' is-active' : ''}`}
+                  onClick={() => {
+                    playTapSound();
+                    setProfitPeriod('today');
+                  }}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  className={`profit-period-btn${profitPeriod === 'week' ? ' is-active' : ''}`}
+                  onClick={() => {
+                    playTapSound();
+                    setProfitPeriod('week');
+                  }}
+                >
+                  7 Days
+                </button>
+                <button
+                  type="button"
+                  className={`profit-period-btn${profitPeriod === 'month' ? ' is-active' : ''}`}
+                  onClick={() => {
+                    playTapSound();
+                    setProfitPeriod('month');
+                  }}
+                >
+                  This Month
+                </button>
+                <button
+                  type="button"
+                  className={`profit-period-btn${profitPeriod === 'total' ? ' is-active' : ''}`}
+                  onClick={() => {
+                    playTapSound();
+                    setProfitPeriod('total');
+                  }}
+                >
+                  All-Time
+                </button>
+              </div>
+            </div>
+
+            <div className="profit-hero-main">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  {periodTitle}
+                </span>
+                <span
+                  className="profit-hero-margin-badge"
+                  style={{
+                    background: currentProfit >= 0 ? 'rgba(34, 197, 94, 0.14)' : 'rgba(239, 68, 68, 0.14)',
+                    color: currentProfit >= 0 ? '#16a34a' : '#ef4444',
+                  }}
+                >
+                  {currentMargin}% Margin
+                </span>
+              </div>
+
+              <div className="profit-hero-value-row">
+                <span
+                  className="profit-hero-amount"
+                  style={{ color: currentProfit >= 0 ? 'var(--text-primary)' : '#ef4444' }}
+                >
+                  {money(currentProfit)}
+                </span>
+              </div>
+
+              <div className="profit-hero-breakdown">
+                <div className="profit-breakdown-item">
+                  <span className="profit-breakdown-label">Gross Selling (Sales)</span>
+                  <span className="profit-breakdown-val" style={{ color: 'var(--text-primary)' }}>
+                    {money(currentSales)}
+                  </span>
+                </div>
+                <div className="profit-breakdown-item">
+                  <span className="profit-breakdown-label">Buying Cost (Saudia)</span>
+                  <span className="profit-breakdown-val" style={{ color: 'var(--text-secondary)' }}>
+                    −{money(currentCost)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="profit-hero-footer">
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ width: 'auto', fontSize: '0.82rem', padding: '0.45rem 1rem' }}
+                disabled={generatingReport}
+                onClick={handleDownloadDailyReport}
+              >
+                <Download size={15} /> {generatingReport ? 'Generating PDF…' : 'Download Daily Executive PDF'}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ width: 'auto', fontSize: '0.82rem', padding: '0.45rem 0.9rem' }}
+                onClick={() => setActiveTab('cashflow')}
+              >
+                View Full Cashflow <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
+
           <div className="stats-grid stats-grid-quiet">
             <StatCard
-              label="Profit today"
-              value={money(profit_today)}
-              hint={`Sales ${money(sales_today)} − cost ${money(cost_today)}`}
-              icon={Wallet}
-            />
-            <StatCard
-              label="Profit this month"
-              value={money(profit_month)}
-              hint={`Sales ${money(sales_month)} − cost ${money(cost_month)}`}
-              icon={CalendarDays}
-            />
-            <StatCard
-              label="Total profit"
-              value={money(profit_total)}
-              hint={`All-time margin: ${margin_total}% · Sales ${money(sales_total)}`}
-              icon={TrendingUp}
-            />
-            <StatCard
-              label="Collected"
+              label="Sales Collected"
               value={money(total_revenue)}
-              hint={
-                <>
-                  <TrendingUp size={12} /> Customer sales paid
-                </>
-              }
+              hint="Customer payments in"
               icon={DollarSign}
             />
-            <StatCard label="Due" value={money(total_pending)} hint="Sales not yet late" icon={Clock} />
             <StatCard
-              label="Overdue"
+              label="Sales Due"
+              value={money(total_pending)}
+              hint="Pending payment"
+              icon={Clock}
+              onClick={() => setActiveTab('dues')}
+            />
+            <StatCard
+              label="Overdue Sales"
               value={money(total_overdue)}
-              hint="Sales past due date"
+              hint={overdue_bills_count > 0 ? `${overdue_bills_count} bill(s) overdue` : 'All clear'}
+              highlight={total_overdue > 0}
               icon={AlertTriangle}
+              onClick={() => setActiveTab('dues')}
             />
-            <StatCard label="Bills" value={String(total_bills)} hint="Active (not cancelled)" icon={FileText} />
             <StatCard
-              label="Help given"
-              value={money(help_given)}
-              hint={`${help_count} ${help_count === 1 ? 'person' : 'people'} · still out ${money(help_outstanding)}`}
+              label="Help Outstanding"
+              value={money(help_outstanding)}
+              hint={`${help_count} person(s) lent`}
               icon={HeartHandshake}
+              onClick={() => setActiveTab('dues')}
+            />
+            <StatCard
+              label="Active Customer Bills"
+              value={String(total_bills)}
+              hint="Excl. cancelled"
+              icon={FileText}
+              onClick={() => onNavigate('database')}
             />
           </div>
-        </DashDropdown>
 
-        <DashDropdown
-          id="overdue"
-          openId={openSection}
-          onOpenChange={setOpenSection}
-          title="Overdue"
-          hint={total_overdue > 0 ? money(total_overdue) : 'All clear'}
-          icon={AlertTriangle}
-          accent={total_overdue > 0 ? 'alert' : ''}
-        >
-          <div className="dash-dropdown-toolbar">
-            <span>Sales overdue — help is below</span>
-            <button type="button" className="dashboard-recent-all" onClick={() => onNavigate('aging')}>
-              Full report
-              <ChevronRight size={15} aria-hidden />
-            </button>
-          </div>
-          <Suspense fallback={<p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading…</p>}>
-          <OverduePanel
-            embedded
-            excludeHelp
-            currencySymbol={currencySymbol}
-            settings={settings}
-            onPaid={() => fetchStats(true)}
-            onViewBill={async (row) => {
-              try {
-                const res = await apiFetch(`/api/bills/${row.id}`);
-                const bill = await res.json();
-                if (res.ok && onViewBill) onViewBill(bill);
-                else if (onNavigate) onNavigate('database');
-              } catch {
-                if (onNavigate) onNavigate('database');
-              }
-            }}
-          />
-          </Suspense>
-        </DashDropdown>
-
-        <DashDropdown
-          id="help"
-          openId={openSection}
-          onOpenChange={setOpenSection}
-          title="Help given"
-          hint={
-            help_count
-              ? `${help_count} · out ${money(help_outstanding)}`
-              : 'None yet'
-          }
-          icon={HeartHandshake}
-          accent={help_outstanding > 0 ? 'help' : ''}
-        >
-          <div className="dashboard-help-toolbar">
-            <p className="dashboard-help-summary">
-              {help_count
-                ? `Given ${money(help_given)} · returned ${money(help_repaid)}`
-                : 'Money lent to people'}
-            </p>
-            <div className="dashboard-help-toolbar-actions">
-              <button type="button" className="btn-secondary dashboard-help-link" onClick={goGiveHelp}>
-                Give
-              </button>
-              <button type="button" className="btn-secondary dashboard-help-link" onClick={goHelpBills}>
-                Bills
-              </button>
-            </div>
-          </div>
-          {help_rows.length === 0 ? (
-            <EmptyState
-              title="No help given yet"
-              body="Record money you give someone for a period. It won’t count as a sale."
-              actionLabel="Give help"
-              onAction={goGiveHelp}
-              icon={HeartHandshake}
-            />
-          ) : (
-            <div className="dashboard-help-list">
-              {help_rows.map((bill) => {
-                const statusKey = String(bill.status || 'pending').toLowerCase();
-                const stillOut = Math.max(0, Number(bill.balance_due ?? (Number(bill.total_amount) || 0) - (Number(bill.amount_paid) || 0)));
-                const dueLabel = formatHelpReturn(bill.due_date);
-                return (
-                  <div className={`dashboard-help-card is-${statusKey}${stillOut <= 0 ? ' is-clear' : ''}`} key={bill.id}>
-                    <button
-                      type="button"
-                      className="dashboard-help-main"
-                      onClick={() => openHelpBill(bill)}
-                    >
-                      <span className="dashboard-help-top">
-                        <span className="dashboard-help-name">{bill.customer_name}</span>
-                        <StatusBadge status={bill.status} />
-                      </span>
-                      <span className="dashboard-help-out">
-                        <small>{stillOut > 0 ? 'Still out' : 'Returned'}</small>
-                        <strong>
-                          {formatCurrency(currencySymbol, stillOut > 0 ? stillOut : bill.total_amount, { maximumFractionDigits: 0 })}
-                        </strong>
-                      </span>
-                      <span className="dashboard-help-foot">
-                        <span className="dashboard-help-inv">{bill.invoice_number}</span>
-                        <span>Return {dueLabel}</span>
-                        {stillOut > 0 ? <span>Given {money(bill.total_amount)}</span> : null}
-                      </span>
-                    </button>
-                    {stillOut > 0 ? (
-                      <div className="dashboard-help-actions">
-                        <button
-                          type="button"
-                          className="dashboard-help-pay"
-                          onClick={() => payHelp(bill)}
-                        >
-                          <Banknote size={16} />
-                          Pay
-                        </button>
-                        <button
-                          type="button"
-                          className="dashboard-help-wa"
-                          onClick={() => remindHelp(bill)}
-                          title={bill.customer_phone ? 'WhatsApp return reminder' : 'No phone'}
-                        >
-                          <MessageCircle size={16} />
-                          WA
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </DashDropdown>
-
-        <DashDropdown
-          id="cashflow"
-          openId={openSection}
-          onOpenChange={setOpenSection}
-          title="Cashflow"
-          hint={
-            help_outstanding > 0
-              ? `Help out ${money(help_outstanding)}`
-              : 'Sales in vs Saudia buying'
-          }
-          icon={ArrowDownUp}
-        >
-          <Suspense fallback={<p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading…</p>}>
-          <CashflowPanel
-            embedded
-            currencySymbol={currencySymbol}
-            compact
-            onNavigate={onNavigate}
-            onViewBill={onViewBill}
-            helpGiven={help_given}
-            helpOutstanding={help_outstanding}
-          />
-          </Suspense>
-        </DashDropdown>
-
-        <DashDropdown
-          id="recent"
-          openId={openSection}
-          onOpenChange={setOpenSection}
-          title="Recent bills"
-          hint={recent_bills.length ? `${recent_bills.length} latest` : 'None yet'}
-          icon={FileText}
-        >
-          <div className="dashboard-recent is-embedded">
-            <div className="dash-dropdown-toolbar">
-              <span>{recent_bills.length ? 'Latest invoices' : 'No bills yet'}</span>
+          <div className="surface-block" style={{ padding: '1rem', borderRadius: 'var(--radius-md, 12px)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <strong style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>Latest Bills</strong>
               <button
                 type="button"
                 className="dashboard-recent-all"
+                onClick={() => setActiveTab('recent')}
+              >
+                View all ({recent_bills.length})
+                <ChevronRight size={14} />
+              </button>
+            </div>
+            {recent_bills.slice(0, 3).map((bill) => (
+              <button
+                key={bill.id}
+                type="button"
+                className={`dashboard-recent-item is-${String(bill.status || '').toLowerCase()}`}
+                style={{ width: '100%', textAlign: 'left', marginBottom: '0.4rem' }}
+                onClick={() => (onViewBill ? onViewBill(bill) : onNavigate('database'))}
+              >
+                <span className="dashboard-recent-body">
+                  <span className="dashboard-recent-row">
+                    <span className="dashboard-recent-name">{bill.customer_name}</span>
+                    <span className="dashboard-recent-amount">{money(bill.total_amount)}</span>
+                  </span>
+                  <span className="dashboard-recent-row is-meta">
+                    <span className="dashboard-recent-meta">
+                      <span>{bill.invoice_number}</span>
+                      <span className="dashboard-recent-dot" />
+                      <span>{billTypeShortLabel(bill)}</span>
+                    </span>
+                    <StatusBadge status={bill.status} />
+                  </span>
+                </span>
+                <ChevronRight size={15} style={{ color: 'var(--text-muted)' }} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'cashflow' && (
+        <div className="dashboard-tab-panel">
+          <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading Cashflow…</div>}>
+            <CashflowPanel
+              currencySymbol={currencySymbol}
+              compact={false}
+              onNavigate={onNavigate}
+              onViewBill={onViewBill}
+              helpGiven={help_given}
+              helpOutstanding={help_outstanding}
+            />
+          </Suspense>
+        </div>
+      )}
+
+      {activeTab === 'dues' && (
+        <div className="dashboard-tab-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 14px)' }}>
+            <div className="dash-dropdown-toolbar" style={{ marginBottom: '0.85rem' }}>
+              <div>
+                <strong style={{ fontSize: '0.95rem', color: total_overdue > 0 ? 'var(--status-overdue)' : 'var(--text-primary)' }}>
+                  Customer Overdue Invoices
+                </strong>
+                <p style={{ margin: '0.15rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  Total Overdue: {money(total_overdue)}
+                </p>
+              </div>
+              <button type="button" className="btn-secondary" style={{ fontSize: '0.76rem', padding: '0.35rem 0.75rem' }} onClick={() => onNavigate('aging')}>
+                Full Aging Report <ChevronRight size={14} />
+              </button>
+            </div>
+            <Suspense fallback={<p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading Overdue Bills…</p>}>
+              <OverduePanel
+                embedded
+                excludeHelp
+                currencySymbol={currencySymbol}
+                settings={settings}
+                onPaid={() => fetchStats(true)}
+                onViewBill={async (row) => {
+                  try {
+                    const res = await apiFetch(`/api/bills/${row.id}`);
+                    const bill = await res.json();
+                    if (res.ok && onViewBill) onViewBill(bill);
+                    else if (onNavigate) onNavigate('database');
+                  } catch {
+                    if (onNavigate) onNavigate('database');
+                  }
+                }}
+              />
+            </Suspense>
+          </div>
+
+          <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 14px)' }}>
+            <div className="dash-dropdown-toolbar" style={{ marginBottom: '0.85rem' }}>
+              <div>
+                <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                  Help / Personal Money Lent
+                </strong>
+                <p style={{ margin: '0.15rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  Given {money(help_given)} · Returned {money(help_repaid)} · Still Out: <strong>{money(help_outstanding)}</strong>
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <button type="button" className="btn-primary" style={{ fontSize: '0.76rem', padding: '0.35rem 0.75rem' }} onClick={goGiveHelp}>
+                  + Give Help
+                </button>
+                <button type="button" className="btn-secondary" style={{ fontSize: '0.76rem', padding: '0.35rem 0.75rem' }} onClick={goHelpBills}>
+                  Help Bills
+                </button>
+              </div>
+            </div>
+
+            {help_rows.length === 0 ? (
+              <EmptyState
+                title="No help given yet"
+                body="Record money you give someone for a period. It won’t affect sales or profits."
+                actionLabel="Give help"
+                onAction={goGiveHelp}
+                icon={HeartHandshake}
+              />
+            ) : (
+              <div className="dashboard-help-list">
+                {help_rows.map((bill) => {
+                  const statusKey = String(bill.status || 'pending').toLowerCase();
+                  const stillOut = Math.max(0, Number(bill.balance_due ?? (Number(bill.total_amount) || 0) - (Number(bill.amount_paid) || 0)));
+                  const dueLabel = formatHelpReturn(bill.due_date);
+                  return (
+                    <div className={`dashboard-help-card is-${statusKey}${stillOut <= 0 ? ' is-clear' : ''}`} key={bill.id}>
+                      <button
+                        type="button"
+                        className="dashboard-help-main"
+                        onClick={() => openHelpBill(bill)}
+                      >
+                        <span className="dashboard-help-top">
+                          <span className="dashboard-help-name">{bill.customer_name}</span>
+                          <StatusBadge status={bill.status} />
+                        </span>
+                        <span className="dashboard-help-out">
+                          <small>{stillOut > 0 ? 'Still out' : 'Returned'}</small>
+                          <strong>
+                            {formatCurrency(currencySymbol, stillOut > 0 ? stillOut : bill.total_amount, { maximumFractionDigits: 0 })}
+                          </strong>
+                        </span>
+                        <span className="dashboard-help-foot">
+                          <span className="dashboard-help-inv">{bill.invoice_number}</span>
+                          <span>Return {dueLabel}</span>
+                          {stillOut > 0 ? <span>Given {money(bill.total_amount)}</span> : null}
+                        </span>
+                      </button>
+                      {stillOut > 0 ? (
+                        <div className="dashboard-help-actions">
+                          <button
+                            type="button"
+                            className="dashboard-help-pay"
+                            onClick={() => payHelp(bill)}
+                          >
+                            <Banknote size={16} />
+                            Pay
+                          </button>
+                          <button
+                            type="button"
+                            className="dashboard-help-wa"
+                            onClick={() => remindHelp(bill)}
+                            title={bill.customer_phone ? 'WhatsApp return reminder' : 'No phone'}
+                          >
+                            <MessageCircle size={16} />
+                            WA
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'recent' && (
+        <div className="dashboard-tab-panel">
+          <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 14px)' }}>
+            <div className="dash-dropdown-toolbar" style={{ marginBottom: '0.85rem' }}>
+              <div>
+                <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                  Recent Invoices
+                </strong>
+                <p style={{ margin: '0.15rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  Showing latest transactions
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ fontSize: '0.76rem', padding: '0.35rem 0.75rem' }}
                 onClick={() => onNavigate('database')}
               >
-                View all
-                <ChevronRight size={15} aria-hidden />
+                Open Full Bills Database <ChevronRight size={14} />
               </button>
             </div>
 
@@ -713,136 +865,36 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
               </div>
             )}
           </div>
-        </DashDropdown>
+        </div>
+      )}
 
-        <DashDropdown
-          id="profit"
-          openId={openSection}
-          onOpenChange={setOpenSection}
-          title="Daily & total profit margins"
-          hint={`Today: ${money(profit_today)} (${margin_today}%) · Total Profit: ${money(profit_total)} (${margin_total}%)`}
-          icon={Wallet}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '0.25rem 0' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
-              {/* Today's Profit Box */}
-              <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 8px)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                  <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Today's Profit
-                  </span>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 800, padding: '0.2rem 0.55rem', borderRadius: 999, background: profit_today >= 0 ? 'rgba(34, 197, 94, 0.14)' : 'rgba(239, 68, 68, 0.14)', color: profit_today >= 0 ? '#16a34a' : '#ef4444' }}>
-                    {margin_today}% Margin
-                  </span>
-                </div>
-                <div style={{ fontSize: '1.65rem', fontWeight: 900, color: profit_today >= 0 ? 'var(--text-primary)' : '#ef4444', fontFamily: 'var(--font-mono)' }}>
-                  {money(profit_today)}
-                </div>
-                <div style={{ marginTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.84rem', color: 'var(--text-secondary)', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Gross Sales:</span>
-                    <strong className="mono" style={{ color: 'var(--text-primary)' }}>{money(sales_today)}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Import Cost:</span>
-                    <strong className="mono" style={{ color: 'var(--text-primary)' }}>−{money(cost_today)}</strong>
-                  </div>
-                </div>
-              </div>
+      {activeTab === 'tools' && (
+        <div className="dashboard-tab-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading Daily Close…</div>}>
+            <DailyClosePanel currencySymbol={currencySymbol} embedded />
+          </Suspense>
 
-              {/* Month's Profit Box */}
-              <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 8px)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                  <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    This Month ({new Date().toLocaleString('default', { month: 'short' })})
-                  </span>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 800, padding: '0.2rem 0.55rem', borderRadius: 999, background: profit_month >= 0 ? 'rgba(34, 197, 94, 0.14)' : 'rgba(239, 68, 68, 0.14)', color: profit_month >= 0 ? '#16a34a' : '#ef4444' }}>
-                    {margin_month}% Margin
-                  </span>
-                </div>
-                <div style={{ fontSize: '1.65rem', fontWeight: 900, color: profit_month >= 0 ? 'var(--text-primary)' : '#ef4444', fontFamily: 'var(--font-mono)' }}>
-                  {money(profit_month)}
-                </div>
-                <div style={{ marginTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.84rem', color: 'var(--text-secondary)', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Monthly Sales:</span>
-                    <strong className="mono" style={{ color: 'var(--text-primary)' }}>{money(sales_month)}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Total Cost:</span>
-                    <strong className="mono" style={{ color: 'var(--text-primary)' }}>−{money(cost_month)}</strong>
-                  </div>
-                </div>
-              </div>
-
-              {/* Total All-Time Profit Box */}
-              <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 8px)', border: '1px solid rgba(212, 175, 55, 0.35)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                  <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Total All-Time Profit
-                  </span>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 800, padding: '0.2rem 0.55rem', borderRadius: 999, background: profit_total >= 0 ? 'rgba(34, 197, 94, 0.18)' : 'rgba(239, 68, 68, 0.18)', color: profit_total >= 0 ? '#16a34a' : '#ef4444' }}>
-                    {margin_total}% Margin
-                  </span>
-                </div>
-                <div style={{ fontSize: '1.65rem', fontWeight: 900, color: profit_total >= 0 ? '#d4af37' : '#ef4444', fontFamily: 'var(--font-mono)' }}>
-                  {money(profit_total)}
-                </div>
-                <div style={{ marginTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.84rem', color: 'var(--text-secondary)', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Total Sales:</span>
-                    <strong className="mono" style={{ color: 'var(--text-primary)' }}>{money(sales_total)}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Total Import Cost:</span>
-                    <strong className="mono" style={{ color: 'var(--text-primary)' }}>−{money(cost_total)}</strong>
-                  </div>
-                </div>
-              </div>
+          <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 14px)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.5rem' }}>
+              <Shield size={18} style={{ color: 'var(--accent-teal)' }} />
+              <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary)' }}>Data Protection & Backup</strong>
             </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
-              <button
-                type="button"
-                className="btn-primary"
-                style={{ width: 'auto', fontSize: '0.82rem', padding: '0.45rem 1rem' }}
-                disabled={generatingReport}
-                onClick={handleDownloadDailyReport}
-              >
-                <Download size={15} /> {generatingReport ? 'Generating PDF…' : 'Download Daily Executive PDF'}
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0 0 0.85rem' }}>
+              {lastBackup
+                ? `Last automatic backup: ${new Date(lastBackup).toLocaleString()}`
+                : 'Back up your bills regularly to prevent data loss.'}
+            </p>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button type="button" className="btn-primary" style={{ fontSize: '0.8rem', padding: '0.45rem 1rem' }} onClick={() => onNavigate('backup')}>
+                Manage Backups & Cloud Sync
               </button>
-              <button type="button" className="btn-secondary" style={{ width: 'auto', fontSize: '0.82rem', padding: '0.45rem 0.9rem' }} onClick={() => onNavigate('cashflow')}>
-                View Full Cashflow <ChevronRight size={14} />
+              <button type="button" className="btn-secondary" style={{ fontSize: '0.8rem', padding: '0.45rem 1rem' }} onClick={() => onNavigate('settings')}>
+                App Settings
               </button>
             </div>
           </div>
-        </DashDropdown>
-
-        <DashDropdown
-          id="backup"
-          openId={openSection}
-          onOpenChange={setOpenSection}
-          title="Data & backup"
-          hint={
-            lastBackup
-              ? `Last auto-backup ${new Date(lastBackup).toLocaleDateString()}`
-              : 'Back up regularly'
-          }
-          icon={Shield}
-        >
-          <div className="dashboard-backup-strip is-embedded">
-            <div style={{ minWidth: 0 }}>
-              <strong>Data on this phone</strong>
-              <div style={{ marginTop: 2, fontSize: '0.75rem' }}>
-                Export a copy so you never lose bills if the phone is reset.
-              </div>
-            </div>
-            <button type="button" className="btn-secondary" onClick={() => onNavigate('backup')}>
-              Backup
-            </button>
-          </div>
-        </DashDropdown>
-      </div>
+        </div>
+      )}
 
       <QuickPaySheet
         open={Boolean(payBill)}

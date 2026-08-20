@@ -3089,14 +3089,24 @@ body {
   }
 
   .dashboard-hero .hero-actions-secondary {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.45rem;
+    width: 100%;
   }
 
-  .hero-actions-secondary .btn-secondary {
+  .hero-actions-secondary .btn-secondary,
+  .dashboard-hero .hero-actions-secondary .btn-secondary {
     width: 100%;
-    min-height: 42px;
+    min-height: 40px;
     font-size: 0.82rem;
+    font-weight: 700;
     border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.65rem;
   }
 
   .hero-actions .btn-primary {
@@ -4386,6 +4396,399 @@ body {
   color: var(--text-primary);
   overflow-wrap: anywhere;
   line-height: 1.15;
+}
+
+/* Modern Dashboard Nav Tabs & Profit Period Switcher */
+.dashboard-nav-pills {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding: 0.2rem 0.1rem 0.65rem;
+  margin-bottom: 0.35rem;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.dashboard-nav-pills::-webkit-scrollbar {
+  display: none;
+}
+.dash-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+  user-select: none;
+}
+.dash-pill-btn:hover {
+  background: color-mix(in srgb, var(--accent-teal) 8%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--accent-teal) 35%, var(--border-color));
+  color: var(--text-primary);
+}
+.dash-pill-btn.is-active {
+  background: var(--accent-teal, #00b3a6);
+  border-color: var(--accent-teal, #00b3a6);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(0, 179, 166, 0.28);
+}
+.dash-pill-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  color: inherit;
+}
+.dash-pill-badge.is-alert {
+  background: var(--status-overdue, #ef4444);
+  color: #ffffff;
+}
+
+/* Interactive Profit Period Card */
+.profit-hero-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg, 16px);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+  animation: card-fade-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.profit-hero-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+@media (min-width: 640px) {
+  .profit-hero-header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+.profit-hero-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.profit-hero-title {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+.profit-period-segmented {
+  display: flex;
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 10px);
+  padding: 3px;
+  gap: 2px;
+  width: 100%;
+}
+@media (min-width: 640px) {
+  .profit-period-segmented {
+    width: auto;
+    min-width: 320px;
+  }
+}
+.profit-period-btn {
+  flex: 1;
+  text-align: center;
+  padding: 0.4rem 0.6rem;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 700;
+  border-radius: calc(var(--radius-md, 10px) - 3px);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+.profit-period-btn:hover {
+  color: var(--text-primary);
+}
+.profit-period-btn.is-active {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  font-weight: 800;
+}
+
+.profit-hero-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: color-mix(in srgb, var(--accent-teal) 4%, var(--bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--accent-teal) 15%, var(--border-color));
+  border-radius: var(--radius-md, 12px);
+  padding: 1.15rem;
+}
+.profit-hero-value-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.profit-hero-amount {
+  font-size: 2rem;
+  font-weight: 900;
+  font-family: var(--font-mono);
+  line-height: 1.1;
+}
+.profit-hero-margin-badge {
+  font-size: 0.82rem;
+  font-weight: 800;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.profit-hero-breakdown {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color);
+  font-size: 0.85rem;
+}
+.profit-breakdown-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.profit-breakdown-label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.profit-breakdown-val {
+  font-size: 1.1rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.profit-hero-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.dashboard-tab-panel {
+  animation: card-fade-up 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Cashflow 2-Row 3-Column Stats Grid */
+.cashflow-stats {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 0.65rem !important;
+}
+
+@media (max-width: 640px) {
+  .cashflow-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 0.4rem !important;
+  }
+  .cashflow-stats .stat-card {
+    padding: 0.65rem 0.5rem !important;
+    min-height: auto !important;
+    border-radius: 10px !important;
+  }
+  .cashflow-stats .stat-card-label {
+    font-size: 0.68rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    margin-bottom: 0.25rem !important;
+  }
+  .cashflow-stats .stat-card-value {
+    font-size: 0.85rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    font-weight: 800 !important;
+  }
+}
+
+/* Cashflow Interactive Chart Styles */
+.cashflow-chart-container {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg, 16px);
+  padding: 1.25rem;
+  margin: 1rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+.cashflow-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.cashflow-chart-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+.cashflow-chart-title {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.cashflow-chart-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: space-between;
+}
+
+.cashflow-chart-btn-group {
+  display: inline-flex;
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 2px;
+}
+.cashflow-chart-btn {
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+.cashflow-chart-btn:hover {
+  color: var(--text-primary);
+}
+.cashflow-chart-btn.is-active {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  font-weight: 800;
+}
+
+.cashflow-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.cashflow-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.cashflow-legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.cashflow-legend-dot.is-sales {
+  background: #10b981;
+}
+.cashflow-legend-dot.is-buying {
+  background: #f43f5e;
+}
+.cashflow-legend-dot.is-profit {
+  background: #0ea5e9;
+}
+
+.cashflow-chart-svg-wrap {
+  position: relative;
+  width: 100%;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  scrollbar-width: thin;
+}
+
+.cashflow-bar-group {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.cashflow-bar-group:hover {
+  opacity: 0.88;
+}
+
+.cashflow-allocation-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 0.5rem 0 0.25rem;
+  background: var(--border-color);
+}
+.cashflow-alloc-segment {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+/* Quick Summary Metrics Grid Below Chart */
+.cashflow-metrics-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+@media (max-width: 640px) {
+  .cashflow-metrics-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.cashflow-metric-card {
+  background: color-mix(in srgb, var(--accent-teal) 3%, var(--bg-secondary));
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.cashflow-metric-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.cashflow-metric-value {
+  font-size: 0.95rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
 }
 
 .dashboard-dropdowns {

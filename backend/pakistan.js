@@ -21,3 +21,14 @@ export function pakistanNowTime() {
 export function pakistanYearMonth(dateStr = pakistanToday()) {
   return String(dateStr || '').slice(0, 7);
 }
+
+/** Add days to a YYYY-MM-DD date string (calendar days) */
+export function addDaysToDateString(dateStr, days) {
+  const [y, m, d] = String(dateStr).split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  const yyyy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+

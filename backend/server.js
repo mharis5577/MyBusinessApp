@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import db, { dbAll, dbGet, dbRun } from './db.js';
-import { pakistanToday, pakistanYearMonth, pakistanNowTime } from './pakistan.js';
+import { pakistanToday, pakistanYearMonth, pakistanNowTime, addDaysToDateString } from './pakistan.js';
 import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from './utils/paymentMethods.js';
 import { normalizeBillType, invoicePrefixForType, partyTypeForBill, outstandingByPartyName } from './utils/billTypes.js';
 import { saleOverviewTotals } from './utils/dashboardStats.js';
@@ -1382,38 +1382,42 @@ app.get('/api/stats', async (req, res) => {
     );
 
     const monthPrefix = pakistanYearMonth(today);
-    const sumSaleCost = async (list) => {
-      let sales = 0;
-      let cost = 0;
-      for (const b of list) {
-        sales += Number(b.total_amount) || 0;
-        const items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [b.id]);
-        for (const it of items) {
-          if (!it.product_id) continue;
-          const prod = await dbGet('SELECT cost_price FROM products WHERE id = ?', [it.product_id]);
-          cost += (Number(prod?.cost_price) || 0) * remainingQty(it);
-        }
-      }
-      return {
-        sales: Math.round(sales * 100) / 100,
-        cost: Math.round(cost * 100) / 100,
-        profit: Math.round((sales - cost) * 100) / 100,
-      };
+    const weekStart = addDaysToDateString(today, -6);
+
+    const calcPeriodProfit = async (whereSalesClause, whereBuyingClause, salesParams = [], buyingParams = []) => {
+      const salesRow = await dbGet(
+        `SELECT COALESCE(SUM(total_amount), 0) AS total FROM bills
+         WHERE COALESCE(NULLIF(TRIM(bill_type), ''), 'customer') = 'customer' AND status != 'cancelled'
+         ${whereSalesClause ? `AND ${whereSalesClause}` : ''}`,
+        salesParams
+      );
+      const buyingRow = await dbGet(
+        `SELECT COALESCE(SUM(total_amount), 0) AS total FROM bills
+         WHERE bill_type = 'supplier' AND status != 'cancelled'
+         ${whereBuyingClause ? `AND ${whereBuyingClause}` : ''}`,
+        buyingParams
+      );
+      const sales = Math.round((Number(salesRow?.total) || 0) * 100) / 100;
+      const cost = Math.round((Number(buyingRow?.total) || 0) * 100) / 100;
+      const profit = Math.round((sales - cost) * 100) / 100;
+      const margin = sales > 0 ? Math.round(((profit / sales) * 100) * 10) / 10 : 0;
+      return { sales, cost, profit, margin };
     };
-    const todaySales = await dbAll(
-      "SELECT * FROM bills WHERE COALESCE(bill_type, 'customer') = 'customer' AND status != 'cancelled' AND bill_date = ?",
-      [today]
+
+    const todayTotals = await calcPeriodProfit('bill_date = ?', 'bill_date = ?', [today], [today]);
+    const weekTotals = await calcPeriodProfit(
+      'bill_date >= ? AND bill_date <= ?',
+      'bill_date >= ? AND bill_date <= ?',
+      [weekStart, today],
+      [weekStart, today]
     );
-    const monthSales = await dbAll(
-      "SELECT * FROM bills WHERE COALESCE(bill_type, 'customer') = 'customer' AND status != 'cancelled' AND bill_date LIKE ?",
+    const monthTotals = await calcPeriodProfit(
+      'bill_date LIKE ?',
+      'bill_date LIKE ?',
+      [`${monthPrefix}%`],
       [`${monthPrefix}%`]
     );
-    const todayTotals = await sumSaleCost(todaySales);
-    const monthTotals = await sumSaleCost(monthSales);
-    const allSales = await dbAll(
-      "SELECT * FROM bills WHERE COALESCE(bill_type, 'customer') = 'customer' AND status != 'cancelled'"
-    );
-    const allTotals = await sumSaleCost(allSales);
+    const allTotals = await calcPeriodProfit('', '');
 
     const helpBills = await dbAll(
       `SELECT * FROM bills
@@ -1429,7 +1433,7 @@ app.get('/api/stats', async (req, res) => {
       total_revenue: overview.total_revenue,
       total_pending: overview.total_pending,
       total_overdue: overview.total_overdue,
-      total_bills: activeCount,
+      total_bills: overview.sales_bills_count,
       paid_bills_count: overview.paid_bills_count,
       pending_bills_count: overview.pending_bills_count,
       overdue_bills_count: overview.overdue_bills_count,
@@ -1439,12 +1443,19 @@ app.get('/api/stats', async (req, res) => {
       sales_today: todayTotals.sales,
       cost_today: todayTotals.cost,
       profit_today: todayTotals.profit,
+      margin_today: todayTotals.margin,
+      sales_week: weekTotals.sales,
+      cost_week: weekTotals.cost,
+      profit_week: weekTotals.profit,
+      margin_week: weekTotals.margin,
       sales_month: monthTotals.sales,
       cost_month: monthTotals.cost,
       profit_month: monthTotals.profit,
+      margin_month: monthTotals.margin,
       sales_total: allTotals.sales,
       cost_total: allTotals.cost,
       profit_total: allTotals.profit,
+      margin_total: allTotals.margin,
       help_given: Math.round(help_given * 100) / 100,
       help_repaid: Math.round(help_repaid * 100) / 100,
       help_outstanding,
@@ -2160,6 +2171,28 @@ app.get('/api/cashflow', async (req, res) => {
     const net_profit = total_sales - buying_cost;
     const net_balance = net_profit - total_advance;
 
+    const dailyTrendRows = await dbAll(
+      `SELECT bill_date as date,
+              COALESCE(SUM(CASE WHEN COALESCE(NULLIF(TRIM(bill_type), ''), 'customer') = 'customer' AND status != 'cancelled' THEN total_amount ELSE 0 END), 0) as sales,
+              COALESCE(SUM(CASE WHEN bill_type = 'supplier' AND status != 'cancelled' THEN total_amount ELSE 0 END), 0) as buying,
+              COALESCE(SUM(CASE WHEN (bill_type = 'help' OR bill_type = 'loan') AND status != 'cancelled' THEN total_amount ELSE 0 END), 0) as help,
+              COUNT(CASE WHEN COALESCE(NULLIF(TRIM(bill_type), ''), 'customer') = 'customer' AND status != 'cancelled' THEN 1 END) as sales_count,
+              COUNT(CASE WHEN bill_type = 'supplier' AND status != 'cancelled' THEN 1 END) as buying_count
+       FROM bills
+       WHERE bill_date IS NOT NULL AND TRIM(bill_date) != '' AND status != 'cancelled'
+       GROUP BY bill_date
+       ORDER BY bill_date ASC`
+    );
+    const daily_trend = dailyTrendRows.map((r) => ({
+      date: r.date,
+      sales: Math.round((Number(r.sales) || 0) * 100) / 100,
+      buying: Math.round((Number(r.buying) || 0) * 100) / 100,
+      help: Math.round((Number(r.help) || 0) * 100) / 100,
+      profit: Math.round(((Number(r.sales) || 0) - (Number(r.buying) || 0)) * 100) / 100,
+      sales_count: Number(r.sales_count) || 0,
+      buying_count: Number(r.buying_count) || 0,
+    })).slice(-30);
+
     res.json({
       total_sales,
       buying_cost,
@@ -2174,6 +2207,7 @@ app.get('/api/cashflow', async (req, res) => {
       pending_sales: Number(pendingSalesRow.total) || 0,
       advances,
       money_flow,
+      daily_trend,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

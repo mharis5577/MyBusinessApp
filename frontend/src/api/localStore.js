@@ -2,8 +2,7 @@
  * On-device IndexedDB store for Capacitor / VITE_DATA_MODE=local builds.
  * Mirrors the Express /api shapes used by the UI.
  */
-import { openDB } from 'idb';
-import { pakistanToday, pakistanYearMonth, pakistanNowTime } from '../utils/pakistan';
+import { pakistanToday, pakistanYearMonth, pakistanNowTime, addDaysToDateString } from '../utils/pakistan';
 import { allItemsReturned, isCancelled, recalcBillTotals, remainingQty } from '../utils/billAdjust';
 import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from '../utils/paymentMethods';
 import { normalizeBillType, invoicePrefixForType, partyTypeForBill, outstandingByPartyName } from '../utils/billTypes';
@@ -1380,42 +1379,34 @@ async function handleLocalRequestInner(url, options = {}) {
     const overview = saleOverviewTotals(bills, today);
     const activeBills = bills.filter((b) => !isCancelled(b));
     const monthPrefix = pakistanYearMonth(today);
-    const productById = new Map(products.map((p) => [Number(p.id), p]));
-    const activeSales = bills.filter((b) => normalizeBillType(b.bill_type) === 'customer' && !isCancelled(b));
-    const todaySales = activeSales.filter((b) => String(b.bill_date) === today);
-    const monthSales = activeSales.filter((b) => String(b.bill_date || '').startsWith(monthPrefix));
-    const costIds = new Set([...todaySales, ...monthSales].map((b) => Number(b.id)));
-    let itemsByBill = new Map();
-    if (costIds.size && costIds.size <= 80) {
-      for (const bid of costIds) {
-        itemsByBill.set(Number(bid), await rowsForBill(db, 'bill_items', bid));
-      }
-    } else if (costIds.size) {
-      try {
-        const items = await db.getAll('bill_items');
-        itemsByBill = groupRowsByBillId(items.filter((it) => costIds.has(Number(it.bill_id))));
-      } catch {
-        itemsByBill = new Map();
-      }
-    }
-    const sumSaleCost = (list) => {
-      let sales = 0;
-      let cost = 0;
-      for (const b of list) {
-        sales += Number(b.total_amount) || 0;
-        for (const it of itemsByBill.get(Number(b.id)) || []) {
-          const prod = productById.get(Number(it.product_id));
-          cost += (Number(prod?.cost_price) || 0) * remainingQty(it);
-        }
-      }
+    const weekStart = addDaysToDateString(today, -6);
+
+    const calcPeriodProfit = (filterFn) => {
+      const periodBills = activeBills.filter(filterFn);
+      const sales = periodBills
+        .filter((b) => normalizeBillType(b.bill_type) === 'customer')
+        .reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+      const cost = periodBills
+        .filter((b) => normalizeBillType(b.bill_type) === 'supplier')
+        .reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+      const profit = Math.round((sales - cost) * 100) / 100;
+      const margin = sales > 0 ? Math.round(((profit / sales) * 100) * 10) / 10 : 0;
       return {
         sales: Math.round(sales * 100) / 100,
         cost: Math.round(cost * 100) / 100,
-        profit: Math.round((sales - cost) * 100) / 100,
+        profit,
+        margin,
       };
     };
-    const todayTotals = sumSaleCost(todaySales);
-    const monthTotals = sumSaleCost(monthSales);
+
+    const todayTotals = calcPeriodProfit((b) => String(b.bill_date || '') === today);
+    const weekTotals = calcPeriodProfit((b) => {
+      const d = String(b.bill_date || '');
+      return d >= weekStart && d <= today;
+    });
+    const monthTotals = calcPeriodProfit((b) => String(b.bill_date || '').startsWith(monthPrefix));
+    const allTotals = calcPeriodProfit(() => true);
+
     const recent = [...bills].sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)).slice(0, 5);
     const helpBills = bills
       .filter((b) => normalizeBillType(b.bill_type) === 'help' && !isCancelled(b))
@@ -1433,7 +1424,7 @@ async function handleLocalRequestInner(url, options = {}) {
       total_revenue: overview.total_revenue,
       total_pending: overview.total_pending,
       total_overdue: overview.total_overdue,
-      total_bills: activeBills.length,
+      total_bills: overview.sales_bills_count,
       paid_bills_count: overview.paid_bills_count,
       pending_bills_count: overview.pending_bills_count,
       overdue_bills_count: overview.overdue_bills_count,
@@ -1446,9 +1437,19 @@ async function handleLocalRequestInner(url, options = {}) {
       sales_today: todayTotals.sales,
       cost_today: todayTotals.cost,
       profit_today: todayTotals.profit,
+      margin_today: todayTotals.margin,
+      sales_week: weekTotals.sales,
+      cost_week: weekTotals.cost,
+      profit_week: weekTotals.profit,
+      margin_week: weekTotals.margin,
       sales_month: monthTotals.sales,
       cost_month: monthTotals.cost,
       profit_month: monthTotals.profit,
+      margin_month: monthTotals.margin,
+      sales_total: allTotals.sales,
+      cost_total: allTotals.cost,
+      profit_total: allTotals.profit,
+      margin_total: allTotals.margin,
       help_given: Math.round(help_given * 100) / 100,
       help_repaid: Math.round(help_repaid * 100) / 100,
       help_outstanding,
@@ -1757,6 +1758,26 @@ async function handleLocalRequestInner(url, options = {}) {
       });
     }
 
+    const dates = [...new Set(bills.filter((b) => !isCancelled(b) && b.bill_date).map((b) => String(b.bill_date)))].sort().slice(-30);
+    const daily_trend = dates.map((d) => {
+      const dayBills = bills.filter((b) => !isCancelled(b) && String(b.bill_date) === d);
+      const custBills = dayBills.filter((b) => normalizeBillType(b.bill_type) === 'customer');
+      const suppBills = dayBills.filter((b) => normalizeBillType(b.bill_type) === 'supplier');
+      const helpB = dayBills.filter((b) => normalizeBillType(b.bill_type) === 'help');
+      const s = custBills.reduce((sum, b) => sum + (Number(b.total_amount) || 0), 0);
+      const b = suppBills.reduce((sum, b) => sum + (Number(b.total_amount) || 0), 0);
+      const h = helpB.reduce((sum, b) => sum + (Number(b.total_amount) || 0), 0);
+      return {
+        date: d,
+        sales: Math.round(s * 100) / 100,
+        buying: Math.round(b * 100) / 100,
+        help: Math.round(h * 100) / 100,
+        profit: Math.round((s - b) * 100) / 100,
+        sales_count: custBills.length,
+        buying_count: suppBills.length,
+      };
+    });
+
     return jsonOk({
       total_sales,
       buying_cost,
@@ -1771,6 +1792,7 @@ async function handleLocalRequestInner(url, options = {}) {
       pending_sales,
       advances: includeFlow ? advances : [],
       money_flow,
+      daily_trend,
     });
   }
 
