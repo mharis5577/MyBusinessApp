@@ -44,7 +44,6 @@ const CustomerManager = lazy(() => import('./components/CustomerManager'));
 const SettingsManager = lazy(() => import('./components/SettingsManager'));
 const CashflowPanel = lazy(() => import('./components/CashflowPanel'));
 const AgingReport = lazy(() => import('./components/AgingReport'));
-const DailyClosePanel = lazy(() => import('./components/DailyClosePanel'));
 const NotepadPanel = lazy(() => import('./components/NotepadPanel'));
 
 const THEME_KEY = 'elite-chocolate-theme';
@@ -58,7 +57,6 @@ const TAB_ORDER = [
   'customers',
   'cashflow',
   'aging',
-  'closing',
   'notepad',
   'settings',
   'preview',
@@ -375,7 +373,6 @@ export default function App() {
   const moreActive =
     currentTab === 'cashflow' ||
     currentTab === 'aging' ||
-    currentTab === 'closing' ||
     currentTab === 'notepad' ||
     currentTab === 'settings';
 
@@ -629,10 +626,6 @@ export default function App() {
                   onNavigate={(tab) => goToTab(tab)}
                   onViewBill={handleViewBill}
                 />
-              )}
-
-              {currentTab === 'closing' && (
-                <DailyClosePanel currencySymbol={settings.currency_symbol || 'Rs.'} />
               )}
 
               {currentTab === 'notepad' && <NotepadPanel />}

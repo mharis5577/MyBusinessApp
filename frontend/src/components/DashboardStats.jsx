@@ -45,7 +45,6 @@ import {
 
 const CashflowPanel = lazy(() => import('./CashflowPanel'));
 const OverduePanel = lazy(() => import('./OverduePanel'));
-const DailyClosePanel = lazy(() => import('./DailyClosePanel'));
 
 function StatCard({
   label,
@@ -947,10 +946,6 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
 
       {activeTab === 'tools' && (
         <div className="dashboard-tab-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading Daily Close…</div>}>
-            <DailyClosePanel currencySymbol={currencySymbol} embedded />
-          </Suspense>
-
           <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 14px)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.5rem' }}>
               <Shield size={18} style={{ color: 'var(--accent-teal)' }} />

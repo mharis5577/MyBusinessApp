@@ -1,4 +1,4 @@
-import { ArrowDownUp, Settings, X, Download, Sparkles, Clock, Calculator, StickyNote } from 'lucide-react';
+import { ArrowDownUp, Settings, X, Download, Sparkles, Clock, StickyNote } from 'lucide-react';
 import { DeveloperCredit } from './BrandMark';
 
 export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, activeTab }) {
@@ -44,18 +44,6 @@ export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, acti
           <span>
             <strong>Collections</strong>
             <small>Aging buckets & WhatsApp reminders</small>
-          </span>
-        </button>
-
-        <button
-          type="button"
-          className={`more-menu-item ${activeTab === 'closing' ? 'active' : ''}`}
-          onClick={() => go('closing')}
-        >
-          <Calculator size={20} />
-          <span>
-            <strong>Day close</strong>
-            <small>Cash counted vs collected today</small>
           </span>
         </button>
 
