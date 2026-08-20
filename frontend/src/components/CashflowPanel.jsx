@@ -10,6 +10,11 @@ import {
   Calendar,
   Download,
   FileSpreadsheet,
+  CheckCircle2,
+  Package,
+  Layers,
+  ArrowUpRight,
+  ArrowDownRight
 } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
@@ -18,156 +23,66 @@ import EmptyState from './EmptyState';
 import { billTypeBadgeClass, billTypeShortLabel, isHelpBill } from '../utils/billTypes';
 import { downloadCashflowReportPdf, downloadCashflowCsv } from '../utils/tableExport';
 
-function CashflowChart({ data = [], currencySymbol = 'Rs.' }) {
+/**
+ * Modern Stripe/Shopify-style Financial Breakdown & Daily Profit Ledger
+ * Replaces clunky SVG graphs with a clean, fully responsive daily timeline.
+ */
+function DailyFinancialBreakdown({ data = [], currencySymbol = 'Rs.' }) {
   const [timeRange, setTimeRange] = useState('7d');
-  const [chartMode, setChartMode] = useState('bars'); // 'bars' | 'trend' | 'cumulative'
-  const [activeItem, setActiveItem] = useState(null);
+  const [filterMode, setFilterMode] = useState('all'); // 'all' | 'profitable' | 'costs'
 
   // Filter data based on selected time range
-  const rangeLimit = timeRange === '7d' ? 7 : timeRange === '14d' ? 14 : 30;
-  const chartData = data.slice(-rangeLimit);
+  const rangeLimit =
+    timeRange === '1d'
+      ? 1
+      : timeRange === '7d'
+      ? 7
+      : timeRange === '14d'
+      ? 14
+      : timeRange === '30d'
+      ? 30
+      : 999;
+  const filteredTimeline = (data || []).slice(-rangeLimit).reverse();
 
-  if (!chartData || chartData.length === 0) {
+  const totalPeriodSales = filteredTimeline.reduce((s, d) => s + (Number(d.sales) || 0), 0);
+  const totalPeriodBuying = filteredTimeline.reduce((s, d) => s + (Number(d.buying) || 0), 0);
+  const totalPeriodProfit = totalPeriodSales - totalPeriodBuying;
+  const periodMargin = totalPeriodSales > 0 ? ((totalPeriodProfit / totalPeriodSales) * 100).toFixed(1) : '0.0';
+
+  if (!filteredTimeline || filteredTimeline.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '1.5rem 0', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-        No transaction trend data available yet.
+        No financial timeline data recorded yet.
       </div>
     );
   }
 
-  // Summary Metrics over the active range
-  const totalPeriodSales = chartData.reduce((s, d) => s + (Number(d.sales) || 0), 0);
-  const totalPeriodBuying = chartData.reduce((s, d) => s + (Number(d.buying) || 0), 0);
-  const totalPeriodProfit = totalPeriodSales - totalPeriodBuying;
-  const periodMargin = totalPeriodSales > 0 ? ((totalPeriodProfit / totalPeriodSales) * 100).toFixed(1) : '0.0';
-
-  const avgSales = Math.round(totalPeriodSales / chartData.length);
-  const avgBuying = Math.round(totalPeriodBuying / chartData.length);
-
-  let peakDay = chartData[0];
-  chartData.forEach((d) => {
-    if ((Number(d.profit) || 0) > (Number(peakDay?.profit) || 0)) peakDay = d;
+  const displayedRows = filteredTimeline.filter((item) => {
+    if (filterMode === 'profitable') return (Number(item.profit) || 0) > 0;
+    if (filterMode === 'costs') return (Number(item.buying) || 0) > 0;
+    return true;
   });
-
-  // Calculate Cumulative Series
-  let runningBal = 0;
-  const cumulativeData = chartData.map((d) => {
-    runningBal += Number(d.profit) || 0;
-    return { ...d, cumulative: runningBal };
-  });
-
-  // Scale calculations
-  const maxBarVal = Math.max(
-    1,
-    ...chartData.map((d) => Math.max(Number(d.sales) || 0, Number(d.buying) || 0))
-  );
-
-  const maxTrendVal = Math.max(
-    1,
-    ...chartData.map((d) => Math.max(0, Number(d.profit) || 0))
-  );
-
-  const maxCumVal = Math.max(
-    1,
-    ...cumulativeData.map((d) => Math.max(0, Number(d.cumulative) || 0))
-  );
-
-  const activeMax = chartMode === 'bars' ? maxBarVal : chartMode === 'trend' ? maxTrendVal : maxCumVal;
-
-  const svgWidth = Math.max(520, chartData.length * 64);
-  const svgHeight = 210;
-  const paddingTop = 20;
-  const paddingBottom = 30;
-  const paddingLeft = 46;
-  const paddingRight = 16;
-  const drawWidth = svgWidth - paddingLeft - paddingRight;
-  const chartHeight = svgHeight - paddingTop - paddingBottom;
-
-  const groupSpacing = drawWidth / chartData.length;
-  const barWidth = Math.min(16, groupSpacing * 0.3);
-
-  // Helper for formatting currency abbreviations
-  const fmtShort = (n) => {
-    const num = Number(n) || 0;
-    if (num >= 100000) return `${(num / 1000).toFixed(0)}k`;
-    if (num >= 1000) return `${(num / 1000).toFixed(1)}k`;
-    return String(Math.round(num));
-  };
-
-  // Generate SVG Points for Trend / Area Line
-  const trendPoints = chartData.map((item, idx) => {
-    const cx = paddingLeft + idx * groupSpacing + groupSpacing / 2;
-    const val = chartMode === 'cumulative' ? cumulativeData[idx].cumulative : Number(item.profit) || 0;
-    const cy = paddingTop + chartHeight - Math.max(0, (val / activeMax) * chartHeight);
-    return { cx, cy, item };
-  });
-
-  // Smooth Catmull-Rom to Cubic Bézier Spline generator
-  const getSmoothSplinePath = (pts) => {
-    if (!pts || pts.length === 0) return '';
-    if (pts.length === 1) return `M ${pts[0].cx},${pts[0].cy}`;
-    let path = `M ${pts[0].cx.toFixed(1)},${pts[0].cy.toFixed(1)}`;
-    for (let i = 0; i < pts.length - 1; i += 1) {
-      const p0 = pts[i === 0 ? 0 : i - 1];
-      const p1 = pts[i];
-      const p2 = pts[i + 1];
-      const p3 = pts[i + 2] || p2;
-
-      const cp1x = p1.cx + (p2.cx - p0.cx) / 6;
-      const cp1y = p1.cy + (p2.cy - p0.cy) / 6;
-      const cp2x = p2.cx - (p3.cx - p1.cx) / 6;
-      const cp2y = p2.cy - (p3.cy - p1.cy) / 6;
-
-      path += ` C ${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2.cx.toFixed(1)},${p2.cy.toFixed(1)}`;
-    }
-    return path;
-  };
-
-  const splineLineStr = getSmoothSplinePath(trendPoints);
-  const areaPathStr = trendPoints.length
-    ? `${splineLineStr} L ${trendPoints[trendPoints.length - 1].cx.toFixed(1)},${paddingTop + chartHeight} L ${trendPoints[0].cx.toFixed(1)},${paddingTop + chartHeight} Z`
-    : '';
 
   return (
-    <div className="cashflow-chart-container">
+    <div className="cashflow-chart-container" style={{ padding: '1.15rem' }}>
       {/* 1. Header & Controls */}
-      <div className="cashflow-chart-header">
+      <div className="cashflow-chart-header" style={{ marginBottom: '1rem' }}>
         <div className="cashflow-chart-title-group">
-          <BarChart2 size={18} style={{ color: 'var(--accent-teal)' }} />
-          <span className="cashflow-chart-title">Detailed Cashflow Analytics</span>
+          <Layers size={18} style={{ color: 'var(--accent-teal)' }} />
+          <span className="cashflow-chart-title">Daily Profit & Financial Breakdown</span>
         </div>
 
         <div className="cashflow-chart-controls">
-          {/* Chart Mode Switcher */}
-          <div className="chart-pill-group" role="group" aria-label="Chart Mode">
-            <button
-              type="button"
-              className={`chart-pill-btn${chartMode === 'bars' ? ' is-active' : ''}`}
-              onClick={() => setChartMode('bars')}
-              title="Compare Invoiced Sales vs Saudia Purchases"
-            >
-              In vs Out
-            </button>
-            <button
-              type="button"
-              className={`chart-pill-btn${chartMode === 'trend' ? ' is-active' : ''}`}
-              onClick={() => setChartMode('trend')}
-              title="Daily Net Profit Curve"
-            >
-              Profit Trend
-            </button>
-            <button
-              type="button"
-              className={`chart-pill-btn${chartMode === 'cumulative' ? ' is-active' : ''}`}
-              onClick={() => setChartMode('cumulative')}
-              title="Accumulated Net Growth"
-            >
-              Cumulative
-            </button>
-          </div>
-
           {/* Time Range Filter */}
           <div className="chart-pill-group" role="group" aria-label="Time Range">
+            <button
+              type="button"
+              className={`chart-pill-btn${timeRange === '1d' ? ' is-active' : ''}`}
+              onClick={() => setTimeRange('1d')}
+              title="Today (1 Day)"
+            >
+              1D
+            </button>
             <button
               type="button"
               className={`chart-pill-btn${timeRange === '7d' ? ' is-active' : ''}`}
@@ -189,322 +104,173 @@ function CashflowChart({ data = [], currencySymbol = 'Rs.' }) {
             >
               30D
             </button>
+            <button
+              type="button"
+              className={`chart-pill-btn${timeRange === 'all' ? ' is-active' : ''}`}
+              onClick={() => setTimeRange('all')}
+            >
+              All
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Mode Subtitle & Legend */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.4rem', fontSize: '0.78rem' }}>
-        <span style={{ color: 'var(--text-muted)' }}>
-          {chartMode === 'bars'
-            ? 'Green = Sales Revenue (In) · Red = Saudia Buying Cost (Out)'
-            : chartMode === 'trend'
-            ? 'Daily Net Profit (Sales − Saudia Costs)'
-            : 'Running Cumulative Net Profit'}
-        </span>
-        <div className="cashflow-chart-legend" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          {chartMode === 'bars' ? (
-            <>
-              <span className="cashflow-legend-item">
-                <span className="cashflow-legend-dot is-sales" /> Sales In
-              </span>
-              <span className="cashflow-legend-item">
-                <span className="cashflow-legend-dot is-buying" /> Saudia Out
-              </span>
-            </>
-          ) : (
-            <span className="cashflow-legend-item">
-              <span className="cashflow-legend-dot is-profit" /> Net Profit Line
-            </span>
-          )}
+      {/* 2. Range KPI Highlights */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+          gap: '0.65rem',
+          marginBottom: '1rem',
+        }}
+      >
+        <div style={{ background: 'var(--surface-muted)', padding: '0.75rem', borderRadius: 10, border: '1px solid var(--border-color)' }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 650 }}>Sales Revenue</div>
+          <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--status-paid)', marginTop: 2 }}>
+            {formatCurrency(currencySymbol, totalPeriodSales)}
+          </div>
+        </div>
+
+        <div style={{ background: 'var(--surface-muted)', padding: '0.75rem', borderRadius: 10, border: '1px solid var(--border-color)' }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 650 }}>Saudia Purchases</div>
+          <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#f43f5e', marginTop: 2 }}>
+            {formatCurrency(currencySymbol, totalPeriodBuying)}
+          </div>
+        </div>
+
+        <div style={{ background: 'rgba(16, 185, 129, 0.08)', padding: '0.75rem', borderRadius: 10, border: '1px solid rgba(16, 185, 129, 0.25)' }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--success)', fontWeight: 650 }}>Period Net Profit</div>
+          <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--success)', marginTop: 2 }}>
+            {formatCurrency(currencySymbol, totalPeriodProfit)}
+          </div>
+        </div>
+
+        <div style={{ background: 'var(--surface-muted)', padding: '0.75rem', borderRadius: 10, border: '1px solid var(--border-color)' }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 650 }}>Operating Margin</div>
+          <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--accent-teal)', marginTop: 2 }}>
+            {periodMargin}%
+          </div>
         </div>
       </div>
 
-      {/* 2. Responsive Interactive SVG Chart */}
-      <div className="cashflow-chart-svg-wrap">
-        <svg
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          style={{ width: '100%', height: 'auto', minWidth: '480px', display: 'block' }}
-        >
-          <defs>
-            <linearGradient id="profitAreaGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#0ea5e9" stopOpacity="0.35" />
-              <stop offset="100%" stopColor="#0ea5e9" stopOpacity="0.0" />
-            </linearGradient>
-            <linearGradient id="salesBarGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#10b981" />
-              <stop offset="100%" stopColor="#059669" />
-            </linearGradient>
-            <linearGradient id="buyingBarGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#f43f5e" />
-              <stop offset="100%" stopColor="#e11d48" />
-            </linearGradient>
-          </defs>
+      {/* 3. Daily Ledger Cards List */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+        {displayedRows.map((item, idx) => {
+          const sales = Number(item.sales) || 0;
+          const buying = Number(item.buying) || 0;
+          const profit = sales - buying;
+          const marginPct = sales > 0 ? ((profit / sales) * 100).toFixed(1) : '0.0';
+          const maxVal = Math.max(1, sales + buying);
+          const salesBarPct = Math.round((sales / maxVal) * 100);
+          const buyingBarPct = Math.round((buying / maxVal) * 100);
 
-          {/* Horizontal Grid & Y-Axis Labels */}
-          {[1, 0.5, 0].map((ratio, i) => {
-            const yPos = paddingTop + chartHeight * (1 - ratio);
-            const valLabel = `${currencySymbol} ${fmtShort(activeMax * ratio)}`;
-            return (
-              <g key={i}>
-                <line
-                  x1={paddingLeft}
-                  y1={yPos}
-                  x2={svgWidth - paddingRight}
-                  y2={yPos}
-                  stroke="var(--border-color)"
-                  strokeWidth="1"
-                  strokeDasharray={ratio === 0 ? undefined : '3 3'}
-                  opacity={ratio === 0 ? '0.8' : '0.45'}
-                />
-                <text
-                  x={paddingLeft - 6}
-                  y={yPos + 3.5}
-                  textAnchor="end"
-                  fill="var(--text-muted)"
-                  fontSize="9.5"
-                  fontWeight="600"
-                  fontFamily="var(--font-mono, monospace)"
-                >
-                  {valLabel}
-                </text>
-              </g>
-            );
-          })}
-
-          {/* A. Mode: DUAL BARS */}
-          {chartMode === 'bars' &&
-            chartData.map((item, idx) => {
-              const centerX = paddingLeft + idx * groupSpacing + groupSpacing / 2;
-              const salesH = Math.max(2, ((Number(item.sales) || 0) / activeMax) * chartHeight);
-              const buyingH = Math.max(2, ((Number(item.buying) || 0) / activeMax) * chartHeight);
-
-              const salesY = paddingTop + chartHeight - salesH;
-              const buyingY = paddingTop + chartHeight - buyingH;
-
-              const isHovered = activeItem?.date === item.date;
-
-              const [, m, d] = String(item.date || '').split('-');
-              const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-              const dateLabel = m && d ? `${parseInt(d, 10)} ${months[parseInt(m, 10) - 1]}` : item.date;
-
-              return (
-                <g
-                  key={item.date || idx}
-                  className="cashflow-bar-group"
-                  onMouseEnter={() => setActiveItem(item)}
-                  onTouchStart={() => setActiveItem(item)}
-                >
-                  {isHovered && (
-                    <rect
-                      x={centerX - groupSpacing / 2 + 2}
-                      y={paddingTop - 6}
-                      width={groupSpacing - 4}
-                      height={chartHeight + 12}
-                      fill="var(--accent-teal)"
-                      opacity="0.09"
-                      rx="6"
-                    />
+          return (
+            <div
+              key={item.date || idx}
+              style={{
+                background: 'var(--surface-muted)',
+                borderRadius: 10,
+                border: '1px solid var(--border-color)',
+                padding: '0.85rem 1rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              {/* Row Header: Date & Profit Pill */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Calendar size={14} style={{ color: 'var(--accent-teal)' }} />
+                  <span style={{ fontWeight: 800, fontSize: '0.9rem' }}>{item.date}</span>
+                  {item.sales_count != null && (
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      ({item.sales_count} order{item.sales_count === 1 ? '' : 's'})
+                    </span>
                   )}
+                </div>
 
-                  {/* Sales Bar */}
-                  <rect
-                    x={centerX - barWidth - 2}
-                    y={salesY}
-                    width={barWidth}
-                    height={salesH}
-                    fill="url(#salesBarGrad)"
-                    rx="3"
-                  />
-
-                  {/* Buying Bar */}
-                  <rect
-                    x={centerX + 2}
-                    y={buyingY}
-                    width={barWidth}
-                    height={buyingH}
-                    fill="url(#buyingBarGrad)"
-                    rx="3"
-                  />
-
-                  {/* Date Label */}
-                  <text
-                    x={centerX}
-                    y={svgHeight - 8}
-                    textAnchor="middle"
-                    fill={isHovered ? 'var(--text-primary)' : 'var(--text-secondary)'}
-                    fontSize="10"
-                    fontWeight={isHovered ? '800' : '600'}
-                    fontFamily="var(--font-sans, sans-serif)"
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <span
+                    style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 750,
+                      padding: '0.2rem 0.55rem',
+                      borderRadius: 999,
+                      background: profit >= 0 ? 'rgba(16, 185, 129, 0.14)' : 'rgba(239, 68, 68, 0.14)',
+                      color: profit >= 0 ? '#10b981' : '#f87171',
+                      border: `1px solid ${profit >= 0 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                    }}
                   >
-                    {dateLabel}
-                  </text>
-                </g>
-              );
-            })}
+                    {profit >= 0 ? `+${marginPct}% Margin` : `${marginPct}%`}
+                  </span>
+                </div>
+              </div>
 
-          {/* B. Mode: TREND AREA OR CUMULATIVE */}
-          {(chartMode === 'trend' || chartMode === 'cumulative') && (
-            <g>
-              {/* Gradient Area Fill */}
-              {areaPathStr && <path d={areaPathStr} fill="url(#profitAreaGrad)" />}
-
-              {/* Glowing Curved Spline Line */}
-              {splineLineStr && (
-                <path
-                  d={splineLineStr}
-                  fill="none"
-                  stroke="#0ea5e9"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              )}
-
-              {/* Data Marker Dots & Labels */}
-              {trendPoints.map((p, idx) => {
-                const isHovered = activeItem?.date === p.item.date;
-                const [, m, d] = String(p.item.date || '').split('-');
-                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                const dateLabel = m && d ? `${parseInt(d, 10)} ${months[parseInt(m, 10) - 1]}` : p.item.date;
-
-                return (
-                  <g
-                    key={p.item.date || idx}
-                    className="cashflow-bar-group"
-                    onMouseEnter={() => setActiveItem(p.item)}
-                    onTouchStart={() => setActiveItem(p.item)}
-                  >
-                    {isHovered && (
-                      <line
-                        x1={p.cx}
-                        y1={paddingTop}
-                        x2={p.cx}
-                        y2={paddingTop + chartHeight}
-                        stroke="var(--accent-teal)"
-                        strokeWidth="1.5"
-                        strokeDasharray="2 2"
-                      />
-                    )}
-
-                    <circle
-                      cx={p.cx}
-                      cy={p.cy}
-                      r={isHovered ? '6' : '4'}
-                      fill="#0ea5e9"
-                      stroke="#ffffff"
-                      strokeWidth="2"
-                    />
-
-                    {/* Date label */}
-                    <text
-                      x={p.cx}
-                      y={svgHeight - 8}
-                      textAnchor="middle"
-                      fill={isHovered ? 'var(--text-primary)' : 'var(--text-secondary)'}
-                      fontSize="10"
-                      fontWeight={isHovered ? '800' : '600'}
-                    >
-                      {dateLabel}
-                    </text>
-                  </g>
-                );
-              })}
-            </g>
-          )}
-        </svg>
-      </div>
-
-      {/* 3. Interactive Inspector Card */}
-      {activeItem && (
-        <div
-          style={{
-            background: 'color-mix(in srgb, var(--accent-teal) 6%, var(--bg-secondary))',
-            border: '1px solid color-mix(in srgb, var(--accent-teal) 25%, var(--border-color))',
-            borderRadius: '12px',
-            padding: '0.75rem 1rem',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '0.75rem',
-            fontSize: '0.82rem',
-            animation: 'card-fade-up 0.2s ease both',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontWeight: 800 }}>
-            <Calendar size={15} style={{ color: 'var(--accent-teal)' }} />
-            <span>{activeItem.date}</span>
-            {activeItem.sales_count != null && (
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                ({activeItem.sales_count} sale{activeItem.sales_count === 1 ? '' : 's'})
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1.1rem', flexWrap: 'wrap' }}>
-            <span>
-              Sales:{' '}
-              <strong style={{ color: '#10b981', fontFamily: 'var(--font-mono)' }}>
-                {formatCurrency(currencySymbol, activeItem.sales)}
-              </strong>
-            </span>
-            <span>
-              Buying:{' '}
-              <strong style={{ color: '#f43f5e', fontFamily: 'var(--font-mono)' }}>
-                {formatCurrency(currencySymbol, activeItem.buying)}
-              </strong>
-            </span>
-            <span>
-              Net Profit:{' '}
-              <strong
+              {/* Financial Flow Split Bar */}
+              <div
                 style={{
-                  color: activeItem.profit >= 0 ? '#10b981' : '#ef4444',
-                  fontFamily: 'var(--font-mono)',
+                  height: '6px',
+                  width: '100%',
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  borderRadius: '999px',
+                  display: 'flex',
+                  overflow: 'hidden',
+                  margin: '0.15rem 0',
                 }}
               >
-                {formatCurrency(currencySymbol, activeItem.profit)}
-              </strong>
-            </span>
-          </div>
-        </div>
-      )}
+                <div
+                  style={{ width: `${salesBarPct}%`, background: '#10b981', transition: 'width 0.3s ease' }}
+                  title={`Sales: ${salesBarPct}%`}
+                />
+                <div
+                  style={{ width: `${buyingBarPct}%`, background: '#f43f5e', transition: 'width 0.3s ease' }}
+                  title={`Saudia Buying: ${buyingBarPct}%`}
+                />
+              </div>
 
-      {/* 4. Quick Summary Metrics Row */}
-      <div className="cashflow-metrics-row">
-        <div className="cashflow-metric-card">
-          <span className="cashflow-metric-label">Best Day</span>
-          <span className="cashflow-metric-value" style={{ color: '#10b981' }}>
-            {peakDay ? formatCurrency(currencySymbol, peakDay.profit) : '—'}
-          </span>
-          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{peakDay?.date || ''}</span>
-        </div>
+              {/* Row Metrics Breakdown */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '0.5rem',
+                  fontSize: '0.8rem',
+                }}
+              >
+                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>
+                    Sales:{' '}
+                    <strong style={{ color: '#10b981', fontFamily: 'var(--font-mono)' }}>
+                      +{formatCurrency(currencySymbol, sales)}
+                    </strong>
+                  </span>
+                  <span style={{ color: 'var(--text-secondary)' }}>
+                    Saudia:{' '}
+                    <strong style={{ color: '#f43f5e', fontFamily: 'var(--font-mono)' }}>
+                      −{formatCurrency(currencySymbol, buying)}
+                    </strong>
+                  </span>
+                </div>
 
-        <div className="cashflow-metric-card">
-          <span className="cashflow-metric-label">Avg Daily Sales</span>
-          <span className="cashflow-metric-value">{formatCurrency(currencySymbol, avgSales)}</span>
-          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>over active {timeRange}</span>
-        </div>
-
-        <div className="cashflow-metric-card">
-          <span className="cashflow-metric-label">Avg Daily Buying</span>
-          <span className="cashflow-metric-value" style={{ color: 'var(--text-secondary)' }}>
-            {formatCurrency(currencySymbol, avgBuying)}
-          </span>
-          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Saudia stock</span>
-        </div>
-
-        <div className="cashflow-metric-card">
-          <span className="cashflow-metric-label">Period Margin</span>
-          <span
-            className="cashflow-metric-value"
-            style={{ color: totalPeriodProfit >= 0 ? 'var(--accent-teal)' : '#ef4444' }}
-          >
-            {periodMargin}%
-          </span>
-          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
-            Net {formatCurrency(currencySymbol, totalPeriodProfit)}
-          </span>
-        </div>
+                <div>
+                  <span style={{ color: 'var(--text-secondary)' }}>Net Profit: </span>
+                  <strong
+                    style={{
+                      color: profit >= 0 ? '#10b981' : '#f87171',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '0.88rem',
+                    }}
+                  >
+                    {formatCurrency(currencySymbol, profit)}
+                  </strong>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -621,7 +387,7 @@ export default function CashflowPanel({
         <div className="panel-flat-head">
           <div>
             <h3 className="panel-flat-title">
-              <ArrowDownUp size={17} /> Cashflow
+              <ArrowDownUp size={17} /> Cashflow & Operating Balance
             </h3>
             <p className="panel-flat-sub">Sales in vs Saudia buying · Help money is separate</p>
           </div>
@@ -743,8 +509,8 @@ export default function CashflowPanel({
         </div>
       </div>
 
-      {/* Interactive Dual-Bar Chart */}
-      <CashflowChart data={daily_trend.length ? daily_trend : []} currencySymbol={currencySymbol} />
+      {/* Modern Daily Financial Breakdown (Replaces clunky SVG graph) */}
+      <DailyFinancialBreakdown data={daily_trend.length ? daily_trend : []} currencySymbol={currencySymbol} />
 
       {!compact && (
         <>
@@ -794,4 +560,3 @@ export default function CashflowPanel({
     </div>
   );
 }
-

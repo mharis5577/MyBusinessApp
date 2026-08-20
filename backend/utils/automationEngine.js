@@ -220,9 +220,8 @@ export async function generateBusinessBrief(dbAll, options = {}) {
 export async function getOverdueQueue(dbAll, currencySymbol = 'Rs.') {
   const today = pakistanToday();
   const rows = await dbAll(
-    `SELECT b.*, c.phone as client_phone, c.email as client_email 
+    `SELECT b.* 
      FROM bills b 
-     LEFT JOIN customers c ON b.customer_id = c.id 
      WHERE (b.bill_type IS NULL OR b.bill_type = 'customer' OR b.bill_type = '') 
        AND b.status != 'cancelled' 
        AND (b.total_amount - b.amount_paid) > 0 
@@ -247,7 +246,7 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
       bill_id: b.id,
       invoice_number: b.invoice_number,
       customer_name: b.customer_name,
-      phone: b.client_phone || b.customer_phone,
+      phone: b.customer_phone || '',
       total_amount: Number(b.total_amount),
       amount_paid: Number(b.amount_paid),
       balance_due: balance,
@@ -259,3 +258,4 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
     };
   });
 }
+

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Sparkles,
   MessageCircle,
@@ -46,6 +47,11 @@ export default function AutomationHub({
       setActiveTab(initialTab);
       fetchBrief(period, startDate, endDate);
       fetchOverdueQueue();
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = prev;
+      };
     }
   }, [open, initialTab]);
 
@@ -135,7 +141,7 @@ export default function AutomationHub({
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div className="client-modal-overlay" onClick={onClose}>
       <div
         className="client-modal-card"
@@ -159,79 +165,76 @@ export default function AutomationHub({
         </div>
 
         {/* Main Tab Switcher */}
-        <div className="chart-pill-group" style={{ marginBottom: '1.25rem', width: '100%', display: 'flex' }}>
+        <div className="auto-hub-tabs" style={{ marginBottom: '1.15rem' }}>
           <button
             type="button"
-            className={`chart-pill-btn${activeTab === 'brief' ? ' is-active' : ''}`}
-            style={{ flex: 1, textAlign: 'center', padding: '0.45rem' }}
+            className={`auto-hub-tab-btn${activeTab === 'brief' ? ' is-active' : ''}`}
             onClick={() => setActiveTab('brief')}
           >
-            📊 Business Brief & Profit
+            📊 Profit Brief
           </button>
           <button
             type="button"
-            className={`chart-pill-btn${activeTab === 'reminders' ? ' is-active' : ''}`}
-            style={{ flex: 1, textAlign: 'center', padding: '0.45rem' }}
+            className={`auto-hub-tab-btn${activeTab === 'reminders' ? ' is-active' : ''}`}
             onClick={() => setActiveTab('reminders')}
           >
-            ⏰ Overdue Queue ({overdueQueue.length})
+            ⏰ Overdue ({overdueQueue.length})
           </button>
           <button
             type="button"
-            className={`chart-pill-btn${activeTab === 'backup' ? ' is-active' : ''}`}
-            style={{ flex: 1, textAlign: 'center', padding: '0.45rem' }}
+            className={`auto-hub-tab-btn${activeTab === 'backup' ? ' is-active' : ''}`}
             onClick={() => setActiveTab('backup')}
           >
-            🛡️ Auto-Backups
+            🛡️ Backups
           </button>
         </div>
 
         {/* TAB 1: EXECUTIVE BUSINESS BRIEF & PROFIT */}
         {activeTab === 'brief' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
             {/* Period Switcher Pills */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <div className="chart-pill-group" style={{ margin: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', width: '100%' }}>
+              <div className="auto-hub-periods">
                 <button
                   type="button"
-                  className={`chart-pill-btn${period === 'today' ? ' is-active' : ''}`}
+                  className={`auto-hub-period-btn${period === 'today' ? ' is-active' : ''}`}
                   onClick={() => handlePeriodChange('today')}
                 >
                   Today
                 </button>
                 <button
                   type="button"
-                  className={`chart-pill-btn${period === 'week' ? ' is-active' : ''}`}
+                  className={`auto-hub-period-btn${period === 'week' ? ' is-active' : ''}`}
                   onClick={() => handlePeriodChange('week')}
                 >
-                  Weekly (7D)
+                  7 Days
                 </button>
                 <button
                   type="button"
-                  className={`chart-pill-btn${period === 'month' ? ' is-active' : ''}`}
+                  className={`auto-hub-period-btn${period === 'month' ? ' is-active' : ''}`}
                   onClick={() => handlePeriodChange('month')}
                 >
-                  Monthly
+                  This Month
                 </button>
                 <button
                   type="button"
-                  className={`chart-pill-btn${period === 'all' ? ' is-active' : ''}`}
+                  className={`auto-hub-period-btn${period === 'all' ? ' is-active' : ''}`}
                   onClick={() => handlePeriodChange('all')}
                 >
                   All Time
                 </button>
                 <button
                   type="button"
-                  className={`chart-pill-btn${period === 'custom' ? ' is-active' : ''}`}
+                  className={`auto-hub-period-btn${period === 'custom' ? ' is-active' : ''}`}
                   onClick={() => handlePeriodChange('custom')}
                 >
                   Custom Dates
                 </button>
               </div>
 
-              <span style={{ fontSize: '0.78rem', color: 'var(--accent-teal)', fontWeight: 700 }}>
+              <div style={{ fontSize: '0.76rem', color: 'var(--accent-teal)', fontWeight: 700, textAlign: 'left' }}>
                 {businessBrief?.dateRangeLabel || ''}
-              </span>
+              </div>
             </div>
 
             {/* Custom Date Range Picker */}
@@ -467,6 +470,7 @@ export default function AutomationHub({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Users,
   Plus,
@@ -1091,140 +1092,142 @@ export default function CustomerManager({
       </div>
 
       {/* 5. Add Client Profile Modal */}
-      {showAddModal && (
-        <div className="client-modal-overlay" onClick={() => setShowAddModal(false)}>
-          <div className="client-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <UserPlus size={20} style={{ color: 'var(--accent-teal)' }} />
-                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>Add New Client Profile</h3>
-              </div>
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ width: 'auto', padding: '0.35rem 0.55rem' }}
-                onClick={() => setShowAddModal(false)}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddCustomer} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-              <div className="form-group">
-                <label className="form-label">Client / Company Name *</label>
-                <input
-                  className="form-input"
-                  type="text"
-                  placeholder="e.g. Ali Retail Client"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  autoFocus
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Party Type</label>
-                <AppSelect
-                  value={partyType}
-                  onChange={setPartyType}
-                  options={[
-                    { value: 'customer', label: 'Online Customer (Retail / Sales)' },
-                    { value: 'supplier', label: 'Supplier (Saudia / Buying)' },
-                  ]}
-                />
-              </div>
-
-              <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <div className="form-group">
-                  <label className="form-label">WhatsApp / Phone</label>
-                  <input
-                    className="form-input"
-                    type="text"
-                    placeholder="+92 300 0000000"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                  />
+      {showAddModal &&
+        createPortal(
+          <div className="client-modal-overlay" onClick={() => setShowAddModal(false)}>
+            <div className="client-modal-card" onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <UserPlus size={20} style={{ color: 'var(--accent-teal)' }} />
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>Add New Client Profile</h3>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Email Address</label>
-                  <input
-                    className="form-input"
-                    type="email"
-                    placeholder="client@domain.pk"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Shipping / City Address</label>
-                <textarea
-                  className="form-textarea"
-                  rows={2}
-                  placeholder="City, delivery address or location"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                />
-              </div>
-
-              {/* Show Bank Details ONLY for Suppliers */}
-              {partyType === 'supplier' && (
-                <div style={{ background: 'var(--surface-muted)', padding: '0.85rem', borderRadius: 8, border: '1px solid var(--border-color)' }}>
-                  <p style={{ fontSize: '0.8rem', fontWeight: 800, margin: '0 0 0.65rem', color: 'var(--text-primary)' }}>
-                    Supplier Pay To Bank Details (for Saudia payments)
-                  </p>
-                  <div className="form-group">
-                    <label className="form-label">Payee Bank Name</label>
-                    <PayeeBankSelect
-                      value={payeeBankName}
-                      onChange={setPayeeBankName}
-                      extraBanks={extraPayeeBanks}
-                    />
-                  </div>
-                  <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <div className="form-group">
-                      <label className="form-label">Account Title</label>
-                      <input
-                        className="form-input"
-                        type="text"
-                        placeholder="Account title"
-                        value={payeeAccountTitle}
-                        onChange={(e) => setPayeeAccountTitle(e.target.value)}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">IBAN / Account #</label>
-                      <input
-                        className="form-input"
-                        type="text"
-                        placeholder="SA…"
-                        value={payeeAccountNumber}
-                        onChange={(e) => setPayeeAccountNumber(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
                 <button
                   type="button"
                   className="btn-secondary"
-                  style={{ width: 'auto' }}
+                  style={{ width: 'auto', padding: '0.35rem 0.55rem' }}
                   onClick={() => setShowAddModal(false)}
                 >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" style={{ width: 'auto' }}>
-                  <Plus size={16} /> Save Client Profile
+                  <X size={16} />
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+              <form onSubmit={handleAddCustomer} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Client / Company Name *</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    placeholder="e.g. Ali Retail Client"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    autoFocus
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Party Type</label>
+                  <AppSelect
+                    value={partyType}
+                    onChange={setPartyType}
+                    options={[
+                      { value: 'customer', label: 'Online Customer (Retail / Sales)' },
+                      { value: 'supplier', label: 'Supplier (Saudia / Buying)' },
+                    ]}
+                  />
+                </div>
+
+                <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div className="form-group">
+                    <label className="form-label">WhatsApp / Phone</label>
+                    <input
+                      className="form-input"
+                      type="text"
+                      placeholder="+92 300 0000000"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Email Address</label>
+                    <input
+                      className="form-input"
+                      type="email"
+                      placeholder="client@domain.pk"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Shipping / City Address</label>
+                  <textarea
+                    className="form-textarea"
+                    rows={2}
+                    placeholder="City, delivery address or location"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                  />
+                </div>
+
+                {/* Show Bank Details ONLY for Suppliers */}
+                {partyType === 'supplier' && (
+                  <div style={{ background: 'var(--surface-muted)', padding: '0.85rem', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                    <p style={{ fontSize: '0.8rem', fontWeight: 800, margin: '0 0 0.65rem', color: 'var(--text-primary)' }}>
+                      Supplier Pay To Bank Details (for Saudia payments)
+                    </p>
+                    <div className="form-group">
+                      <label className="form-label">Payee Bank Name</label>
+                      <PayeeBankSelect
+                        value={payeeBankName}
+                        onChange={setPayeeBankName}
+                        extraBanks={extraPayeeBanks}
+                      />
+                    </div>
+                    <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                      <div className="form-group">
+                        <label className="form-label">Account Title</label>
+                        <input
+                          className="form-input"
+                          type="text"
+                          placeholder="Account title"
+                          value={payeeAccountTitle}
+                          onChange={(e) => setPayeeAccountTitle(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">IBAN / Account #</label>
+                        <input
+                          className="form-input"
+                          type="text"
+                          placeholder="SA…"
+                          value={payeeAccountNumber}
+                          onChange={(e) => setPayeeAccountNumber(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ width: 'auto' }}
+                    onClick={() => setShowAddModal(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-primary" style={{ width: 'auto' }}>
+                    <Plus size={16} /> Save Client Profile
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
