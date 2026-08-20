@@ -1671,7 +1671,7 @@ app.post('/api/restore', async (req, res) => {
 
       for (const c of data.customers || []) {
         await dbRun(
-          `INSERT INTO customers (
+          `INSERT OR REPLACE INTO customers (
             id, name, email, phone, address, tax_id, party_type,
             payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes, created_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1693,13 +1693,13 @@ app.post('/api/restore', async (req, res) => {
       }
       for (const p of data.products || []) {
         await dbRun(
-          'INSERT INTO products (id, name, description, price, cost_price, unit, stock, sku, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO products (id, name, description, price, cost_price, unit, stock, sku, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [p.id, p.name, p.description || '', p.price || 0, p.cost_price || 0, p.unit || 'item', p.stock ?? 0, p.sku || '', p.created_at || null]
         );
       }
       for (const b of data.bills || []) {
         await dbRun(
-          `INSERT INTO bills (
+          `INSERT OR REPLACE INTO bills (
             id, bill_type, invoice_number, customer_name, customer_email, customer_phone, customer_address,
             bill_date, bill_time, due_date, subtotal, tax_rate, tax_amount, discount_rate, discount_amount,
             total_amount, amount_paid, status, notes, payment_method, bank_details,
@@ -1719,13 +1719,13 @@ app.post('/api/restore', async (req, res) => {
       }
       for (const i of data.bill_items || []) {
         await dbRun(
-          'INSERT INTO bill_items (id, bill_id, product_id, description, quantity, unit_price, total, returned_qty) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO bill_items (id, bill_id, product_id, description, quantity, unit_price, total, returned_qty) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           [i.id, i.bill_id, i.product_id || null, i.description, i.quantity || 1, i.unit_price || 0, i.total || 0, i.returned_qty || 0]
         );
       }
       for (const p of data.bill_payments || []) {
         await dbRun(
-          'INSERT INTO bill_payments (id, bill_id, amount, method, payment_date, notes, screenshot_data, screenshot_path, screenshot_thumb, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO bill_payments (id, bill_id, amount, method, payment_date, notes, screenshot_data, screenshot_path, screenshot_thumb, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             p.id,
             p.bill_id,
@@ -1744,19 +1744,19 @@ app.post('/api/restore', async (req, res) => {
         const amt = Number(a.amount) || 0;
         const rem = a.remaining == null ? amt : Number(a.remaining) || 0;
         await dbRun(
-          'INSERT INTO advance_payments (id, amount, remaining, payment_date, client_name, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO advance_payments (id, amount, remaining, payment_date, client_name, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
           [a.id, amt, rem, a.payment_date, a.client_name || '', a.notes || '', a.created_at || null]
         );
       }
       for (const r of data.customer_product_rates || []) {
         await dbRun(
-          'INSERT INTO customer_product_rates (id, customer_id, product_id, custom_price, created_at) VALUES (?, ?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO customer_product_rates (id, customer_id, product_id, custom_price, created_at) VALUES (?, ?, ?, ?, ?)',
           [r.id, r.customer_id, r.product_id, r.custom_price || 0, r.created_at || null]
         );
       }
       for (const s of data.stock_adjustments || []) {
         await dbRun(
-          'INSERT INTO stock_adjustments (id, product_id, delta, reason, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO stock_adjustments (id, product_id, delta, reason, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)',
           [s.id, s.product_id, s.delta || 0, s.reason || 'adjustment', s.notes || '', s.created_at || null]
         );
       }
@@ -1765,7 +1765,7 @@ app.post('/api/restore', async (req, res) => {
         await dbRun('DELETE FROM memos');
         for (const m of data.memos) {
           await dbRun(
-            'INSERT INTO memos (id, title, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+            'INSERT OR REPLACE INTO memos (id, title, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
             [m.id, m.title || 'Untitled', m.body || '', m.created_at || null, m.updated_at || m.created_at || null]
           );
         }

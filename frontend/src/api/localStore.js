@@ -1676,12 +1676,14 @@ async function handleLocalRequestInner(url, options = {}) {
 
       const putAll = async (store, rows, mapFn) => {
         const os = tx.objectStore(store);
+        let nextId = 1;
         for (const row of rows || []) {
           if (!row || typeof row !== 'object') continue;
           const rec = mapFn ? mapFn(row) : { ...row };
           if (rec.id == null) {
-            const keys = await os.getAllKeys();
-            rec.id = keys.length ? Math.max(...keys.map((k) => Number(k) || 0)) + 1 : 1;
+            rec.id = nextId++;
+          } else {
+            nextId = Math.max(nextId, (Number(rec.id) || 0) + 1);
           }
           await os.put(rec);
         }
