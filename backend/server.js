@@ -6,6 +6,7 @@ import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from '
 import { normalizeBillType, invoicePrefixForType, partyTypeForBill, outstandingByPartyName } from './utils/billTypes.js';
 import { saleOverviewTotals } from './utils/dashboardStats.js';
 import { isDemoBill, isDemoCustomer } from './utils/demoData.js';
+import { performAutoBackup, generateDailyBrief, getOverdueQueue } from './utils/automationEngine.js';
 
 const app = express();
 const PORT = process.env.PORT || 11000;
@@ -2236,6 +2237,64 @@ app.get('/api/cashflow', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// -------------------------------------------------------------
+// AUTOMATION & EXECUTIVE BRIEF ENDPOINTS
+// -------------------------------------------------------------
+app.get('/api/automation/daily-brief', async (req, res) => {
+  try {
+    const targetDate = req.query.date || pakistanToday();
+    const currency = req.query.currency || 'Rs.';
+    const brief = await generateDailyBrief(dbAll, targetDate, currency);
+    res.json(brief);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/automation/overdue-queue', async (req, res) => {
+  try {
+    const currency = req.query.currency || 'Rs.';
+    const queue = await getOverdueQueue(dbAll, currency);
+    res.json(queue);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/automation/run-backup', async (req, res) => {
+  try {
+    const result = await performAutoBackup(dbAll);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Nightly background auto-backup scheduler
+let lastAutoBackupDate = null;
+setTimeout(async () => {
+  try {
+    const today = pakistanToday();
+    lastAutoBackupDate = today;
+    await performAutoBackup(dbAll);
+  } catch (e) {
+    console.error('[Auto-Backup Initial] Failed:', e);
+  }
+}, 5000);
+
+setInterval(async () => {
+  try {
+    const today = pakistanToday();
+    if (lastAutoBackupDate !== today) {
+      lastAutoBackupDate = today;
+      const res = await performAutoBackup(dbAll);
+      console.log(`[Auto-Backup] Nightly backup created:`, res.filename);
+    }
+  } catch (e) {
+    console.error('[Auto-Backup Interval] Failed:', e);
+  }
+}, 1000 * 60 * 30);
 
 // Start Server
 app.listen(PORT, () => {

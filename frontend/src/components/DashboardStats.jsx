@@ -18,6 +18,8 @@ import {
   Download,
   SlidersHorizontal,
   CheckCircle2,
+  Zap,
+  Bell,
 } from 'lucide-react';
 import { downloadDailyProfitSummaryPdf } from '../utils/tableExport';
 import { playSuccessChime, playTapSound } from '../utils/audioEffects';
@@ -33,6 +35,7 @@ import {
 import EmptyState from './EmptyState';
 import StatusBadge from './StatusBadge';
 import QuickPaySheet from './QuickPaySheet';
+import AutomationHub from './AutomationHub';
 import { getLastAutoBackupAt } from '../utils/backupManager';
 import { publishHomeWidgetStats } from '../utils/homeWidget';
 import { useToast } from '../toast/ToastContext';
@@ -176,6 +179,8 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
   const [profitPeriod, setProfitPeriod] = useState('today');
   const [payBill, setPayBill] = useState(null);
   const [generatingReport, setGeneratingReport] = useState(false);
+  const [automationOpen, setAutomationOpen] = useState(false);
+  const [automationTab, setAutomationTab] = useState('brief');
 
   const fetchStats = async (soft = false) => {
     if (!soft) setLoading(true);
@@ -434,6 +439,30 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
             <PlusCircle size={18} /> Create bill
           </button>
           <div className="hero-actions-secondary">
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ color: '#25d366', borderColor: 'rgba(37, 211, 102, 0.35)', background: 'rgba(37, 211, 102, 0.08)' }}
+              onClick={() => {
+                playTapSound();
+                setAutomationTab('brief');
+                setAutomationOpen(true);
+              }}
+            >
+              <Zap size={14} /> ⚡ Daily WA Brief
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.35)', background: 'rgba(239, 68, 68, 0.08)' }}
+              onClick={() => {
+                playTapSound();
+                setAutomationTab('reminders');
+                setAutomationOpen(true);
+              }}
+            >
+              <Bell size={14} /> Overdue Queue
+            </button>
             <button type="button" className="btn-secondary" onClick={() => onNavigate('database')}>
               <FileText size={15} /> All Bills
             </button>
@@ -975,6 +1004,13 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
         onClose={() => setPayBill(null)}
         onSaved={() => fetchStats(true)}
         currencySymbol={currencySymbol}
+      />
+
+      <AutomationHub
+        open={automationOpen}
+        onClose={() => setAutomationOpen(false)}
+        currencySymbol={currencySymbol}
+        initialTab={automationTab}
       />
     </div>
   );
