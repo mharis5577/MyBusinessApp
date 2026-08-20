@@ -47,23 +47,75 @@ const CashflowPanel = lazy(() => import('./CashflowPanel'));
 const OverduePanel = lazy(() => import('./OverduePanel'));
 const DailyClosePanel = lazy(() => import('./DailyClosePanel'));
 
-function StatCard({ label, value, hint, icon: Icon, highlight = false, onClick }) {
+function StatCard({
+  label,
+  value,
+  hint,
+  icon: Icon,
+  highlight = false,
+  onClick,
+  actionLabel,
+  onAction,
+  actionType = 'default',
+}) {
   return (
     <div
       className={`stat-card${highlight ? ' stat-card-highlight' : ''}${onClick ? ' is-clickable' : ''}`}
       onClick={onClick}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
-      style={{ cursor: onClick ? 'pointer' : 'default' }}
+      style={{
+        cursor: onClick ? 'pointer' : 'default',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+      }}
     >
-      <div className="stat-card-head">
-        <span className="stat-card-label">{label}</span>
-        <Icon size={15} style={{ color: highlight ? 'var(--status-overdue)' : 'var(--text-muted)', flexShrink: 0 }} />
+      <div>
+        <div className="stat-card-head">
+          <span className="stat-card-label">{label}</span>
+          <Icon size={15} style={{ color: highlight ? 'var(--status-overdue)' : 'var(--text-muted)', flexShrink: 0 }} />
+        </div>
+        <div className="stat-card-value" title={String(value)}>
+          {value}
+        </div>
+        <div className="stat-card-hint">{hint}</div>
       </div>
-      <div className="stat-card-value" title={String(value)}>
-        {value}
+      {actionLabel && (
+        <button
+          type="button"
+          className={`stat-card-action-badge${actionType === 'danger' ? ' is-danger' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onAction) onAction();
+          }}
+        >
+          {actionLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="dashboard-page" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <div className="skeleton-hero-card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="skeleton-box" style={{ width: '180px', height: '24px' }} />
+          <div className="skeleton-box" style={{ width: '140px', height: '32px' }} />
+        </div>
+        <div className="skeleton-box" style={{ width: '100%', height: '90px' }} />
       </div>
-      <div className="stat-card-hint">{hint}</div>
+      <div className="stats-grid stats-grid-quiet">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="stat-card">
+            <div className="skeleton-box" style={{ width: '60%', height: '14px', marginBottom: '8px' }} />
+            <div className="skeleton-box" style={{ width: '80%', height: '28px', marginBottom: '6px' }} />
+            <div className="skeleton-box" style={{ width: '40%', height: '12px' }} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -245,13 +297,8 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     }
   };
 
-  if (loading) {
-    return (
-      <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
-        <RefreshCw className="spin" size={28} style={{ marginBottom: '0.75rem' }} />
-        <p>Loading…</p>
-      </div>
-    );
+  if (loading && !stats) {
+    return <DashboardSkeleton />;
   }
 
   const {
@@ -471,7 +518,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
 
       {activeTab === 'overview' && (
         <div className="dashboard-tab-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div className="profit-hero-card">
+          <div className={`profit-hero-card ${currentProfit >= 0 ? 'is-profitable' : 'is-loss'}`}>
             <div className="profit-hero-header">
               <div className="profit-hero-title-group">
                 <Wallet size={18} style={{ color: 'var(--accent-teal)' }} />
@@ -615,6 +662,8 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
               hint="Pending payment"
               icon={Clock}
               onClick={() => setActiveTab('dues')}
+              actionLabel="View Dues"
+              onAction={() => setActiveTab('dues')}
             />
             <StatCard
               label="Overdue Sales"
@@ -623,6 +672,9 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
               highlight={total_overdue > 0}
               icon={AlertTriangle}
               onClick={() => setActiveTab('dues')}
+              actionLabel={total_overdue > 0 ? '⚡ 1-Tap WA' : undefined}
+              actionType="danger"
+              onAction={() => onNavigate('aging')}
             />
             <StatCard
               label="Help Outstanding"
@@ -630,6 +682,8 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
               hint={`${help_count} person(s) lent`}
               icon={HeartHandshake}
               onClick={() => setActiveTab('dues')}
+              actionLabel={help_outstanding > 0 ? '🤝 Remind' : undefined}
+              onAction={() => setActiveTab('dues')}
             />
             <StatCard
               label="Active Customer Bills"
@@ -637,6 +691,8 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
               hint="Excl. cancelled"
               icon={FileText}
               onClick={() => onNavigate('database')}
+              actionLabel="🔍 Database"
+              onAction={() => onNavigate('database')}
             />
           </div>
 
@@ -655,8 +711,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
             {recent_bills.slice(0, 3).map((bill) => (
               <button
                 key={bill.id}
-                type="button"
-                className={`dashboard-recent-item is-${String(bill.status || '').toLowerCase()}`}
+                             className={`dashboard-recent-item is-${String(bill.status || '').toLowerCase()}`}
                 style={{ width: '100%', textAlign: 'left', marginBottom: '0.4rem' }}
                 onClick={() => (onViewBill ? onViewBill(bill) : onNavigate('database'))}
               >
@@ -917,6 +972,31 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
           </div>
         </div>
       )}
+
+      {/* Mobile Floating Action Bar (FAB) */}
+      <div className="mobile-fab-bar">
+        <button
+          type="button"
+          className="mobile-fab-btn is-primary"
+          onClick={() => onNavigate('create')}
+        >
+          <PlusCircle size={15} /> New Bill
+        </button>
+        <button
+          type="button"
+          className="mobile-fab-btn is-secondary"
+          onClick={() => onNavigate('database')}
+        >
+          <FileText size={14} /> Bills
+        </button>
+        <button
+          type="button"
+          className="mobile-fab-btn is-secondary"
+          onClick={() => setActiveTab('cashflow')}
+        >
+          <ArrowDownUp size={14} /> Cashflow
+        </button>
+      </div>
 
       <QuickPaySheet
         open={Boolean(payBill)}

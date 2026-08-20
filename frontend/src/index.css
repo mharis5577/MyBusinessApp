@@ -4791,6 +4791,120 @@ body {
   color: var(--text-primary);
 }
 
+/* Senior UI Aesthetics: Shimmer Skeleton Loaders */
+@keyframes shimmerWave {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton-box {
+  background: linear-gradient(90deg, var(--bg-secondary) 25%, color-mix(in srgb, var(--text-muted) 15%, var(--bg-secondary)) 50%, var(--bg-secondary) 75%);
+  background-size: 200% 100%;
+  animation: shimmerWave 1.6s infinite ease-in-out;
+  border-radius: 8px;
+}
+.skeleton-hero-card {
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  border-radius: var(--radius-lg, 16px);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Senior UI Aesthetics: Floating Mobile Action Bar (FAB) */
+.mobile-fab-bar {
+  display: none;
+}
+@media (max-width: 768px) {
+  .mobile-fab-bar {
+    position: fixed;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 900;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.55rem;
+    background: rgba(15, 23, 42, 0.9);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 999px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    animation: fab-rise 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .mobile-fab-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.5rem 0.85rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 800;
+    border: none;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .mobile-fab-btn.is-primary {
+    background: var(--accent-teal, #00b3a6);
+    color: #ffffff;
+    box-shadow: 0 4px 14px rgba(0, 179, 166, 0.35);
+  }
+  .mobile-fab-btn.is-secondary {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+  }
+  .mobile-fab-btn:active {
+    transform: scale(0.94);
+  }
+}
+@keyframes fab-rise {
+  from { opacity: 0; transform: translate(-50%, 20px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* Senior UI: Actionable Stat Card Badges */
+.stat-card-action-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 0.18rem 0.45rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent-teal) 15%, var(--bg-card));
+  color: var(--accent-teal);
+  border: 1px solid color-mix(in srgb, var(--accent-teal) 30%, transparent);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: 0.3rem;
+  width: fit-content;
+}
+.stat-card-action-badge:hover {
+  background: var(--accent-teal);
+  color: #ffffff;
+}
+.stat-card-action-badge.is-danger {
+  background: rgba(239, 68, 68, 0.14);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.stat-card-action-badge.is-danger:hover {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+/* Ambient Aura Glows on Financial Hero Cards */
+.profit-hero-card.is-profitable {
+  box-shadow: 0 8px 32px rgba(16, 185, 129, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+.profit-hero-card.is-loss {
+  box-shadow: 0 8px 32px rgba(239, 68, 68, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
 .dashboard-dropdowns {
   display: flex;
   flex-direction: column;

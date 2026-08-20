@@ -102,11 +102,30 @@ function CashflowChart({ data = [], currencySymbol = 'Rs.' }) {
     return { cx, cy, item };
   });
 
-  const polylineStr = trendPoints.map((p) => `${p.cx},${p.cy}`).join(' ');
+  // Smooth Catmull-Rom to Cubic Bézier Spline generator
+  const getSmoothSplinePath = (pts) => {
+    if (!pts || pts.length === 0) return '';
+    if (pts.length === 1) return `M ${pts[0].cx},${pts[0].cy}`;
+    let path = `M ${pts[0].cx.toFixed(1)},${pts[0].cy.toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i += 1) {
+      const p0 = pts[i === 0 ? 0 : i - 1];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[i + 2] || p2;
+
+      const cp1x = p1.cx + (p2.cx - p0.cx) / 6;
+      const cp1y = p1.cy + (p2.cy - p0.cy) / 6;
+      const cp2x = p2.cx - (p3.cx - p1.cx) / 6;
+      const cp2y = p2.cy - (p3.cy - p1.cy) / 6;
+
+      path += ` C ${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2.cx.toFixed(1)},${p2.cy.toFixed(1)}`;
+    }
+    return path;
+  };
+
+  const splineLineStr = getSmoothSplinePath(trendPoints);
   const areaPathStr = trendPoints.length
-    ? `M ${trendPoints[0].cx},${paddingTop + chartHeight} ` +
-      trendPoints.map((p) => `L ${p.cx},${p.cy}`).join(' ') +
-      ` L ${trendPoints[trendPoints.length - 1].cx},${paddingTop + chartHeight} Z`
+    ? `${splineLineStr} L ${trendPoints[trendPoints.length - 1].cx.toFixed(1)},${paddingTop + chartHeight} L ${trendPoints[0].cx.toFixed(1)},${paddingTop + chartHeight} Z`
     : '';
 
   return (
@@ -119,50 +138,53 @@ function CashflowChart({ data = [], currencySymbol = 'Rs.' }) {
         </div>
 
         <div className="cashflow-chart-controls">
-          {/* View Mode Toggle */}
-          <div className="cashflow-chart-btn-group" role="group" aria-label="Chart Visualization Mode">
+          {/* Chart Mode Switcher */}
+          <div className="chart-pill-group" role="group" aria-label="Chart Mode">
             <button
               type="button"
-              className={`cashflow-chart-btn${chartMode === 'bars' ? ' is-active' : ''}`}
+              className={`chart-pill-btn${chartMode === 'bars' ? ' is-active' : ''}`}
               onClick={() => setChartMode('bars')}
+              title="Compare Invoiced Sales vs Saudia Purchases"
             >
-              In vs Out Bars
+              In vs Out
             </button>
             <button
               type="button"
-              className={`cashflow-chart-btn${chartMode === 'trend' ? ' is-active' : ''}`}
+              className={`chart-pill-btn${chartMode === 'trend' ? ' is-active' : ''}`}
               onClick={() => setChartMode('trend')}
+              title="Daily Net Profit Curve"
             >
               Profit Trend
             </button>
             <button
               type="button"
-              className={`cashflow-chart-btn${chartMode === 'cumulative' ? ' is-active' : ''}`}
+              className={`chart-pill-btn${chartMode === 'cumulative' ? ' is-active' : ''}`}
               onClick={() => setChartMode('cumulative')}
+              title="Accumulated Net Growth"
             >
               Cumulative
             </button>
           </div>
 
           {/* Time Range Filter */}
-          <div className="cashflow-chart-btn-group" role="group" aria-label="Time range">
+          <div className="chart-pill-group" role="group" aria-label="Time Range">
             <button
               type="button"
-              className={`cashflow-chart-btn${timeRange === '7d' ? ' is-active' : ''}`}
+              className={`chart-pill-btn${timeRange === '7d' ? ' is-active' : ''}`}
               onClick={() => setTimeRange('7d')}
             >
               7D
             </button>
             <button
               type="button"
-              className={`cashflow-chart-btn${timeRange === '14d' ? ' is-active' : ''}`}
+              className={`chart-pill-btn${timeRange === '14d' ? ' is-active' : ''}`}
               onClick={() => setTimeRange('14d')}
             >
               14D
             </button>
             <button
               type="button"
-              className={`cashflow-chart-btn${timeRange === '30d' ? ' is-active' : ''}`}
+              className={`chart-pill-btn${timeRange === '30d' ? ' is-active' : ''}`}
               onClick={() => setTimeRange('30d')}
             >
               30D
@@ -171,17 +193,31 @@ function CashflowChart({ data = [], currencySymbol = 'Rs.' }) {
         </div>
       </div>
 
-      {/* Legend */}
-      <div className="cashflow-chart-legend" style={{ justifyContent: 'flex-start', flexWrap: 'wrap' }}>
-        <span className="cashflow-legend-item">
-          <span className="cashflow-legend-dot is-sales" /> Sales In (Customer)
+      {/* Mode Subtitle & Legend */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.4rem', fontSize: '0.78rem' }}>
+        <span style={{ color: 'var(--text-muted)' }}>
+          {chartMode === 'bars'
+            ? 'Green = Sales Revenue (In) · Red = Saudia Buying Cost (Out)'
+            : chartMode === 'trend'
+            ? 'Daily Net Profit (Sales − Saudia Costs)'
+            : 'Running Cumulative Net Profit'}
         </span>
-        <span className="cashflow-legend-item">
-          <span className="cashflow-legend-dot is-buying" /> Saudia Buying (Cost)
-        </span>
-        <span className="cashflow-legend-item">
-          <span className="cashflow-legend-dot is-profit" /> Net Profit Line
-        </span>
+        <div className="cashflow-chart-legend" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          {chartMode === 'bars' ? (
+            <>
+              <span className="cashflow-legend-item">
+                <span className="cashflow-legend-dot is-sales" /> Sales In
+              </span>
+              <span className="cashflow-legend-item">
+                <span className="cashflow-legend-dot is-buying" /> Saudia Out
+              </span>
+            </>
+          ) : (
+            <span className="cashflow-legend-item">
+              <span className="cashflow-legend-dot is-profit" /> Net Profit Line
+            </span>
+          )}
+        </div>
       </div>
 
       {/* 2. Responsive Interactive SVG Chart */}
@@ -313,15 +349,15 @@ function CashflowChart({ data = [], currencySymbol = 'Rs.' }) {
               {/* Gradient Area Fill */}
               {areaPathStr && <path d={areaPathStr} fill="url(#profitAreaGrad)" />}
 
-              {/* Glowing Line */}
-              {polylineStr && (
-                <polyline
+              {/* Glowing Curved Spline Line */}
+              {splineLineStr && (
+                <path
+                  d={splineLineStr}
                   fill="none"
                   stroke="#0ea5e9"
-                  strokeWidth="2.5"
+                  strokeWidth="3"
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  points={polylineStr}
                 />
               )}
 
