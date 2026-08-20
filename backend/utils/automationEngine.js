@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { pakistanToday, pakistanNowTime } from '../pakistan.js';
+import { pakistanToday, pakistanNowTime, addDaysToDateString } from '../pakistan.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -70,39 +70,94 @@ export async function performAutoBackup(dbAll) {
 }
 
 /**
- * Builds the Executive WhatsApp / Telegram Daily Business Summary
+ * Builds Executive Business Summary for Any Period (Daily, Weekly, Monthly, All-Time, Custom Dates)
  */
-export async function generateDailyBrief(dbAll, targetDate = pakistanToday(), currencySymbol = 'Rs.') {
-  // 1. Sales Bills today
+export async function generateBusinessBrief(dbAll, options = {}) {
+  const {
+    period = 'today', // 'today' | 'week' | 'month' | 'all' | 'custom'
+    startDate,
+    endDate,
+    currencySymbol = 'Rs.',
+  } = options;
+
+  const today = pakistanToday();
+  let start = today;
+  let end = today;
+  let periodTitle = 'DAILY BUSINESS REPORT';
+  let dateRangeLabel = today;
+
+  if (period === 'week') {
+    start = addDaysToDateString(today, -6); // 7 calendar days
+    end = today;
+    periodTitle = 'WEEKLY BUSINESS REPORT';
+    dateRangeLabel = `${start} to ${end} (Last 7 Days)`;
+  } else if (period === 'month') {
+    start = `${today.slice(0, 7)}-01`; // 1st of current month
+    end = today;
+    periodTitle = 'MONTHLY BUSINESS REPORT';
+    dateRangeLabel = `${start} to ${end} (This Month)`;
+  } else if (period === 'all') {
+    start = null;
+    end = null;
+    periodTitle = 'ALL-TIME BUSINESS REPORT';
+    dateRangeLabel = 'Complete Lifetime History';
+  } else if (period === 'custom') {
+    start = startDate || today;
+    end = endDate || today;
+    periodTitle = 'CUSTOM PERIOD BUSINESS REPORT';
+    dateRangeLabel = `${start} to ${end}`;
+  }
+
+  // Build query filter
+  let billDateWhere = '';
+  let paymentDateWhere = '';
+  const billParams = [];
+  const paymentParams = [];
+
+  if (start && end) {
+    billDateWhere = 'AND bill_date BETWEEN ? AND ?';
+    billParams.push(start, end);
+    paymentDateWhere = 'WHERE bp.payment_date BETWEEN ? AND ?';
+    paymentParams.push(start, end);
+  }
+
+  // 1. Sales Bills in range
   const salesBills = await dbAll(
-    `SELECT * FROM bills WHERE bill_date = ? AND (bill_type IS NULL OR bill_type = 'customer' OR bill_type = '') AND status != 'cancelled'`,
-    [targetDate]
+    `SELECT * FROM bills 
+     WHERE (bill_type IS NULL OR bill_type = 'customer' OR bill_type = '') 
+       AND status != 'cancelled' 
+       ${billDateWhere}`,
+    billParams
   );
   const totalSales = salesBills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
   const salesPaid = salesBills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
   const salesDue = Math.max(0, totalSales - salesPaid);
 
-  // 2. Saudia Buying Bills today
+  // 2. Saudia Buying Bills in range
   const buyingBills = await dbAll(
-    `SELECT * FROM bills WHERE bill_date = ? AND bill_type = 'supplier' AND status != 'cancelled'`,
-    [targetDate]
+    `SELECT * FROM bills 
+     WHERE bill_type = 'supplier' 
+       AND status != 'cancelled' 
+       ${billDateWhere}`,
+    billParams
   );
   const totalBuying = buyingBills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
   const buyingPaid = buyingBills.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
   const buyingDue = Math.max(0, totalBuying - buyingPaid);
 
-  // 3. Daily Net Operating Profit = Sales - Buying
-  const netDailyProfit = totalSales - totalBuying;
-  const profitMarginPct = totalSales > 0 ? ((netDailyProfit / totalSales) * 100).toFixed(1) : '0.0';
+  // 3. Operating Net Profit = Sales - Buying
+  const netProfit = totalSales - totalBuying;
+  const profitMarginPct = totalSales > 0 ? ((netProfit / totalSales) * 100).toFixed(1) : '0.0';
 
-  // 4. Payments received today (across all bills)
-  const paymentsToday = await dbAll(
+  // 4. Cash Collections received in range
+  const paymentsInRange = await dbAll(
     `SELECT bp.*, b.bill_type, b.customer_name FROM bill_payments bp 
      JOIN bills b ON bp.bill_id = b.id 
-     WHERE bp.payment_date = ? AND (b.status != 'cancelled' OR b.status IS NULL)`,
-    [targetDate]
+     ${paymentDateWhere}
+     ${paymentDateWhere ? 'AND' : 'WHERE'} (b.status != 'cancelled' OR b.status IS NULL)`,
+    paymentParams
   );
-  const totalCashCollected = paymentsToday
+  const totalCashCollected = paymentsInRange
     .filter((p) => p.bill_type !== 'supplier' && p.bill_type !== 'help' && p.bill_type !== 'loan')
     .reduce((s, p) => s + (Number(p.amount) || 0), 0);
 
@@ -113,25 +168,24 @@ export async function generateDailyBrief(dbAll, targetDate = pakistanToday(), cu
        AND status != 'cancelled' 
        AND (total_amount - amount_paid) > 0 
        AND due_date IS NOT NULL AND due_date < ?`,
-    [targetDate]
+    [today]
   );
   const totalOverdueAmount = overdueBills.reduce((s, b) => s + Math.max(0, (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0)), 0);
 
   const formattedSales = `${currencySymbol} ${totalSales.toLocaleString('en-PK')}`;
   const formattedBuying = `${currencySymbol} ${totalBuying.toLocaleString('en-PK')}`;
-  const formattedProfit = `${currencySymbol} ${netDailyProfit.toLocaleString('en-PK')}`;
+  const formattedProfit = `${currencySymbol} ${netProfit.toLocaleString('en-PK')}`;
   const formattedCollections = `${currencySymbol} ${totalCashCollected.toLocaleString('en-PK')}`;
   const formattedOverdue = `${currencySymbol} ${totalOverdueAmount.toLocaleString('en-PK')}`;
 
-  // Formatted WhatsApp Text
-  const messageText = `📊 *DAILY ONLINE BUSINESS REPORT*
-📅 *Date:* ${targetDate}
+  const messageText = `📊 *${periodTitle}*
+📅 *Period:* ${dateRangeLabel}
 ⏰ *Generated:* ${pakistanNowTime()}
 
 ━━━━━━━━━━━━━━━━━━━━
 📈 *Online Sales:* ${formattedSales} (${salesBills.length} orders)
 📦 *Saudia Purchases:* ${formattedBuying} (${buyingBills.length} bills)
-💰 *Net Daily Profit:* ${formattedProfit} (${profitMarginPct}% margin)
+💰 *Net Operating Profit:* ${formattedProfit} (${profitMarginPct}% margin)
 ━━━━━━━━━━━━━━━━━━━━
 💵 *Collections Received:* ${formattedCollections}
 ⏳ *Overdue Dues Pending:* ${formattedOverdue} (${overdueBills.length} client bills)
@@ -139,14 +193,18 @@ export async function generateDailyBrief(dbAll, targetDate = pakistanToday(), cu
 ✅ *Accounting Status:* Accrual & Online-first reconciled.`;
 
   return {
-    date: targetDate,
+    period,
+    startDate: start,
+    endDate: end,
+    dateRangeLabel,
+    periodTitle,
     time: pakistanNowTime(),
     metrics: {
       totalSales,
       salesCount: salesBills.length,
       totalBuying,
       buyingCount: buyingBills.length,
-      netDailyProfit,
+      netProfit,
       profitMarginPct,
       totalCashCollected,
       totalOverdueAmount,

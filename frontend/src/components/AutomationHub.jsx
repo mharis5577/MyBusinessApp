@@ -14,11 +14,12 @@ import {
   RefreshCw,
   Bell,
   HardDriveDownload,
-  Zap
+  Zap,
+  Filter
 } from 'lucide-react';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
-import { formatCurrency } from '../utils/pakistan';
+import { formatCurrency, pakistanToday } from '../utils/pakistan';
 import { openWhatsAppReminder, normalizeWhatsAppPhone } from '../utils/paymentReminder';
 import { playSuccessChime, playTapSound } from '../utils/audioEffects';
 
@@ -30,9 +31,12 @@ export default function AutomationHub({
 }) {
   const toast = useToast();
   const [activeTab, setActiveTab] = useState(initialTab);
+  const [period, setPeriod] = useState('today'); // 'today' | 'week' | 'month' | 'all' | 'custom'
+  const [startDate, setStartDate] = useState(pakistanToday());
+  const [endDate, setEndDate] = useState(pakistanToday());
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [dailyBrief, setDailyBrief] = useState(null);
+  const [businessBrief, setBusinessBrief] = useState(null);
   const [overdueQueue, setOverdueQueue] = useState([]);
   const [backupRunning, setBackupRunning] = useState(false);
   const [backupSuccessMsg, setBackupSuccessMsg] = useState('');
@@ -40,22 +44,38 @@ export default function AutomationHub({
   useEffect(() => {
     if (open) {
       setActiveTab(initialTab);
-      fetchDailyBrief();
+      fetchBrief(period, startDate, endDate);
       fetchOverdueQueue();
     }
   }, [open, initialTab]);
 
-  const fetchDailyBrief = async () => {
+  const fetchBrief = async (p = period, sDate = startDate, eDate = endDate) => {
     setLoading(true);
     try {
-      const res = await apiFetch(`/api/automation/daily-brief?currency=${encodeURIComponent(currencySymbol)}`);
+      let query = `/api/automation/daily-brief?period=${p}&currency=${encodeURIComponent(currencySymbol)}`;
+      if (p === 'custom') {
+        query += `&startDate=${sDate}&endDate=${eDate}`;
+      }
+      const res = await apiFetch(query);
       const data = await res.json();
-      if (res.ok) setDailyBrief(data);
+      if (res.ok) setBusinessBrief(data);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePeriodChange = (newPeriod) => {
+    playTapSound();
+    setPeriod(newPeriod);
+    fetchBrief(newPeriod, startDate, endDate);
+  };
+
+  const handleCustomApply = (e) => {
+    e.preventDefault();
+    playTapSound();
+    fetchBrief('custom', startDate, endDate);
   };
 
   const fetchOverdueQueue = async () => {
@@ -69,18 +89,18 @@ export default function AutomationHub({
   };
 
   const handleCopyBrief = () => {
-    if (!dailyBrief?.messageText) return;
-    navigator.clipboard.writeText(dailyBrief.messageText);
+    if (!businessBrief?.messageText) return;
+    navigator.clipboard.writeText(businessBrief.messageText);
     setCopied(true);
     playSuccessChime();
-    toast.success('Daily brief copied to clipboard!');
+    toast.success('Business brief copied to clipboard!');
     setTimeout(() => setCopied(false), 3000);
   };
 
   const handleSendBriefWhatsApp = () => {
-    if (!dailyBrief?.messageText) return;
+    if (!businessBrief?.messageText) return;
     playTapSound();
-    const encoded = encodeURIComponent(dailyBrief.messageText);
+    const encoded = encodeURIComponent(businessBrief.messageText);
     window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
   };
 
@@ -119,7 +139,7 @@ export default function AutomationHub({
     <div className="client-modal-overlay" onClick={onClose}>
       <div
         className="client-modal-card"
-        style={{ maxWidth: '640px', padding: '1.5rem' }}
+        style={{ maxWidth: '680px', padding: '1.5rem' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
@@ -129,8 +149,8 @@ export default function AutomationHub({
               <Zap size={18} />
             </div>
             <div>
-              <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>Automation & Executive Reports</h3>
-              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0 }}>Automate your daily profit brief, overdue reminders, and database backups.</p>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>Executive Business Reports & Automation</h3>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0 }}>Daily, Weekly, Monthly & Custom Date Profit Reports, Overdue Reminders, and Auto-Backups.</p>
             </div>
           </div>
           <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.55rem' }} onClick={onClose}>
@@ -138,7 +158,7 @@ export default function AutomationHub({
           </button>
         </div>
 
-        {/* Tab Switcher */}
+        {/* Main Tab Switcher */}
         <div className="chart-pill-group" style={{ marginBottom: '1.25rem', width: '100%', display: 'flex' }}>
           <button
             type="button"
@@ -146,7 +166,7 @@ export default function AutomationHub({
             style={{ flex: 1, textAlign: 'center', padding: '0.45rem' }}
             onClick={() => setActiveTab('brief')}
           >
-            📊 Daily Business Brief
+            📊 Business Brief & Profit
           </button>
           <button
             type="button"
@@ -166,46 +186,126 @@ export default function AutomationHub({
           </button>
         </div>
 
-        {/* TAB 1: DAILY BUSINESS BRIEF */}
+        {/* TAB 1: EXECUTIVE BUSINESS BRIEF & PROFIT */}
         {activeTab === 'brief' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {dailyBrief && (
+            {/* Period Switcher Pills */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div className="chart-pill-group" style={{ margin: 0 }}>
+                <button
+                  type="button"
+                  className={`chart-pill-btn${period === 'today' ? ' is-active' : ''}`}
+                  onClick={() => handlePeriodChange('today')}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  className={`chart-pill-btn${period === 'week' ? ' is-active' : ''}`}
+                  onClick={() => handlePeriodChange('week')}
+                >
+                  Weekly (7D)
+                </button>
+                <button
+                  type="button"
+                  className={`chart-pill-btn${period === 'month' ? ' is-active' : ''}`}
+                  onClick={() => handlePeriodChange('month')}
+                >
+                  Monthly
+                </button>
+                <button
+                  type="button"
+                  className={`chart-pill-btn${period === 'all' ? ' is-active' : ''}`}
+                  onClick={() => handlePeriodChange('all')}
+                >
+                  All Time
+                </button>
+                <button
+                  type="button"
+                  className={`chart-pill-btn${period === 'custom' ? ' is-active' : ''}`}
+                  onClick={() => handlePeriodChange('custom')}
+                >
+                  Custom Dates
+                </button>
+              </div>
+
+              <span style={{ fontSize: '0.78rem', color: 'var(--accent-teal)', fontWeight: 700 }}>
+                {businessBrief?.dateRangeLabel || ''}
+              </span>
+            </div>
+
+            {/* Custom Date Range Picker */}
+            {period === 'custom' && (
+              <form onSubmit={handleCustomApply} style={{ display: 'flex', gap: '0.65rem', alignItems: 'flex-end', background: 'var(--surface-muted)', padding: '0.75rem', borderRadius: 8, border: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
+                <div className="form-group" style={{ margin: 0, flex: '1 1 140px' }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Start Date</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0, flex: '1 1 140px' }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>End Date</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <button type="submit" className="btn-primary" style={{ width: 'auto', padding: '0.5rem 1rem', fontSize: '0.82rem' }}>
+                  Apply Dates
+                </button>
+              </form>
+            )}
+
+            {businessBrief && (
               <>
                 {/* Metrics Highlights */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.65rem' }}>
                   <div style={{ background: 'var(--surface-muted)', padding: '0.75rem', borderRadius: 8, border: '1px solid var(--border-color)' }}>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 650 }}>Online Sales</div>
                     <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: 2 }}>
-                      {formatCurrency(currencySymbol, dailyBrief.metrics?.totalSales || 0)}
+                      {formatCurrency(currencySymbol, businessBrief.metrics?.totalSales || 0)}
                     </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{businessBrief.metrics?.salesCount || 0} orders</div>
                   </div>
 
                   <div style={{ background: 'var(--surface-muted)', padding: '0.75rem', borderRadius: 8, border: '1px solid var(--border-color)' }}>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 650 }}>Saudia Buying</div>
                     <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#f43f5e', marginTop: 2 }}>
-                      {formatCurrency(currencySymbol, dailyBrief.metrics?.totalBuying || 0)}
+                      {formatCurrency(currencySymbol, businessBrief.metrics?.totalBuying || 0)}
                     </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{businessBrief.metrics?.buyingCount || 0} purchases</div>
                   </div>
 
                   <div style={{ background: 'rgba(16, 185, 129, 0.08)', padding: '0.75rem', borderRadius: 8, border: '1px solid rgba(16, 185, 129, 0.25)' }}>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--success)', fontWeight: 650 }}>Daily Net Profit</div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--success)', fontWeight: 650 }}>Operating Profit</div>
                     <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--success)', marginTop: 2 }}>
-                      {formatCurrency(currencySymbol, dailyBrief.metrics?.netDailyProfit || 0)}
+                      {formatCurrency(currencySymbol, businessBrief.metrics?.netProfit || 0)}
                     </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--success)', fontWeight: 700 }}>{businessBrief.metrics?.profitMarginPct || '0.0'}% margin</div>
                   </div>
 
                   <div style={{ background: 'var(--surface-muted)', padding: '0.75rem', borderRadius: 8, border: '1px solid var(--border-color)' }}>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 650 }}>Collections In</div>
                     <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--accent-teal)', marginTop: 2 }}>
-                      {formatCurrency(currencySymbol, dailyBrief.metrics?.totalCashCollected || 0)}
+                      {formatCurrency(currencySymbol, businessBrief.metrics?.totalCashCollected || 0)}
                     </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Cash received</div>
                   </div>
                 </div>
 
                 {/* Pre-formatted WhatsApp text box */}
                 <div style={{ position: 'relative' }}>
                   <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>WhatsApp Brief Message</span>
+                    <span>WhatsApp Brief Message ({businessBrief.periodTitle})</span>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Ready to share</span>
                   </label>
                   <pre
@@ -219,12 +319,12 @@ export default function AutomationHub({
                       color: 'var(--text-primary)',
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
-                      maxHeight: '200px',
+                      maxHeight: '180px',
                       overflowY: 'auto',
                       margin: 0,
                     }}
                   >
-                    {dailyBrief.messageText}
+                    {businessBrief.messageText}
                   </pre>
                 </div>
 
@@ -254,7 +354,7 @@ export default function AutomationHub({
                     className="btn-secondary"
                     style={{ width: 'auto', padding: '0.55rem' }}
                     title="Refresh report"
-                    onClick={fetchDailyBrief}
+                    onClick={() => fetchBrief(period, startDate, endDate)}
                   >
                     <RefreshCw size={15} className={loading ? 'spin' : ''} />
                   </button>

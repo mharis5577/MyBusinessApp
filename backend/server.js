@@ -5,8 +5,7 @@ import { pakistanToday, pakistanYearMonth, pakistanNowTime, addDaysToDateString,
 import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from './utils/paymentMethods.js';
 import { normalizeBillType, invoicePrefixForType, partyTypeForBill, outstandingByPartyName } from './utils/billTypes.js';
 import { saleOverviewTotals } from './utils/dashboardStats.js';
-import { isDemoBill, isDemoCustomer } from './utils/demoData.js';
-import { performAutoBackup, generateDailyBrief, getOverdueQueue } from './utils/automationEngine.js';
+import { performAutoBackup, generateBusinessBrief, getOverdueQueue } from './utils/automationEngine.js';
 
 const app = express();
 const PORT = process.env.PORT || 11000;
@@ -2243,9 +2242,13 @@ app.get('/api/cashflow', async (req, res) => {
 // -------------------------------------------------------------
 app.get('/api/automation/daily-brief', async (req, res) => {
   try {
-    const targetDate = req.query.date || pakistanToday();
-    const currency = req.query.currency || 'Rs.';
-    const brief = await generateDailyBrief(dbAll, targetDate, currency);
+    const { period = 'today', startDate, endDate, date, currency = 'Rs.' } = req.query;
+    const brief = await generateBusinessBrief(dbAll, {
+      period,
+      startDate: startDate || date,
+      endDate: endDate || date,
+      currencySymbol: currency,
+    });
     res.json(brief);
   } catch (err) {
     res.status(500).json({ error: err.message });
