@@ -4905,6 +4905,125 @@ body {
   box-shadow: 0 8px 32px rgba(239, 68, 68, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
+/* Cashflow Analytics Chart Styles */
+.cashflow-chart-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  background: var(--surface-muted);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 14px);
+  padding: 1.15rem 1.25rem;
+}
+
+.cashflow-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.cashflow-chart-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cashflow-chart-title {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.cashflow-chart-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.chart-pill-group {
+  display: inline-flex;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.chart-pill-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 0.28rem 0.65rem;
+  font-size: 0.76rem;
+  font-weight: 750;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.chart-pill-btn:hover {
+  color: var(--text-primary);
+}
+
+.chart-pill-btn.is-active {
+  background: var(--accent-teal, #00b3a6);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 179, 166, 0.3);
+}
+
+.cashflow-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.cashflow-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 650;
+}
+
+.cashflow-legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+}
+
+.cashflow-legend-dot.is-sales {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.45);
+}
+
+.cashflow-legend-dot.is-buying {
+  background: #f43f5e;
+  box-shadow: 0 0 6px rgba(244, 63, 94, 0.45);
+}
+
+.cashflow-legend-dot.is-profit {
+  background: #0ea5e9;
+  box-shadow: 0 0 8px rgba(14, 165, 233, 0.6);
+}
+
+.cashflow-chart-svg-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 8px;
+  padding: 0.25rem 0;
+}
+
+.cashflow-bar-group {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
 .dashboard-dropdowns {
   display: flex;
   flex-direction: column;
