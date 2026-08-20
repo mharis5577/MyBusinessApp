@@ -6916,13 +6916,14 @@ button.dashboard-recent-item {
   background: rgba(239, 68, 68, 0.2);
 }
 
-/* Modal Overlay for Add Client */
+/* Modal Overlay for Add Client & Automation Hub */
 .client-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(8px);
-  z-index: 1050;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 25000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -6932,14 +6933,28 @@ button.dashboard-recent-item {
 
 .client-modal-card {
   width: 100%;
-  max-width: 540px;
-  max-height: 90vh;
+  max-width: 580px;
+  max-height: min(88vh, calc(100dvh - 2.5rem));
   overflow-y: auto;
   background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg, 16px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-lg, 18px);
   padding: 1.5rem;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  position: relative;
+  z-index: 25001;
+  margin: auto;
+}
+
+@media (max-width: 600px) {
+  .client-modal-overlay {
+    padding: 0.75rem;
+    align-items: center;
+  }
+  .client-modal-card {
+    padding: 1.15rem;
+    max-height: calc(100dvh - 2rem);
+  }
 }
 
 .client-ledger-stats {
