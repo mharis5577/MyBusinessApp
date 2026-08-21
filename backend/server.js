@@ -2274,6 +2274,412 @@ app.post('/api/automation/run-backup', async (req, res) => {
   }
 });
 
+// =============================================================
+// PARTNER EQUITY & PROFIT DIVIDER APIS (Nomi & Haris 50/50)
+// =============================================================
+
+// 1. Get all partners with lifetime & current unsettled balances
+app.get('/api/partners', async (req, res) => {
+  try {
+    let partners = await dbAll('SELECT * FROM partners WHERE is_active = 1 ORDER BY id ASC');
+    if (!partners || partners.length === 0) {
+      await dbRun(`
+        INSERT INTO partners (name, phone, profit_share_pct, bank_name, account_title, account_number)
+        VALUES 
+          ('Nomi', '+923000000000', 50.0, 'Meezan Bank', 'Nomi', ''),
+          ('Haris', '+923337669709', 50.0, 'Meezan Bank / HBL', 'ELITE CHOCOLATE', '03337669709')
+      `);
+      partners = await dbAll('SELECT * FROM partners WHERE is_active = 1 ORDER BY id ASC');
+    }
+
+    // Lifetime profit totals
+    const salesRow = await dbGet(
+      `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills 
+       WHERE (bill_type IS NULL OR bill_type = 'customer' OR bill_type = '') AND status != 'cancelled'`
+    );
+    const buyingRow = await dbGet(
+      `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills 
+       WHERE bill_type = 'supplier' AND status != 'cancelled'`
+    );
+
+    const lifetimeSales = Number(salesRow?.total) || 0;
+    const lifetimeBuying = Number(buyingRow?.total) || 0;
+    const lifetimeNetProfit = lifetimeSales - lifetimeBuying;
+
+    // Last settlement checkpoint
+    const lastSettlement = await dbGet(
+      'SELECT * FROM partner_settlements ORDER BY id DESC LIMIT 1'
+    );
+
+    // Unsettled period profit (since last settlement if one exists)
+    let unsettledWhereSales = "(bill_type IS NULL OR bill_type = 'customer' OR bill_type = '') AND status != 'cancelled'";
+    let unsettledWhereBuying = "bill_type = 'supplier' AND status != 'cancelled'";
+    const unsettledParams = [];
+
+    if (lastSettlement && lastSettlement.period_end) {
+      unsettledWhereSales += ' AND (bill_date > ? OR (bill_date = ? AND id > ?))';
+      unsettledWhereBuying += ' AND (bill_date > ? OR (bill_date = ? AND id > ?))';
+      const lastDate = lastSettlement.period_end;
+      const lastId = Number(lastSettlement.last_bill_id) || 0;
+      unsettledParams.push(lastDate, lastDate, lastId);
+    }
+
+    const unsettledSalesRow = await dbGet(
+      `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills WHERE ${unsettledWhereSales}`,
+      unsettledParams
+    );
+    const unsettledBuyingRow = await dbGet(
+      `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills WHERE ${unsettledWhereBuying}`,
+      unsettledParams
+    );
+
+    const unsettledSales = Number(unsettledSalesRow?.total) || 0;
+    const unsettledBuying = Number(unsettledBuyingRow?.total) || 0;
+    const unsettledNetProfit = unsettledSales - unsettledBuying;
+
+    // Process each partner's ledger stats
+    const enrichedPartners = await Promise.all(
+      partners.map(async (p) => {
+        const sharePct = Number(p.profit_share_pct) || 50.0;
+        const openingBalance = Number(p.opening_balance) || 0;
+
+        const payoutRow = await dbGet(
+          `SELECT COALESCE(SUM(amount), 0) as total FROM partner_transactions 
+           WHERE partner_id = ? AND type = 'payout'`,
+          [p.id]
+        );
+        const capitalInRow = await dbGet(
+          `SELECT COALESCE(SUM(amount), 0) as total FROM partner_transactions 
+           WHERE partner_id = ? AND type = 'capital_in'`,
+          [p.id]
+        );
+
+        const totalPayouts = Number(payoutRow?.total) || 0;
+        const totalCapitalIn = Number(capitalInRow?.total) || 0;
+        const lifetimeEarnedShare = Math.round(((lifetimeNetProfit * sharePct) / 100) * 100) / 100;
+        const unsettledEarnedShare = Math.round(((unsettledNetProfit * sharePct) / 100) * 100) / 100;
+
+        // Current available balance
+        const currentBalance = Math.round(
+          (lifetimeEarnedShare + totalCapitalIn + openingBalance - totalPayouts) * 100
+        ) / 100;
+
+        return {
+          ...p,
+          profit_share_pct: sharePct,
+          opening_balance: openingBalance,
+          lifetime_earned_share: lifetimeEarnedShare,
+          unsettled_earned_share: unsettledEarnedShare,
+          total_payouts: totalPayouts,
+          total_capital_in: totalCapitalIn,
+          current_balance: currentBalance,
+        };
+      })
+    );
+
+    res.json({
+      partners: enrichedPartners,
+      business_totals: {
+        lifetime_sales: lifetimeSales,
+        lifetime_buying: lifetimeBuying,
+        lifetime_net_profit: lifetimeNetProfit,
+        unsettled_sales: unsettledSales,
+        unsettled_buying: unsettledBuying,
+        unsettled_net_profit: unsettledNetProfit,
+      },
+      last_settlement: lastSettlement || null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Update partner details
+app.put('/api/partners/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, phone, profit_share_pct, bank_name, account_title, account_number, opening_balance } = req.body;
+    await dbRun(
+      `UPDATE partners SET 
+        name = COALESCE(?, name),
+        phone = COALESCE(?, phone),
+        profit_share_pct = COALESCE(?, profit_share_pct),
+        bank_name = COALESCE(?, bank_name),
+        account_title = COALESCE(?, account_title),
+        account_number = COALESCE(?, account_number),
+        opening_balance = COALESCE(?, opening_balance)
+       WHERE id = ?`,
+      [name, phone, profit_share_pct, bank_name, account_title, account_number, opening_balance, id]
+    );
+    const updated = await dbGet('SELECT * FROM partners WHERE id = ?', [id]);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Custom Profit Breakdown & Order/Shipment Ledger Calculator
+app.get('/api/partners/profit-breakdown', async (req, res) => {
+  try {
+    const { startDate, endDate, sinceLastSettlement } = req.query;
+    const partners = await dbAll('SELECT * FROM partners WHERE is_active = 1 ORDER BY id ASC');
+
+    const lastSettlement = await dbGet(
+      'SELECT * FROM partner_settlements ORDER BY id DESC LIMIT 1'
+    );
+
+    let whereClause = "status != 'cancelled'";
+    const params = [];
+
+    if (sinceLastSettlement === 'true' && lastSettlement) {
+      if (lastSettlement.last_bill_id && lastSettlement.period_end) {
+        whereClause += ' AND (bill_date > ? OR (bill_date = ? AND id > ?))';
+        params.push(lastSettlement.period_end, lastSettlement.period_end, lastSettlement.last_bill_id);
+      } else if (lastSettlement.period_end) {
+        whereClause += ' AND bill_date > ?';
+        params.push(lastSettlement.period_end);
+      }
+    } else {
+      if (startDate) {
+        whereClause += ' AND bill_date >= ?';
+        params.push(startDate);
+      }
+      if (endDate) {
+        whereClause += ' AND bill_date <= ?';
+        params.push(endDate);
+      }
+    }
+
+    // Fetch all qualifying orders/bills
+    const rawBills = await dbAll(
+      `SELECT id, bill_type, invoice_number, customer_name, customer_phone, bill_date, total_amount, amount_paid, status, notes
+       FROM bills 
+       WHERE ${whereClause}
+       ORDER BY bill_date DESC, id DESC`,
+      params
+    );
+
+    let totalSales = 0;
+    let totalBuying = 0;
+    let salesCount = 0;
+    let buyingCount = 0;
+
+    const orders = rawBills.map((b) => {
+      const t = normalizeBillType(b.bill_type);
+      const isSupplier = t === 'supplier';
+      const isHelp = t === 'help' || t === 'loan';
+      const amount = Number(b.total_amount) || 0;
+
+      if (isSupplier) {
+        totalBuying += amount;
+        buyingCount += 1;
+      } else if (!isHelp) {
+        totalSales += amount;
+        salesCount += 1;
+      }
+
+      const profitEffect = isHelp ? 0 : isSupplier ? -amount : amount;
+
+      return {
+        id: b.id,
+        invoice_number: b.invoice_number,
+        bill_date: b.bill_date,
+        customer_name: b.customer_name,
+        customer_phone: b.customer_phone || '',
+        bill_type: t,
+        is_supplier: isSupplier,
+        is_help: isHelp,
+        total_amount: amount,
+        amount_paid: Number(b.amount_paid) || 0,
+        status: b.status,
+        notes: b.notes || '',
+        profit_effect: profitEffect,
+      };
+    });
+
+    const netProfit = totalSales - totalBuying;
+    const profitMarginPct = totalSales > 0 ? Number(((netProfit / totalSales) * 100).toFixed(1)) : 0.0;
+
+    // Partner Splits for this filtered period
+    const partnerSplits = partners.map((p) => {
+      const sharePct = Number(p.profit_share_pct) || 50.0;
+      const shareAmount = Math.round(((netProfit * sharePct) / 100) * 100) / 100;
+      return {
+        id: p.id,
+        name: p.name,
+        profit_share_pct: sharePct,
+        share_amount: shareAmount,
+      };
+    });
+
+    // Determine earliest and latest bill dates in this dataset
+    const sortedDates = rawBills.map((b) => b.bill_date).filter(Boolean).sort();
+    const effectiveStart = startDate || (sortedDates.length > 0 ? sortedDates[0] : '');
+    const effectiveEnd = endDate || (sortedDates.length > 0 ? sortedDates[sortedDates.length - 1] : '');
+    const maxBillId = rawBills.length > 0 ? Math.max(...rawBills.map((b) => b.id)) : null;
+
+    res.json({
+      period: {
+        startDate: effectiveStart,
+        endDate: effectiveEnd,
+        sinceLastSettlement: sinceLastSettlement === 'true',
+      },
+      summary: {
+        total_sales: totalSales,
+        sales_count: salesCount,
+        total_buying: totalBuying,
+        buying_count: buyingCount,
+        net_profit: netProfit,
+        profit_margin_pct: profitMarginPct,
+        max_bill_id: maxBillId,
+      },
+      partner_splits: partnerSplits,
+      orders,
+      last_settlement: lastSettlement || null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Create a Settlement Marker / Checkpoint
+app.post('/api/partners/settlements', async (req, res) => {
+  try {
+    const {
+      period_start,
+      period_end,
+      last_bill_id,
+      last_bill_date,
+      total_sales,
+      total_buying,
+      net_profit,
+      nomi_share,
+      haris_share,
+      notes,
+      created_by,
+    } = req.body;
+
+    const dateStr = pakistanToday().replace(/-/g, '');
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const settlement_code = `SETTL-${dateStr}-${randomSuffix}`;
+
+    const result = await dbRun(
+      `INSERT INTO partner_settlements (
+        settlement_code, period_start, period_end, last_bill_id, last_bill_date,
+        total_sales, total_buying, net_profit, nomi_share, haris_share, notes, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        settlement_code,
+        period_start || '',
+        period_end || pakistanToday(),
+        last_bill_id || null,
+        last_bill_date || period_end || '',
+        Number(total_sales) || 0,
+        Number(total_buying) || 0,
+        Number(net_profit) || 0,
+        Number(nomi_share) || 0,
+        Number(haris_share) || 0,
+        notes || '',
+        created_by || 'Owner',
+      ]
+    );
+
+    const created = await dbGet('SELECT * FROM partner_settlements WHERE id = ?', [result.lastID]);
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. List historical Settlement Checkpoints
+app.get('/api/partners/settlements', async (req, res) => {
+  try {
+    const settlements = await dbAll(
+      'SELECT * FROM partner_settlements ORDER BY id DESC'
+    );
+    res.json(settlements);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. Delete a settlement checkpoint
+app.delete('/api/partners/settlements/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await dbRun('DELETE FROM partner_settlements WHERE id = ?', [id]);
+    res.json({ success: true, message: 'Settlement checkpoint removed.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7. Record a Partner Transaction / Payout / Capital Addition
+app.post('/api/partners/payouts', async (req, res) => {
+  try {
+    const { partner_id, amount, transaction_date, payment_method, notes, type, screenshot_path } = req.body;
+    if (!partner_id || !amount || Number(amount) <= 0) {
+      return res.status(400).json({ error: 'Valid partner and amount are required.' });
+    }
+
+    const txDate = transaction_date || pakistanToday();
+    const txType = type || 'payout';
+
+    const result = await dbRun(
+      `INSERT INTO partner_transactions (
+        partner_id, type, amount, transaction_date, payment_method, notes, screenshot_path
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        partner_id,
+        txType,
+        Number(amount),
+        txDate,
+        payment_method || 'Bank Transfer',
+        notes || '',
+        screenshot_path || '',
+      ]
+    );
+
+    const created = await dbGet(
+      `SELECT pt.*, p.name as partner_name 
+       FROM partner_transactions pt 
+       JOIN partners p ON pt.partner_id = p.id 
+       WHERE pt.id = ?`,
+      [result.lastID]
+    );
+
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 8. List all Partner Payouts
+app.get('/api/partners/payouts', async (req, res) => {
+  try {
+    const payouts = await dbAll(
+      `SELECT pt.*, p.name as partner_name, p.profit_share_pct 
+       FROM partner_transactions pt 
+       JOIN partners p ON pt.partner_id = p.id 
+       ORDER BY pt.transaction_date DESC, pt.id DESC`
+    );
+    res.json(payouts);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 9. Delete a Partner Payout
+app.delete('/api/partners/payouts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await dbRun('DELETE FROM partner_transactions WHERE id = ?', [id]);
+    res.json({ success: true, message: 'Transaction removed.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Nightly background auto-backup scheduler
 let lastAutoBackupDate = null;
 setTimeout(async () => {

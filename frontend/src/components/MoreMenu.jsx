@@ -1,4 +1,4 @@
-import { ArrowDownUp, Settings, X, Download, Sparkles, Clock, StickyNote } from 'lucide-react';
+import { ArrowDownUp, Settings, X, Download, Sparkles, Clock, StickyNote, Users2 } from 'lucide-react';
 import { DeveloperCredit } from './BrandMark';
 
 export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, activeTab }) {
@@ -22,6 +22,18 @@ export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, acti
         <p className="more-menu-section-label">
           <Sparkles size={13} /> Extras
         </p>
+
+        <button
+          type="button"
+          className={`more-menu-item ${activeTab === 'partners' ? 'active' : ''}`}
+          onClick={() => go('partners')}
+        >
+          <Users2 size={20} style={{ color: 'var(--accent-teal)' }} />
+          <span>
+            <strong>Partners & 50/50 Profit</strong>
+            <small>Nomi & Haris dividend · Settlements</small>
+          </span>
+        </button>
 
         <button
           type="button"

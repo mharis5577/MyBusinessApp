@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   Zap,
   Bell,
+  Users2,
 } from 'lucide-react';
 import { downloadDailyProfitSummaryPdf } from '../utils/tableExport';
 import { playSuccessChime, playTapSound } from '../utils/audioEffects';
@@ -677,6 +678,85 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
             </div>
           </div>
 
+          {/* 50/50 Partner Profit Division Widget (Nomi & Haris) */}
+          <div
+            className="glass-panel"
+            style={{
+              padding: '1rem 1.15rem',
+              borderRadius: 'var(--radius-lg)',
+              borderLeft: '4px solid var(--accent-teal)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+                <Users2 size={18} style={{ color: 'var(--accent-teal)' }} />
+                <div>
+                  <span style={{ fontSize: '0.88rem', fontWeight: 800 }}>Partner 50/50 Profit Division</span>
+                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginLeft: '0.4rem' }}>
+                    ({periodTitle})
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => onNavigate('partners')}
+                style={{ padding: '0.3rem 0.65rem', fontSize: '0.74rem', fontWeight: 600, borderColor: 'var(--accent-teal)' }}
+              >
+                Open Partners Tab <ChevronRight size={12} />
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
+              <div
+                style={{
+                  padding: '0.7rem 0.85rem',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'rgba(59, 130, 246, 0.05)',
+                  border: '1px solid rgba(59, 130, 246, 0.15)',
+                  cursor: 'pointer',
+                }}
+                onClick={() => onNavigate('partners')}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#3b82f6' }}>Nomi (50%)</span>
+                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Share</span>
+                </div>
+                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: currentProfit >= 0 ? '#3b82f6' : '#ef4444' }}>
+                  {money(Math.round((currentProfit / 2) * 100) / 100)}
+                </div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                  Dividend for {periodTitle}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: '0.7rem 0.85rem',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'rgba(20, 184, 166, 0.05)',
+                  border: '1px solid rgba(20, 184, 166, 0.15)',
+                  cursor: 'pointer',
+                }}
+                onClick={() => onNavigate('partners')}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-teal)' }}>Haris (50%)</span>
+                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Share</span>
+                </div>
+                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: currentProfit >= 0 ? 'var(--accent-teal)' : '#ef4444' }}>
+                  {money(Math.round((currentProfit / 2) * 100) / 100)}
+                </div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                  Dividend for {periodTitle}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="stats-grid stats-grid-quiet">
             <StatCard
               label="Sales Collected"
@@ -739,7 +819,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
             {recent_bills.slice(0, 3).map((bill) => (
               <button
                 key={bill.id}
-                             className={`dashboard-recent-item is-${String(bill.status || '').toLowerCase()}`}
+                className={`dashboard-recent-item is-${String(bill.status || '').toLowerCase()}`}
                 style={{ width: '100%', textAlign: 'left', marginBottom: '0.4rem' }}
                 onClick={() => (onViewBill ? onViewBill(bill) : onNavigate('database'))}
               >
@@ -996,7 +1076,6 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
           </div>
         </div>
       )}
-
 
       <QuickPaySheet
         open={Boolean(payBill)}

@@ -15,6 +15,7 @@ import {
   Fingerprint,
   Clock,
   Sparkles,
+  Users2,
 } from 'lucide-react';
 import DashboardStats from './components/DashboardStats';
 import MoreMenu from './components/MoreMenu';
@@ -45,6 +46,7 @@ const SettingsManager = lazy(() => import('./components/SettingsManager'));
 const CashflowPanel = lazy(() => import('./components/CashflowPanel'));
 const AgingReport = lazy(() => import('./components/AgingReport'));
 const NotepadPanel = lazy(() => import('./components/NotepadPanel'));
+const PartnerEquityPanel = lazy(() => import('./components/PartnerEquityPanel'));
 
 const THEME_KEY = 'elite-chocolate-theme';
 const PIN_UNLOCK_KEY = 'elite-chocolate-pin-ok';
@@ -55,6 +57,7 @@ const TAB_ORDER = [
   'create',
   'database',
   'customers',
+  'partners',
   'cashflow',
   'aging',
   'notepad',
@@ -471,6 +474,12 @@ export default function App() {
             <Users size={17} /> Clients
           </button>
           <button
+            className={`nav-btn ${currentTab === 'partners' ? 'active' : ''}`}
+            onClick={() => goToTab('partners')}
+          >
+            <Users2 size={17} /> Partners
+          </button>
+          <button
             className={`nav-btn ${currentTab === 'cashflow' ? 'active' : ''}`}
             onClick={() => goToTab('cashflow')}
           >
@@ -617,6 +626,12 @@ export default function App() {
                   onViewBill={handleViewBill}
                   onDuplicateBill={handleDuplicateBill}
                   onNavigate={(tab) => goToTab(tab)}
+                />
+              )}
+
+              {currentTab === 'partners' && (
+                <PartnerEquityPanel
+                  currencySymbol={settings.currency_symbol || 'Rs.'}
                 />
               )}
 

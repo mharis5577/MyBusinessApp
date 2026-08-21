@@ -44,6 +44,9 @@ export async function performAutoBackup(dbAll) {
       stock_adjustments: await dbAll('SELECT * FROM stock_adjustments'),
       day_closings: await dbAll('SELECT * FROM day_closings'),
       memos: await dbAll('SELECT * FROM memos'),
+      partners: await dbAll('SELECT * FROM partners'),
+      partner_settlements: await dbAll('SELECT * FROM partner_settlements'),
+      partner_transactions: await dbAll('SELECT * FROM partner_transactions'),
     };
 
     fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
@@ -172,6 +175,35 @@ export async function generateBusinessBrief(dbAll, options = {}) {
   );
   const totalOverdueAmount = overdueBills.reduce((s, b) => s + Math.max(0, (Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0)), 0);
 
+  // Partner Split (50/50 by default: Nomi & Haris)
+  let partners = [];
+  try {
+    partners = await dbAll(`SELECT * FROM partners WHERE is_active = 1 ORDER BY id ASC`);
+  } catch (_) {
+    partners = [];
+  }
+  if (!partners || partners.length === 0) {
+    partners = [
+      { name: 'Nomi', profit_share_pct: 50.0 },
+      { name: 'Haris', profit_share_pct: 50.0 },
+    ];
+  }
+
+  const partnerSplits = partners.map((p) => {
+    const pct = Number(p.profit_share_pct) || 50;
+    const share = Math.round(((netProfit * pct) / 100) * 100) / 100;
+    return {
+      name: p.name,
+      sharePct: pct,
+      shareAmount: share,
+      formattedShare: `${currencySymbol} ${share.toLocaleString('en-PK')}`,
+    };
+  });
+
+  const partnerSplitText = partnerSplits
+    .map((p) => `  • ${p.name} (${p.sharePct}%): ${p.formattedShare}`)
+    .join('\n');
+
   const formattedSales = `${currencySymbol} ${totalSales.toLocaleString('en-PK')}`;
   const formattedBuying = `${currencySymbol} ${totalBuying.toLocaleString('en-PK')}`;
   const formattedProfit = `${currencySymbol} ${netProfit.toLocaleString('en-PK')}`;
@@ -186,6 +218,9 @@ export async function generateBusinessBrief(dbAll, options = {}) {
 📈 *Online Sales:* ${formattedSales} (${salesBills.length} orders)
 📦 *Saudia Purchases:* ${formattedBuying} (${buyingBills.length} bills)
 💰 *Net Operating Profit:* ${formattedProfit} (${profitMarginPct}% margin)
+━━━━━━━━━━━━━━━━━━━━
+👥 *Partner Split:*
+${partnerSplitText}
 ━━━━━━━━━━━━━━━━━━━━
 💵 *Collections Received:* ${formattedCollections}
 ⏳ *Overdue Dues Pending:* ${formattedOverdue} (${overdueBills.length} client bills)
@@ -206,6 +241,7 @@ export async function generateBusinessBrief(dbAll, options = {}) {
       buyingCount: buyingBills.length,
       netProfit,
       profitMarginPct,
+      partnerSplits,
       totalCashCollected,
       totalOverdueAmount,
       overdueCount: overdueBills.length,

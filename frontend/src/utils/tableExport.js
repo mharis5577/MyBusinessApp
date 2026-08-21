@@ -628,4 +628,307 @@ export async function downloadCashflowCsv({
   return 'downloaded';
 }
 
+/**
+ * Professional Multi-page PDF Generator for Partner Profit & Settlement Statement
+ * (Nomi & Haris 50/50 Split with Itemized Order / Shipment Breakdown)
+ */
+export async function downloadPartnerReportPdf({
+  periodLabel = 'All Time',
+  dateRange = '',
+  totalSales = 0,
+  totalBuying = 0,
+  netProfit = 0,
+  profitMarginPct = 0,
+  partners = [],
+  orders = [],
+  payouts = [],
+  settlementInfo = null,
+  currencySymbol = 'Rs.',
+  filename = 'Partner_Profit_Statement.pdf',
+}) {
+  const { jsPDF } = await import('jspdf');
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4', compress: true });
+
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 28;
+  const usableW = pageWidth - margin * 2;
+  let y = margin;
+
+  const checkPageBreak = (neededHeight) => {
+    if (y + neededHeight > pageHeight - margin) {
+      pdf.addPage();
+      y = margin + 10;
+      return true;
+    }
+    return false;
+  };
+
+  // 1. Header Banner
+  pdf.setFillColor(15, 23, 42); // slate-900
+  pdf.rect(margin, y, usableW, 54, 'F');
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(14);
+  pdf.setTextColor(255, 255, 255);
+  pdf.text('ELITE CHOCOLATE · PARTNER PROFIT STATEMENT', margin + 14, y + 22);
+
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(8.5);
+  pdf.setTextColor(148, 163, 184);
+  pdf.text(`Period: ${periodLabel} ${dateRange ? `(${dateRange})` : ''} · Generated: ${new Date().toLocaleDateString('en-PK')}`, margin + 14, y + 40);
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(8);
+  pdf.setTextColor(45, 212, 191);
+  pdf.text('50/50 EQUITY DIVISION', pageWidth - margin - 120, y + 22);
+
+  y += 64;
+
+  // 2. Financial Overview Cards (4 Columns)
+  const cardW = (usableW - 18) / 4;
+  const kpis = [
+    { label: 'Total Sales', val: `${currencySymbol} ${exportMoney(totalSales)}`, color: [16, 185, 129] },
+    { label: 'Buying Costs', val: `${currencySymbol} ${exportMoney(totalBuying)}`, color: [239, 68, 68] },
+    { label: 'Net Profit', val: `${currencySymbol} ${exportMoney(netProfit)}`, color: [14, 165, 233] },
+    { label: 'Profit Margin', val: `${profitMarginPct}%`, color: [168, 85, 247] },
+  ];
+
+  kpis.forEach((kpi, idx) => {
+    const cx = margin + idx * (cardW + 6);
+    pdf.setFillColor(248, 250, 252);
+    pdf.setDrawColor(226, 232, 240);
+    pdf.setLineWidth(1);
+    pdf.roundedRect(cx, y, cardW, 40, 4, 4, 'FD');
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7);
+    pdf.setTextColor(100, 116, 139);
+    pdf.text(kpi.label.toUpperCase(), cx + 8, y + 14);
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(10);
+    pdf.setTextColor(kpi.color[0], kpi.color[1], kpi.color[2]);
+    pdf.text(kpi.val, cx + 8, y + 30);
+  });
+
+  y += 50;
+
+  // 3. Partner 50/50 Division Cards (Nomi & Haris)
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(10);
+  pdf.setTextColor(15, 23, 42);
+  pdf.text('Partner 50/50 Profit Division Summary', margin, y);
+  y += 10;
+
+  const pCardW = (usableW - 10) / Math.max(1, partners.length);
+  partners.forEach((p, idx) => {
+    const px = margin + idx * (pCardW + 10);
+    pdf.setFillColor(241, 245, 249);
+    pdf.setDrawColor(203, 213, 225);
+    pdf.roundedRect(px, y, pCardW, 52, 4, 4, 'FD');
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(11);
+    pdf.setTextColor(15, 23, 42);
+    pdf.text(`${p.name} (${p.profit_share_pct || 50}% Share)`, px + 10, y + 16);
+
+    const shareAmt = p.share_amount !== undefined ? p.share_amount : (netProfit * (p.profit_share_pct || 50)) / 100;
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(8);
+    pdf.setTextColor(71, 85, 105);
+    pdf.text(`Period Profit Share:`, px + 10, y + 30);
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(10.5);
+    pdf.setTextColor(16, 185, 129);
+    pdf.text(`${currencySymbol} ${exportMoney(shareAmt)}`, px + 100, y + 30);
+
+    if (p.current_balance !== undefined) {
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(7.5);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(`All-Time Undrawn Balance: ${currencySymbol} ${exportMoney(p.current_balance)}`, px + 10, y + 44);
+    }
+  });
+
+  y += 62;
+
+  // 4. Settlement Checkpoint Banner if marked
+  if (settlementInfo) {
+    pdf.setFillColor(254, 243, 199);
+    pdf.setDrawColor(245, 158, 11);
+    pdf.roundedRect(margin, y, usableW, 26, 3, 3, 'FD');
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(8);
+    pdf.setTextColor(180, 83, 9);
+    pdf.text(`SETTLEMENT CHECKPOINT: ${settlementInfo.settlement_code || 'Settled'} · Notes: ${settlementInfo.notes || 'Settlement finalized up to this checkpoint.'}`, margin + 8, y + 16);
+    y += 34;
+  }
+
+  // 5. Itemized Order & Shipment Profit Breakdown Table
+  checkPageBreak(80);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(10);
+  pdf.setTextColor(15, 23, 42);
+  pdf.text(`Itemized Orders & Shipments Breakdown (${orders.length} transactions)`, margin, y);
+  y += 10;
+
+  const orderHeaders = ['Date', 'Invoice #', 'Type', 'Party / Shipment', 'Sales (Rs.)', 'Buying (Rs.)', 'Profit Margin'];
+  const orderColW = [usableW * 0.13, usableW * 0.17, usableW * 0.11, usableW * 0.27, usableW * 0.11, usableW * 0.11, usableW * 0.10];
+  const orderColX = [];
+  {
+    let curX = margin;
+    for (let i = 0; i < orderHeaders.length; i += 1) {
+      orderColX.push(curX);
+      curX += orderColW[i];
+    }
+  }
+
+  const paintOrderHeader = () => {
+    pdf.setFillColor(30, 41, 59);
+    pdf.rect(margin, y, usableW, 17, 'F');
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(255, 255, 255);
+    orderHeaders.forEach((h, i) => {
+      pdf.text(h, orderColX[i] + 3, y + 11);
+    });
+    y += 17;
+  };
+
+  paintOrderHeader();
+
+  if (!orders.length) {
+    pdf.setFont('helvetica', 'italic');
+    pdf.setFontSize(8);
+    pdf.setTextColor(148, 163, 184);
+    pdf.text('No transactions in this period.', margin + 8, y + 14);
+    y += 20;
+  } else {
+    orders.forEach((o, idx) => {
+      if (checkPageBreak(22)) {
+        paintOrderHeader();
+      }
+
+      const bg = idx % 2 === 0 ? 255 : 248;
+      pdf.setFillColor(bg, bg, bg);
+      pdf.rect(margin, y, usableW, 16, 'F');
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(7);
+      pdf.setTextColor(30, 41, 59);
+
+      const dStr = String(o.bill_date || '');
+      const invStr = String(o.invoice_number || '');
+      const tStr = (o.bill_type || 'sale').toUpperCase();
+      const partyStr = String(o.customer_name || '').substring(0, 24);
+      const isBuy = o.is_supplier || o.bill_type === 'supplier';
+      const isHelp = o.is_help || o.bill_type === 'help';
+
+      const salesStr = isBuy || isHelp ? '−' : `${exportMoney(o.total_amount || 0)}`;
+      const buyStr = isBuy ? `${exportMoney(o.total_amount || 0)}` : '−';
+      const profitStr = isHelp ? 'Rs. 0' : isBuy ? `-Rs. ${exportMoney(o.total_amount)}` : `+Rs. ${exportMoney(o.total_amount)}`;
+
+      pdf.text(dStr, orderColX[0] + 3, y + 10);
+      pdf.text(invStr, orderColX[1] + 3, y + 10);
+      pdf.text(tStr, orderColX[2] + 3, y + 10);
+      pdf.text(partyStr, orderColX[3] + 3, y + 10);
+      pdf.text(salesStr, orderColX[4] + 3, y + 10);
+      pdf.text(buyStr, orderColX[5] + 3, y + 10);
+
+      pdf.setFont('helvetica', 'bold');
+      if (isBuy) {
+        pdf.setTextColor(239, 68, 68);
+      } else {
+        pdf.setTextColor(16, 185, 129);
+      }
+      pdf.text(profitStr, orderColX[6] + 3, y + 10);
+
+      y += 16;
+    });
+  }
+
+  y += 16;
+
+  // 6. Footer / Signatures
+  checkPageBreak(50);
+  pdf.setDrawColor(203, 213, 225);
+  pdf.setLineWidth(1);
+  pdf.line(margin, y, pageWidth - margin, y);
+  y += 14;
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(8);
+  pdf.setTextColor(71, 85, 105);
+  pdf.text('Partner Approval Signatures:', margin, y);
+
+  pdf.text('Nomi: ________________________', margin + 140, y);
+  pdf.text('Haris: ________________________', margin + 340, y);
+
+  const blob = pdf.output('blob');
+  await downloadBlob(blob, filename, 'application/pdf');
+  return 'downloaded';
+}
+
+/**
+ * Export Partner Profit & Shipment Breakdown to CSV
+ */
+export async function downloadPartnerReportCsv({
+  periodLabel = 'All Time',
+  totalSales = 0,
+  totalBuying = 0,
+  netProfit = 0,
+  partners = [],
+  orders = [],
+  currencySymbol = 'Rs.',
+  filename = 'Partner_Profit_Export.csv',
+}) {
+  const rows = [
+    ['=== PARTNER PROFIT 50/50 SETTLEMENT STATEMENT ==='],
+    ['Period', `"${periodLabel}"`],
+    ['Total Sales', totalSales],
+    ['Total Buying', totalBuying],
+    ['Net Profit', netProfit],
+    [],
+    ['=== 50/50 PARTNER SHARES ==='],
+    ['Partner Name', 'Share %', `Calculated Profit Share (${currencySymbol})`],
+  ];
+
+  partners.forEach((p) => {
+    const shareAmt = (netProfit * (p.profit_share_pct || 50)) / 100;
+    rows.push([`"${p.name}"`, `${p.profit_share_pct || 50}%`, shareAmt]);
+  });
+
+  rows.push([]);
+  rows.push(['=== SHIPMENT & ORDER-BY-ORDER BREAKDOWN ===']);
+  rows.push(['Date', 'Invoice #', 'Type', 'Party / Shipment', `Sales (${currencySymbol})`, `Buying (${currencySymbol})`, `Profit Effect (${currencySymbol})`, 'Notes']);
+
+  orders.forEach((o) => {
+    const isBuy = o.is_supplier || o.bill_type === 'supplier';
+    const isHelp = o.is_help || o.bill_type === 'help';
+    const salesAmt = isBuy || isHelp ? 0 : o.total_amount;
+    const buyingAmt = isBuy ? o.total_amount : 0;
+    const profitEffect = isHelp ? 0 : isBuy ? -o.total_amount : o.total_amount;
+
+    rows.push([
+      `"${o.bill_date || ''}"`,
+      `"${o.invoice_number || ''}"`,
+      `"${o.bill_type || 'sale'}"`,
+      `"${String(o.customer_name || '').replace(/"/g, '""')}"`,
+      salesAmt,
+      buyingAmt,
+      profitEffect,
+      `"${String(o.notes || '').replace(/"/g, '""')}"`,
+    ]);
+  });
+
+  const csvContent = rows.map((r) => r.join(',')).join('\r\n');
+  const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+  await downloadBlob(blob, filename, 'text/csv');
+  return 'downloaded';
+}
+
+
 

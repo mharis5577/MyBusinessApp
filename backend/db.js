@@ -285,6 +285,68 @@ function initTables() {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // Partner Equity & Profit Divider Tables
+    db.run(`
+      CREATE TABLE IF NOT EXISTS partners (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT DEFAULT '',
+        profit_share_pct REAL NOT NULL DEFAULT 50.0,
+        bank_name TEXT DEFAULT '',
+        account_title TEXT DEFAULT '',
+        account_number TEXT DEFAULT '',
+        opening_balance REAL DEFAULT 0.0,
+        is_active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `, () => {
+      // Seed default 50/50 partners: Nomi & Haris if table is empty
+      db.get('SELECT COUNT(*) as count FROM partners', [], (err, row) => {
+        if (!err && (!row || row.count === 0)) {
+          db.run(`
+            INSERT INTO partners (name, phone, profit_share_pct, bank_name, account_title, account_number)
+            VALUES 
+              ('Nomi', '+923000000000', 50.0, 'Meezan Bank', 'Nomi', ''),
+              ('Haris', '+923337669709', 50.0, 'Meezan Bank / HBL', 'ELITE CHOCOLATE', '03337669709')
+          `);
+        }
+      });
+    });
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS partner_settlements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        settlement_code TEXT UNIQUE,
+        period_start TEXT,
+        period_end TEXT,
+        last_bill_id INTEGER,
+        last_bill_date TEXT,
+        total_sales REAL NOT NULL DEFAULT 0.0,
+        total_buying REAL NOT NULL DEFAULT 0.0,
+        net_profit REAL NOT NULL DEFAULT 0.0,
+        nomi_share REAL NOT NULL DEFAULT 0.0,
+        haris_share REAL NOT NULL DEFAULT 0.0,
+        notes TEXT DEFAULT '',
+        created_by TEXT DEFAULT 'System',
+        settled_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS partner_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        partner_id INTEGER NOT NULL,
+        type TEXT NOT NULL DEFAULT 'payout', -- 'payout' | 'capital_in'
+        amount REAL NOT NULL DEFAULT 0.0,
+        transaction_date TEXT NOT NULL,
+        payment_method TEXT DEFAULT 'Bank Transfer',
+        notes TEXT DEFAULT '',
+        screenshot_path TEXT DEFAULT '',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (partner_id) REFERENCES partners(id) ON DELETE CASCADE
+      )
+    `);
   });
 }
 
