@@ -632,6 +632,7 @@ export default function App() {
               {currentTab === 'partners' && (
                 <PartnerEquityPanel
                   currencySymbol={settings.currency_symbol || 'Rs.'}
+                  settings={settings}
                 />
               )}
 

@@ -22,7 +22,10 @@ import {
   Layers,
   Sparkles,
   ShieldCheck,
-  AlertCircle
+  AlertCircle,
+  BarChart3,
+  PieChart,
+  MessageCircle,
 } from 'lucide-react';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
@@ -30,8 +33,10 @@ import { formatCurrency, formatPkMoney, pakistanToday } from '../utils/pakistan'
 import { playSuccessChime, playTapSound } from '../utils/audioEffects';
 import { downloadPartnerReportPdf, downloadPartnerReportCsv } from '../utils/tableExport';
 import EmptyState from './EmptyState';
+import PartnerEquityCharts from './PartnerEquityCharts';
+import PartnerWhatsAppDigestModal from './PartnerWhatsAppDigestModal';
 
-export default function PartnerEquityPanel({ currencySymbol = 'Rs.' }) {
+export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = {} }) {
   const toast = useToast();
 
   // State
@@ -54,6 +59,7 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.' }) {
 
   // Modals
   const [showPayoutModal, setShowPayoutModal] = useState(false);
+  const [showDigestModal, setShowDigestModal] = useState(false);
   const [payoutForm, setPayoutForm] = useState({
     partner_id: '',
     amount: '',
@@ -68,7 +74,7 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.' }) {
   const [settleNotes, setSettleNotes] = useState('');
   const [submittingSettle, setSubmittingSettle] = useState(false);
 
-  const [activeSubTab, setActiveSubTab] = useState('breakdown'); // 'breakdown' | 'payouts' | 'settlements'
+  const [activeSubTab, setActiveSubTab] = useState('breakdown'); // 'breakdown' | 'analytics' | 'payouts' | 'settlements'
   const [searchQuery, setSearchQuery] = useState('');
 
   // 1. Fetch Partner Profiles & Lifetime Overview
@@ -429,11 +435,14 @@ ${splitsText}
           <button
             type="button"
             className="btn-secondary"
-            onClick={() => handleShareWhatsApp(nomi?.phone || haris?.phone)}
+            onClick={() => {
+              playTapSound();
+              setShowDigestModal(true);
+            }}
             style={{ padding: '0.45rem 0.8rem', fontSize: '0.82rem', borderColor: '#25D366', color: '#25D366' }}
           >
-            <Share2 size={14} />
-            <span>WhatsApp Summary</span>
+            <MessageCircle size={14} />
+            <span>1-Tap WA Digest</span>
           </button>
 
           <button
@@ -758,12 +767,15 @@ ${splitsText}
         </div>
       </div>
 
-      {/* 5. Sub-Tabs (Itemized Orders | Payouts Ledger | Checkpoints History) */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.4rem' }}>
+      {/* 5. Sub-Tabs (Itemized Orders | Visual Analytics | Payouts Ledger | Checkpoints History) */}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.4rem', flexWrap: 'wrap' }}>
         <button
           type="button"
           className={`btn-secondary${activeSubTab === 'breakdown' ? ' active' : ''}`}
-          onClick={() => setActiveSubTab('breakdown')}
+          onClick={() => {
+            playTapSound();
+            setActiveSubTab('breakdown');
+          }}
           style={{ padding: '0.4rem 0.8rem', fontSize: '0.82rem', fontWeight: activeSubTab === 'breakdown' ? 700 : 500 }}
         >
           <Layers size={14} /> Itemized Shipment / Order Breakdown ({calcData.orders?.length || 0})
@@ -771,8 +783,23 @@ ${splitsText}
 
         <button
           type="button"
+          className={`btn-secondary${activeSubTab === 'analytics' ? ' active' : ''}`}
+          onClick={() => {
+            playTapSound();
+            setActiveSubTab('analytics');
+          }}
+          style={{ padding: '0.4rem 0.8rem', fontSize: '0.82rem', fontWeight: activeSubTab === 'analytics' ? 700 : 500, borderColor: activeSubTab === 'analytics' ? 'var(--accent-teal)' : undefined }}
+        >
+          <BarChart3 size={14} style={{ color: 'var(--accent-teal)' }} /> Visual Analytics & Growth Charts
+        </button>
+
+        <button
+          type="button"
           className={`btn-secondary${activeSubTab === 'payouts' ? ' active' : ''}`}
-          onClick={() => setActiveSubTab('payouts')}
+          onClick={() => {
+            playTapSound();
+            setActiveSubTab('payouts');
+          }}
           style={{ padding: '0.4rem 0.8rem', fontSize: '0.82rem', fontWeight: activeSubTab === 'payouts' ? 700 : 500 }}
         >
           <Wallet size={14} /> Payouts & Drawings Ledger ({payouts.length})
@@ -781,12 +808,25 @@ ${splitsText}
         <button
           type="button"
           className={`btn-secondary${activeSubTab === 'settlements' ? ' active' : ''}`}
-          onClick={() => setActiveSubTab('settlements')}
+          onClick={() => {
+            playTapSound();
+            setActiveSubTab('settlements');
+          }}
           style={{ padding: '0.4rem 0.8rem', fontSize: '0.82rem', fontWeight: activeSubTab === 'settlements' ? 700 : 500 }}
         >
           <Flag size={14} /> Settlement Markers History ({settlements.length})
         </button>
       </div>
+
+      {/* Sub-Tab 0: Visual Analytics & Interactive Growth Charts */}
+      {activeSubTab === 'analytics' && (
+        <PartnerEquityCharts
+          orders={calcData.orders || []}
+          summary={calcData.summary || {}}
+          partners={partnersData.partners || []}
+          currencySymbol={currencySymbol}
+        />
+      )}
 
       {/* Sub-Tab 1: Itemized Order & Shipment Breakdown Table */}
       {activeSubTab === 'breakdown' && (
@@ -1176,6 +1216,17 @@ ${splitsText}
           </div>
         </div>
       )}
+
+      {/* 1-Tap WhatsApp Partner Digest Modal */}
+      <PartnerWhatsAppDigestModal
+        open={showDigestModal}
+        onClose={() => setShowDigestModal(false)}
+        calcData={calcData}
+        partners={partnersData.partners || []}
+        currencySymbol={currencySymbol}
+        settings={settings}
+        latestSettlement={settlements[0] || null}
+      />
     </div>
   );
 }
