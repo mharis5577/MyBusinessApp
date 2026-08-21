@@ -81,16 +81,17 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
   const fetchPartners = useCallback(async () => {
     try {
       const res = await apiFetch('/api/partners');
-      if (res && res.partners) {
-        setPartnersData(res);
-        if (!payoutForm.partner_id && res.partners.length > 0) {
-          setPayoutForm((prev) => ({ ...prev, partner_id: res.partners[0].id }));
+      const data = await res.json().catch(() => ({}));
+      if (data && Array.isArray(data.partners)) {
+        setPartnersData(data);
+        if (!payoutForm.partner_id && data.partners.length > 0) {
+          setPayoutForm((prev) => ({ ...prev, partner_id: data.partners[0].id }));
         }
       }
     } catch (e) {
-      toast.error('Failed to load partner accounts: ' + e.message);
+      console.error('Failed to load partner accounts:', e);
     }
-  }, [payoutForm.partner_id, toast]);
+  }, [payoutForm.partner_id]);
 
   // 2. Fetch Payouts & Settlements
   const fetchAuxData = useCallback(async () => {
@@ -99,9 +100,13 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
         apiFetch('/api/partners/payouts'),
         apiFetch('/api/partners/settlements'),
       ]);
-      if (Array.isArray(payoutsRes)) setPayouts(payoutsRes);
-      if (Array.isArray(settlRes)) setSettlements(settlRes);
-    } catch (_) {}
+      const pData = await payoutsRes.json().catch(() => []);
+      const sData = await settlRes.json().catch(() => []);
+      if (Array.isArray(pData)) setPayouts(pData);
+      if (Array.isArray(sData)) setSettlements(sData);
+    } catch (e) {
+      console.error('Failed to load payouts/settlements:', e);
+    }
   }, []);
 
   // 3. Compute dynamic period profit breakdown
@@ -140,13 +145,14 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
       if (queryString) url += `?${queryString}`;
 
       const res = await apiFetch(url);
-      if (res) {
-        setCalcData(res);
+      const data = await res.json().catch(() => ({}));
+      if (data && data.summary) {
+        setCalcData(data);
       }
     } catch (e) {
-      toast.error('Failed to calculate profit breakdown: ' + e.message);
+      console.error('Failed to calculate profit breakdown:', e);
     }
-  }, [timeRange, customStart, customEnd, toast]);
+  }, [timeRange, customStart, customEnd]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);

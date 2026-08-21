@@ -12,7 +12,7 @@ import { deletePaymentProofFile } from '../utils/paymentProof';
 import { isDemoBill, isDemoCustomer } from '../utils/demoData';
 
 const DB_NAME = 'elite-chocolate-pos';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 function normalizePartyType(value) {
   return value === 'supplier' ? 'supplier' : 'customer';
@@ -108,6 +108,9 @@ async function getDb() {
         'stock_adjustments',
         'day_closings',
         'memos',
+        'partners',
+        'partner_settlements',
+        'partner_transactions',
       ];
       for (const name of stores) {
         if (!db.objectStoreNames.contains(name)) {
@@ -141,6 +144,38 @@ async function ensureSeeded() {
     await db.put('settings', { ...DEFAULT_SETTINGS });
   }
   await ensurePartyTypes(db);
+
+  // Seed default 50/50 partners (Nomi & Haris) if empty
+  try {
+    const existingPartners = await db.getAll('partners');
+    if (!existingPartners || existingPartners.length === 0) {
+      await db.put('partners', {
+        id: 1,
+        name: 'Nomi',
+        phone: '+923000000000',
+        profit_share_pct: 50,
+        bank_name: 'Meezan Bank',
+        account_title: 'Nomi',
+        account_number: '',
+        opening_balance: 0,
+        is_active: 1,
+        created_at: new Date().toISOString(),
+      });
+      await db.put('partners', {
+        id: 2,
+        name: 'Haris',
+        phone: '+923337669709',
+        profit_share_pct: 50,
+        bank_name: 'Meezan Bank / HBL',
+        account_title: 'ELITE CHOCOLATE',
+        account_number: '03337669709',
+        opening_balance: 0,
+        is_active: 1,
+        created_at: new Date().toISOString(),
+      });
+    }
+  } catch (_) {}
+
   return db;
 }
 
@@ -2002,6 +2037,313 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
       money_flow,
       daily_trend,
     });
+  }
+
+  // PARTNERS (On-device IndexedDB handling for 50/50 profit division, settlements & payouts)
+  if (parts[1] === 'partners') {
+    // 1. GET /api/partners
+    if (!parts[2] && method === 'GET') {
+      const partners = await db.getAll('partners');
+      const settlements = (await db.getAll('partner_settlements')).sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+      const lastSettlement = settlements[0] || null;
+      const transactions = await db.getAll('partner_transactions');
+      const bills = (await db.getAll('bills')).filter((b) => !isCancelled(b));
+
+      let lifetimeSales = 0;
+      let lifetimeBuying = 0;
+      bills.forEach((b) => {
+        const t = normalizeBillType(b.bill_type);
+        const amt = Number(b.total_amount) || 0;
+        if (t === 'supplier') lifetimeBuying += amt;
+        else if (t !== 'help' && t !== 'loan') lifetimeSales += amt;
+      });
+      const lifetimeNetProfit = lifetimeSales - lifetimeBuying;
+
+      let unsettledSales = 0;
+      let unsettledBuying = 0;
+      const unsettledBills = bills.filter((b) => {
+        if (!lastSettlement) return true;
+        const bDate = String(b.bill_date || '');
+        const pEnd = String(lastSettlement.period_end || '');
+        const lastId = Number(lastSettlement.last_bill_id) || 0;
+        if (bDate > pEnd) return true;
+        if (bDate === pEnd && Number(b.id) > lastId) return true;
+        return false;
+      });
+
+      unsettledBills.forEach((b) => {
+        const t = normalizeBillType(b.bill_type);
+        const amt = Number(b.total_amount) || 0;
+        if (t === 'supplier') unsettledBuying += amt;
+        else if (t !== 'help' && t !== 'loan') unsettledSales += amt;
+      });
+      const unsettledNetProfit = unsettledSales - unsettledBuying;
+
+      const enrichedPartners = partners.map((p) => {
+        const sharePct = Number(p.profit_share_pct) || 50.0;
+        const lifetimeEarned = Math.round(((lifetimeNetProfit * sharePct) / 100) * 100) / 100;
+        const unsettledEarned = Math.round(((unsettledNetProfit * sharePct) / 100) * 100) / 100;
+
+        const partnerTx = transactions.filter((t) => Number(t.partner_id) === Number(p.id));
+        const totalPayouts = partnerTx
+          .filter((t) => !t.type || t.type === 'payout' || t.type === 'drawing')
+          .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+        const totalCapitalIn = partnerTx
+          .filter((t) => t.type === 'capital_in' || t.type === 'investment')
+          .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+        const currentBalance = (Number(p.opening_balance) || 0) + lifetimeEarned - totalPayouts + totalCapitalIn;
+
+        return {
+          ...p,
+          lifetime_earned_share: lifetimeEarned,
+          unsettled_earned_share: unsettledEarned,
+          total_payouts: totalPayouts,
+          total_capital_in: totalCapitalIn,
+          current_balance: Math.round(currentBalance * 100) / 100,
+        };
+      });
+
+      return jsonOk({
+        partners: enrichedPartners,
+        business_totals: {
+          lifetime_sales: lifetimeSales,
+          lifetime_buying: lifetimeBuying,
+          lifetime_net_profit: lifetimeNetProfit,
+          unsettled_sales: unsettledSales,
+          unsettled_buying: unsettledBuying,
+          unsettled_net_profit: unsettledNetProfit,
+        },
+        last_settlement: lastSettlement,
+      });
+    }
+
+    // 2. PUT /api/partners/:id
+    if (parts[2] && !isNaN(Number(parts[2])) && method === 'PUT') {
+      const id = Number(parts[2]);
+      const existing = await db.get('partners', id);
+      if (!existing) return jsonErr('Partner not found', 404);
+      const updated = { ...existing, ...body, id };
+      await db.put('partners', updated);
+      return jsonOk(updated);
+    }
+
+    // 3. GET /api/partners/profit-breakdown
+    if (parts[2] === 'profit-breakdown' && method === 'GET') {
+      const sinceLastSettlement = search.get('sinceLastSettlement');
+      const startDate = search.get('startDate');
+      const endDate = search.get('endDate');
+
+      const partners = await db.getAll('partners');
+      const settlements = (await db.getAll('partner_settlements')).sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+      const lastSettlement = settlements[0] || null;
+      let bills = (await db.getAll('bills')).filter((b) => !isCancelled(b));
+
+      if (sinceLastSettlement === 'true') {
+        if (lastSettlement) {
+          const pEnd = String(lastSettlement.period_end || '');
+          const lastId = Number(lastSettlement.last_bill_id) || 0;
+          bills = bills.filter((b) => {
+            const bDate = String(b.bill_date || '');
+            if (bDate > pEnd) return true;
+            if (bDate === pEnd && Number(b.id) > lastId) return true;
+            return false;
+          });
+        }
+      } else {
+        if (startDate && endDate) {
+          bills = bills.filter((b) => {
+            const d = String(b.bill_date || '');
+            return d >= startDate && d <= endDate;
+          });
+        } else if (startDate) {
+          bills = bills.filter((b) => String(b.bill_date || '') >= startDate);
+        } else if (endDate) {
+          bills = bills.filter((b) => String(b.bill_date || '') <= endDate);
+        }
+      }
+
+      bills.sort((a, b) => {
+        const d = String(b.bill_date || '').localeCompare(String(a.bill_date || ''));
+        if (d !== 0) return d;
+        return (Number(b.id) || 0) - (Number(a.id) || 0);
+      });
+
+      let totalSales = 0;
+      let totalBuying = 0;
+      let salesCount = 0;
+      let buyingCount = 0;
+
+      const orders = bills.map((b) => {
+        const t = normalizeBillType(b.bill_type);
+        const isSupplier = t === 'supplier';
+        const isHelp = t === 'help' || t === 'loan';
+        const amount = Number(b.total_amount) || 0;
+
+        if (isSupplier) {
+          totalBuying += amount;
+          buyingCount += 1;
+        } else if (!isHelp) {
+          totalSales += amount;
+          salesCount += 1;
+        }
+
+        const profitEffect = isHelp ? 0 : isSupplier ? -amount : amount;
+
+        return {
+          id: b.id,
+          invoice_number: b.invoice_number,
+          bill_date: b.bill_date,
+          customer_name: b.customer_name,
+          customer_phone: b.customer_phone || '',
+          bill_type: t,
+          is_supplier: isSupplier,
+          is_help: isHelp,
+          total_amount: amount,
+          amount_paid: Number(b.amount_paid) || 0,
+          status: b.status,
+          notes: b.notes || '',
+          profit_effect: profitEffect,
+        };
+      });
+
+      const netProfit = totalSales - totalBuying;
+      const profitMarginPct = totalSales > 0 ? Number(((netProfit / totalSales) * 100).toFixed(1)) : 0.0;
+
+      const partnerSplits = partners.map((p) => {
+        const sharePct = Number(p.profit_share_pct) || 50.0;
+        const shareAmount = Math.round(((netProfit * sharePct) / 100) * 100) / 100;
+        return {
+          id: p.id,
+          name: p.name,
+          profit_share_pct: sharePct,
+          share_amount: shareAmount,
+        };
+      });
+
+      const sortedDates = bills.map((b) => b.bill_date).filter(Boolean).sort();
+      const effectiveStart = startDate || (sortedDates.length > 0 ? sortedDates[0] : '');
+      const effectiveEnd = endDate || (sortedDates.length > 0 ? sortedDates[sortedDates.length - 1] : '');
+      const maxBillId = bills.length > 0 ? Math.max(...bills.map((b) => Number(b.id) || 0)) : null;
+
+      return jsonOk({
+        period: {
+          startDate: effectiveStart,
+          endDate: effectiveEnd,
+          sinceLastSettlement: sinceLastSettlement === 'true',
+        },
+        summary: {
+          total_sales: totalSales,
+          sales_count: salesCount,
+          total_buying: totalBuying,
+          buying_count: buyingCount,
+          net_profit: netProfit,
+          profit_margin_pct: profitMarginPct,
+          max_bill_id: maxBillId,
+        },
+        partner_splits: partnerSplits,
+        orders,
+        last_settlement: lastSettlement || null,
+      });
+    }
+
+    // 4. POST /api/partners/settlements
+    if (parts[2] === 'settlements' && method === 'POST') {
+      const dateStr = pakistanToday().replace(/-/g, '');
+      const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+      const settlement_code = `SETTL-${dateStr}-${randomSuffix}`;
+      const newId = await nextId(db, 'partner_settlements');
+
+      const entry = {
+        id: newId,
+        settlement_code,
+        period_start: body.period_start || '',
+        period_end: body.period_end || pakistanToday(),
+        last_bill_id: body.last_bill_id || null,
+        last_bill_date: body.last_bill_date || body.period_end || '',
+        total_sales: Number(body.total_sales) || 0,
+        total_buying: Number(body.total_buying) || 0,
+        net_profit: Number(body.net_profit) || 0,
+        nomi_share: Number(body.nomi_share) || 0,
+        haris_share: Number(body.haris_share) || 0,
+        notes: body.notes || '',
+        created_by: body.created_by || 'Owner',
+        settled_at: new Date().toISOString(),
+      };
+
+      await db.put('partner_settlements', entry);
+      return jsonOk(entry, 201);
+    }
+
+    // 5. GET /api/partners/settlements
+    if (parts[2] === 'settlements' && method === 'GET') {
+      const settlements = (await db.getAll('partner_settlements')).sort(
+        (a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)
+      );
+      return jsonOk(settlements);
+    }
+
+    // 6. DELETE /api/partners/settlements/:id
+    if (parts[2] === 'settlements' && parts[3] && method === 'DELETE') {
+      const id = Number(parts[3]);
+      await db.delete('partner_settlements', id);
+      return jsonOk({ success: true, message: 'Settlement checkpoint removed.' });
+    }
+
+    // 7. POST /api/partners/payouts
+    if (parts[2] === 'payouts' && method === 'POST') {
+      const partner_id = Number(body.partner_id);
+      const amount = Number(body.amount);
+      if (!partner_id || !amount || amount <= 0) {
+        return jsonErr('Valid partner and amount are required.', 400);
+      }
+      const newId = await nextId(db, 'partner_transactions');
+      const partner = await db.get('partners', partner_id);
+
+      const entry = {
+        id: newId,
+        partner_id,
+        partner_name: partner?.name || 'Partner',
+        type: body.type || 'payout',
+        amount,
+        transaction_date: body.transaction_date || pakistanToday(),
+        payment_method: body.payment_method || 'Bank Transfer',
+        notes: body.notes || '',
+        screenshot_path: body.screenshot_path || '',
+        created_at: new Date().toISOString(),
+      };
+
+      await db.put('partner_transactions', entry);
+      return jsonOk(entry, 201);
+    }
+
+    // 8. GET /api/partners/payouts
+    if (parts[2] === 'payouts' && method === 'GET') {
+      const partners = await db.getAll('partners');
+      const pMap = new Map(partners.map((p) => [Number(p.id), p]));
+      const payouts = (await db.getAll('partner_transactions'))
+        .map((pt) => {
+          const p = pMap.get(Number(pt.partner_id));
+          return {
+            ...pt,
+            partner_name: p?.name || pt.partner_name || 'Partner',
+            profit_share_pct: p?.profit_share_pct || 50,
+          };
+        })
+        .sort((a, b) => {
+          const d = String(b.transaction_date || '').localeCompare(String(a.transaction_date || ''));
+          if (d !== 0) return d;
+          return (Number(b.id) || 0) - (Number(a.id) || 0);
+        });
+      return jsonOk(payouts);
+    }
+
+    // 9. DELETE /api/partners/payouts/:id
+    if (parts[2] === 'payouts' && parts[3] && method === 'DELETE') {
+      const id = Number(parts[3]);
+      await db.delete('partner_transactions', id);
+      return jsonOk({ success: true, message: 'Transaction removed.' });
+    }
   }
 
   return jsonErr(`Local API route not found: ${method} ${url}`, 404);
