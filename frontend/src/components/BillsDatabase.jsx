@@ -98,18 +98,16 @@ function BillsCardMenuItem({ icon: Icon, label, onClick, danger = false }) {
 }
 
 function getPaginationItems(current, total) {
-  if (total <= 7) {
+  if (total <= 4) {
     return Array.from({ length: total }, (_, i) => i + 1);
   }
-  const items = [];
-  if (current <= 3) {
-    items.push(1, 2, 3, 4, '...', total);
-  } else if (current >= total - 2) {
-    items.push(1, '...', total - 3, total - 2, total - 1, total);
-  } else {
-    items.push(1, '...', current - 1, current, current + 1, '...', total);
+  if (current <= 2) {
+    return [1, 2, 3, '...', total];
   }
-  return items;
+  if (current >= total - 1) {
+    return [1, '...', total - 2, total - 1, total];
+  }
+  return [1, '...', current, '...', total];
 }
 
 export default function BillsDatabase({
@@ -1161,28 +1159,14 @@ export default function BillsDatabase({
                     type="button"
                     className="btn-secondary bills-pagination-btn"
                     onClick={() => {
-                      setCurrentPage(1);
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                    disabled={validPage === 1}
-                    style={{ width: 'auto', minWidth: '32px', flex: '0 0 auto', padding: '0.35rem 0.6rem', fontSize: '0.78rem' }}
-                    title="First page"
-                  >
-                    <ChevronsLeft size={14} />
-                  </button>
-
-                  <button
-                    type="button"
-                    className="btn-secondary bills-pagination-btn"
-                    onClick={() => {
                       setCurrentPage((p) => Math.max(1, p - 1));
                       window.scrollTo({ top: 0, behavior: 'smooth' });
                     }}
                     disabled={validPage === 1}
-                    style={{ width: 'auto', flex: '0 0 auto', padding: '0.35rem 0.65rem', fontSize: '0.78rem' }}
+                    style={{ width: '34px', height: '34px', minWidth: '34px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '999px' }}
                     title="Previous page"
                   >
-                    <ChevronLeft size={14} /> Prev
+                    <ChevronLeft size={16} />
                   </button>
 
                   {/* Smart Windowed Page Number Buttons for up to 100+ pages */}
@@ -1193,7 +1177,7 @@ export default function BillsDatabase({
                           key={`dots-${idx}`}
                           style={{
                             color: 'var(--text-muted)',
-                            padding: '0 0.25rem',
+                            padding: '0 0.15rem',
                             fontSize: '0.85rem',
                             userSelect: 'none',
                             flex: '0 0 auto',
@@ -1214,12 +1198,16 @@ export default function BillsDatabase({
                           window.scrollTo({ top: 0, behavior: 'smooth' });
                         }}
                         style={{
-                          width: 'auto',
-                          minWidth: '32px',
-                          flex: '0 0 auto',
-                          padding: '0.35rem 0.65rem',
-                          fontSize: '0.78rem',
-                          fontWeight: validPage === pageNum ? 800 : 500,
+                          width: '34px',
+                          height: '34px',
+                          minWidth: '34px',
+                          padding: 0,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: '999px',
+                          fontSize: '0.84rem',
+                          fontWeight: validPage === pageNum ? 800 : 600,
                         }}
                       >
                         {pageNum}
@@ -1235,24 +1223,10 @@ export default function BillsDatabase({
                       window.scrollTo({ top: 0, behavior: 'smooth' });
                     }}
                     disabled={validPage === totalPages}
-                    style={{ width: 'auto', flex: '0 0 auto', padding: '0.35rem 0.65rem', fontSize: '0.78rem' }}
+                    style={{ width: '34px', height: '34px', minWidth: '34px', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '999px' }}
                     title="Next page"
                   >
-                    Next <ChevronRight size={14} />
-                  </button>
-
-                  <button
-                    type="button"
-                    className="btn-secondary bills-pagination-btn"
-                    onClick={() => {
-                      setCurrentPage(totalPages);
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                    disabled={validPage === totalPages}
-                    style={{ width: 'auto', minWidth: '32px', flex: '0 0 auto', padding: '0.35rem 0.6rem', fontSize: '0.78rem' }}
-                    title="Last page"
-                  >
-                    <ChevronsRight size={14} />
+                    <ChevronRight size={16} />
                   </button>
                 </div>
               )}
