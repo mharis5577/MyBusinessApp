@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Users2,
   DollarSign,
@@ -26,6 +27,9 @@ import {
   BarChart3,
   PieChart,
   MessageCircle,
+  Search,
+  Check,
+  X,
 } from 'lucide-react';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
@@ -35,6 +39,7 @@ import { downloadPartnerReportPdf, downloadPartnerReportCsv } from '../utils/tab
 import EmptyState from './EmptyState';
 import PartnerEquityCharts from './PartnerEquityCharts';
 import PartnerWhatsAppDigestModal from './PartnerWhatsAppDigestModal';
+import ConfirmDialog from './ConfirmDialog';
 
 export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = {} }) {
   const toast = useToast();
@@ -70,9 +75,15 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
   });
   const [submittingPayout, setSubmittingPayout] = useState(false);
 
-  const [showSettleModal, setShowSettleModal] = useState(false);
-  const [settleNotes, setSettleNotes] = useState('');
-  const [submittingSettle, setSubmittingSettle] = useState(false);
+  const [confirmingOrderId, setConfirmingOrderId] = useState(null);
+  const [settlingOrderId, setSettlingOrderId] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState({
+    open: false,
+    title: '',
+    message: '',
+    confirmLabel: 'Delete',
+    onConfirm: null,
+  });
 
   const [activeSubTab, setActiveSubTab] = useState('breakdown'); // 'breakdown' | 'analytics' | 'payouts' | 'settlements'
   const [searchQuery, setSearchQuery] = useState('');
@@ -154,16 +165,21 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
     }
   }, [timeRange, customStart, customEnd]);
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
-    await Promise.all([fetchPartners(), fetchAuxData(), fetchBreakdown()]);
-    setLoading(false);
-  }, [fetchPartners, fetchAuxData, fetchBreakdown]);
-
+  // Initial Mount Only - prevents screen jumping/scrolling to top on filter changes
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    let isMounted = true;
+    const init = async () => {
+      setLoading(true);
+      await Promise.all([fetchPartners(), fetchAuxData(), fetchBreakdown()]);
+      if (isMounted) setLoading(false);
+    };
+    init();
+    return () => {
+      isMounted = false;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fetch breakdown smoothly in background when filter/period changes without unmounting DOM
   useEffect(() => {
     fetchBreakdown();
   }, [fetchBreakdown]);
@@ -202,71 +218,70 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
     }
   };
 
-  const handleDeletePayout = async (id) => {
-    if (!window.confirm('Delete this payout record?')) return;
-    try {
-      await apiFetch(`/api/partners/payouts/${id}`, { method: 'DELETE' });
-      toast.success('Payout deleted.');
-      await Promise.all([fetchPartners(), fetchAuxData()]);
-    } catch (err) {
-      toast.error('Error deleting payout: ' + err.message);
-    }
+  const promptDeletePayout = (id) => {
+    playTapSound();
+    setConfirmDialog({
+      open: true,
+      title: 'Delete Payout Record',
+      message: 'Are you sure you want to delete this payout entry? This will adjust the partner balance.',
+      confirmLabel: 'Delete Payout',
+      onConfirm: async () => {
+        setConfirmDialog((prev) => ({ ...prev, open: false }));
+        try {
+          await apiFetch(`/api/partners/payouts/${id}`, { method: 'DELETE' });
+          toast.success('Payout deleted.');
+          await Promise.all([fetchPartners(), fetchAuxData()]);
+        } catch (err) {
+          toast.error('Error deleting payout: ' + err.message);
+        }
+      },
+    });
   };
 
-  // Create Settlement Marker Checkpoint
-  const handleCreateSettlement = async () => {
-    if (calcData.orders.length === 0) {
-      toast.error('No orders found in current selection to settle.');
-      return;
-    }
-    setSubmittingSettle(true);
+  // Toggle individual bill settlement status (Settled vs Unsettled)
+  const handleToggleBillSettled = async (order) => {
+    setSettlingOrderId(order.id);
     try {
-      const summary = calcData.summary || {};
-      const splits = calcData.partner_splits || [];
-      const nomi = splits.find((s) => s.name.toLowerCase().includes('nomi')) || splits[0] || {};
-      const haris = splits.find((s) => s.name.toLowerCase().includes('haris')) || splits[1] || {};
-
-      const payload = {
-        period_start: calcData.period?.startDate || '',
-        period_end: calcData.period?.endDate || pakistanToday(),
-        last_bill_id: summary.max_bill_id || null,
-        last_bill_date: calcData.period?.endDate || pakistanToday(),
-        total_sales: summary.total_sales || 0,
-        total_buying: summary.total_buying || 0,
-        net_profit: summary.net_profit || 0,
-        nomi_share: nomi.share_amount || 0,
-        haris_share: haris.share_amount || 0,
-        notes: settleNotes || `Settled 50/50 up to ${calcData.period?.endDate || 'date'}`,
-        created_by: 'Owner',
-      };
-
-      await apiFetch('/api/partners/settlements', {
-        method: 'POST',
+      const newStatus = !order.is_partner_settled;
+      await apiFetch(`/api/partners/bills/${order.id}/settle`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ is_partner_settled: newStatus }),
       });
 
       playSuccessChime();
-      toast.success('Settlement marker saved! Profit dividend checkpoint locked.');
-      setShowSettleModal(false);
-      setSettleNotes('');
+      toast.success(
+        newStatus
+          ? `Invoice #${order.invoice_number} marked as Settled!`
+          : `Invoice #${order.invoice_number} reverted to Unsettled.`
+      );
+      setConfirmingOrderId(null);
       await Promise.all([fetchPartners(), fetchAuxData(), fetchBreakdown()]);
     } catch (err) {
-      toast.error('Failed to create settlement checkpoint: ' + err.message);
+      toast.error('Failed to update settlement status: ' + err.message);
     } finally {
-      setSubmittingSettle(false);
+      setSettlingOrderId(null);
     }
   };
 
-  const handleDeleteSettlement = async (id) => {
-    if (!window.confirm('Delete this settlement checkpoint? This will revert the calculation baseline.')) return;
-    try {
-      await apiFetch(`/api/partners/settlements/${id}`, { method: 'DELETE' });
-      toast.success('Settlement checkpoint removed.');
-      await Promise.all([fetchPartners(), fetchAuxData(), fetchBreakdown()]);
-    } catch (err) {
-      toast.error('Error deleting checkpoint: ' + err.message);
-    }
+  const promptDeleteSettlement = (id) => {
+    playTapSound();
+    setConfirmDialog({
+      open: true,
+      title: 'Delete Settlement Checkpoint',
+      message: 'Are you sure you want to delete this settlement checkpoint? This will revert the calculation baseline.',
+      confirmLabel: 'Delete Checkpoint',
+      onConfirm: async () => {
+        setConfirmDialog((prev) => ({ ...prev, open: false }));
+        try {
+          await apiFetch(`/api/partners/settlements/${id}`, { method: 'DELETE' });
+          toast.success('Settlement checkpoint removed.');
+          await Promise.all([fetchPartners(), fetchAuxData(), fetchBreakdown()]);
+        } catch (err) {
+          toast.error('Error deleting checkpoint: ' + err.message);
+        }
+      },
+    });
   };
 
   // Export PDF Statement
@@ -328,6 +343,7 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
         netProfit: summary.net_profit || 0,
         partners: calcData.partner_splits || [],
         orders: calcData.orders || [],
+        settlementInfo: settlements[0] || calcData.last_settlement,
         currencySymbol,
         filename: `Partner_Profit_${pakistanToday()}.csv`,
       });
@@ -620,7 +636,12 @@ ${splitsText}
           </div>
 
           {/* Time Range Pills */}
-          <div className="chart-pill-group" role="group" aria-label="Time Range">
+          <div
+            className="chart-pill-group"
+            role="group"
+            aria-label="Time Range"
+            style={{ maxWidth: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', flexShrink: 1 }}
+          >
             <button
               type="button"
               className={`chart-pill-btn${timeRange === 'unsettled' ? ' is-active' : ''}`}
@@ -693,84 +714,74 @@ ${splitsText}
           </div>
         )}
 
-        {/* Dynamic Period Summary KPIs */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-            gap: '0.7rem',
-            paddingTop: '0.8rem',
-            borderTop: '1px solid var(--border-subtle)',
-          }}
-        >
-          <div style={{ padding: '0.6rem 0.8rem', borderRadius: 'var(--radius-md)', background: 'rgba(0,0,0,0.02)' }}>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>PERIOD SALES</div>
-            <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--status-paid)' }}>
-              {currencySymbol} {formatPkMoney(summary.total_sales || 0)}
-            </div>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{summary.sales_count || 0} orders</div>
-          </div>
+        {/* Summary Metric Cards */}
+        {(() => {
+          const allOrders = calcData.orders || [];
+          const unsettledCount = allOrders.filter((o) => !o.is_partner_settled).length;
+          const settledCount = allOrders.filter((o) => o.is_partner_settled).length;
 
-          <div style={{ padding: '0.6rem 0.8rem', borderRadius: 'var(--radius-md)', background: 'rgba(0,0,0,0.02)' }}>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>BUYING / PURCHASES</div>
-            <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--status-overdue)' }}>
-              {currencySymbol} {formatPkMoney(summary.total_buying || 0)}
-            </div>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{summary.buying_count || 0} bills</div>
-          </div>
+          return (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                gap: '0.7rem',
+                paddingTop: '0.8rem',
+                borderTop: '1px solid var(--border-subtle)',
+              }}
+            >
+              <div style={{ padding: '0.6rem 0.8rem', borderRadius: 'var(--radius-md)', background: 'rgba(0,0,0,0.02)' }}>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>PERIOD SALES</div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--status-paid)' }}>
+                  {currencySymbol} {formatPkMoney(summary.total_sales || 0)}
+                </div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{summary.sales_count || 0} orders</div>
+              </div>
 
-          <div style={{ padding: '0.6rem 0.8rem', borderRadius: 'var(--radius-md)', background: 'rgba(0,0,0,0.02)' }}>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>NET PERIOD PROFIT</div>
-            <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--accent-teal)' }}>
-              {currencySymbol} {formatPkMoney(summary.net_profit || 0)}
-            </div>
-            <div style={{ fontSize: '0.68rem', color: 'var(--accent-teal)' }}>{summary.profit_margin_pct || 0}% margin</div>
-          </div>
+              <div style={{ padding: '0.6rem 0.8rem', borderRadius: 'var(--radius-md)', background: 'rgba(0,0,0,0.02)' }}>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>BUYING / PURCHASES</div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--status-overdue)' }}>
+                  {currencySymbol} {formatPkMoney(summary.total_buying || 0)}
+                </div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{summary.buying_count || 0} bills</div>
+              </div>
 
-          <div style={{ padding: '0.6rem 0.8rem', borderRadius: 'var(--radius-md)', background: 'rgba(59, 130, 246, 0.06)' }}>
-            <div style={{ fontSize: '0.68rem', color: '#3b82f6', fontWeight: 700 }}>NOMI 50% SHARE</div>
-            <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#3b82f6' }}>
-              {currencySymbol} {formatPkMoney((summary.net_profit || 0) * 0.5)}
-            </div>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Period Dividend</div>
-          </div>
+              <div style={{ padding: '0.6rem 0.8rem', borderRadius: 'var(--radius-md)', background: 'rgba(0,0,0,0.02)' }}>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>NET PERIOD PROFIT</div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--accent-teal)' }}>
+                  {currencySymbol} {formatPkMoney(summary.net_profit || 0)}
+                </div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--accent-teal)' }}>{summary.profit_margin_pct || 0}% margin</div>
+              </div>
 
-          <div style={{ padding: '0.6rem 0.8rem', borderRadius: 'var(--radius-md)', background: 'rgba(20, 184, 166, 0.06)' }}>
-            <div style={{ fontSize: '0.68rem', color: 'var(--accent-teal)', fontWeight: 700 }}>HARIS 50% SHARE</div>
-            <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--accent-teal)' }}>
-              {currencySymbol} {formatPkMoney((summary.net_profit || 0) * 0.5)}
-            </div>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Period Dividend</div>
-          </div>
-        </div>
+              <div style={{ padding: '0.6rem 0.8rem', borderRadius: 'var(--radius-md)', background: 'rgba(59, 130, 246, 0.06)' }}>
+                <div style={{ fontSize: '0.68rem', color: '#3b82f6', fontWeight: 700 }}>NOMI 50% SHARE</div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#3b82f6' }}>
+                  {currencySymbol} {formatPkMoney((summary.net_profit || 0) * 0.5)}
+                </div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Period Dividend</div>
+              </div>
 
-        {/* Mark as Settled Action Bar */}
-        <div
-          style={{
-            marginTop: '0.9rem',
-            paddingTop: '0.8rem',
-            borderTop: '1px dashed var(--border-subtle)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '0.6rem',
-          }}
-        >
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-            Ready to finalize and freeze this period? Add a settlement marker so subsequent calculations start cleanly from this point.
-          </div>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => setShowSettleModal(true)}
-            style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem', background: '#d97706', borderColor: '#d97706' }}
-            disabled={calcData.orders.length === 0}
-          >
-            <Flag size={14} />
-            <span>Mark as Settled / Checkpoint</span>
-          </button>
-        </div>
+              <div style={{ padding: '0.6rem 0.8rem', borderRadius: 'var(--radius-md)', background: 'rgba(20, 184, 166, 0.06)' }}>
+                <div style={{ fontSize: '0.68rem', color: 'var(--accent-teal)', fontWeight: 700 }}>HARIS 50% SHARE</div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--accent-teal)' }}>
+                  {currencySymbol} {formatPkMoney((summary.net_profit || 0) * 0.5)}
+                </div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Period Dividend</div>
+              </div>
+
+              <div style={{ padding: '0.6rem 0.8rem', borderRadius: 'var(--radius-md)', background: 'rgba(217, 119, 6, 0.08)', border: '1px solid rgba(217, 119, 6, 0.2)' }}>
+                <div style={{ fontSize: '0.68rem', color: '#d97706', fontWeight: 700 }}>UNSETTLED BILLS</div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#d97706' }}>
+                  {unsettledCount} <span style={{ fontSize: '0.72rem', fontWeight: 500, color: 'var(--text-muted)' }}>/ {allOrders.length}</span>
+                </div>
+                <div style={{ fontSize: '0.68rem', color: settledCount > 0 ? 'var(--status-paid)' : 'var(--text-muted)' }}>
+                  {settledCount > 0 ? `${settledCount} settled` : 'All unsettled'}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* 5. Sub-Tabs (Itemized Orders | Visual Analytics | Payouts Ledger | Checkpoints History) */}
@@ -837,24 +848,61 @@ ${splitsText}
       {/* Sub-Tab 1: Itemized Order & Shipment Breakdown Table */}
       {activeSubTab === 'breakdown' && (
         <div className="glass-panel" style={{ padding: '1rem', borderRadius: 'var(--radius-lg)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <input
-              type="search"
-              placeholder="Search by client, invoice # or note..."
-              className="input"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ maxWidth: '320px', padding: '0.4rem 0.7rem', fontSize: '0.82rem' }}
-            />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem', flexWrap: 'wrap', gap: '0.6rem' }}>
+            <div style={{ position: 'relative', flex: '1 1 240px', maxWidth: '360px', display: 'flex', alignItems: 'center' }}>
+              <Search size={14} style={{ position: 'absolute', left: '0.85rem', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+              <input
+                type="text"
+                placeholder="Search orders, invoices, clients..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '0.42rem 2.2rem 0.42rem 2.4rem',
+                  fontSize: '0.82rem',
+                  background: 'var(--bg-input, rgba(255, 255, 255, 0.05))',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '999px',
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                  transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
+                }}
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  style={{
+                    position: 'absolute',
+                    right: '0.6rem',
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '2px',
+                  }}
+                  title="Clear search"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
             <div style={{ display: 'flex', gap: '0.4rem' }}>
-              <button type="button" className="btn-secondary" onClick={handleDownloadCsv} style={{ padding: '0.35rem 0.65rem', fontSize: '0.78rem' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleDownloadCsv}
+                style={{ padding: '0.42rem 0.85rem', fontSize: '0.78rem', borderRadius: '999px', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              >
                 <FileSpreadsheet size={13} /> Export Excel
               </button>
             </div>
           </div>
 
-          <div className="table-responsive" style={{ maxHeight: '420px', overflowY: 'auto' }}>
-            <table className="data-table" style={{ width: '100%', fontSize: '0.82rem' }}>
+          <div className="table-responsive" style={{ maxHeight: '420px', overflowY: 'auto', overflowX: 'auto', WebkitOverflowScrolling: 'touch', width: '100%' }}>
+            <table className="data-table" style={{ width: '100%', minWidth: '780px', fontSize: '0.82rem' }}>
               <thead>
                 <tr>
                   <th>Date</th>
@@ -865,12 +913,13 @@ ${splitsText}
                   <th style={{ textAlign: 'right' }}>Buying Cost</th>
                   <th style={{ textAlign: 'right' }}>Profit Margin</th>
                   <th style={{ textAlign: 'center' }}>50/50 Share</th>
+                  <th style={{ textAlign: 'center' }}>Settlement Status</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-muted)' }}>
+                    <td colSpan={9} style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-muted)' }}>
                       No orders or shipments found for this time period.
                     </td>
                   </tr>
@@ -879,6 +928,8 @@ ${splitsText}
                     const isBuy = o.is_supplier || o.bill_type === 'supplier';
                     const isHelp = o.is_help || o.bill_type === 'help';
                     const halfShare = Math.round((Math.abs(o.profit_effect) / 2) * 100) / 100;
+
+                    const isOrderSettled = Boolean(o.is_partner_settled);
 
                     return (
                       <tr key={o.id}>
@@ -922,6 +973,175 @@ ${splitsText}
                         <td style={{ textAlign: 'center', fontSize: '0.74rem', color: 'var(--text-muted)' }}>
                           {isHelp ? '—' : `Rs. ${formatPkMoney(halfShare)} ea.`}
                         </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {isOrderSettled ? (
+                            confirmingOrderId === o.id ? (
+                              <div
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  background: 'rgba(234, 67, 53, 0.12)',
+                                  border: '1px solid rgba(234, 67, 53, 0.35)',
+                                  borderRadius: '999px',
+                                  padding: '2px',
+                                  gap: '3px',
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleBillSettled(o)}
+                                  disabled={settlingOrderId === o.id}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    background: 'var(--status-overdue)',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '999px',
+                                    padding: '0.22rem 0.6rem',
+                                    fontSize: '0.72rem',
+                                    fontWeight: 750,
+                                    cursor: 'pointer',
+                                    height: '24px',
+                                    lineHeight: 1,
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  title="Revert this bill back to Unsettled"
+                                >
+                                  {settlingOrderId === o.id ? 'Updating...' : 'Unsettle'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmingOrderId(null)}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    background: 'transparent',
+                                    color: 'var(--text-secondary)',
+                                    border: 'none',
+                                    borderRadius: '50%',
+                                    width: '22px',
+                                    height: '22px',
+                                    cursor: 'pointer',
+                                    padding: 0,
+                                  }}
+                                  title="Cancel"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="badge badge-paid"
+                                onClick={() => {
+                                  playTapSound();
+                                  setConfirmingOrderId(o.id);
+                                }}
+                                style={{
+                                  fontSize: '0.70rem',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem',
+                                  whiteSpace: 'nowrap',
+                                  cursor: 'pointer',
+                                  border: '1px solid var(--status-paid)',
+                                  background: 'rgba(52, 168, 83, 0.15)',
+                                }}
+                                title="Click to revert this record to Unsettled"
+                              >
+                                <CheckCircle2 size={11} /> Settled
+                              </button>
+                            )
+                          ) : confirmingOrderId === o.id ? (
+                            <div
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                background: 'rgba(217, 119, 6, 0.12)',
+                                border: '1px solid rgba(217, 119, 6, 0.35)',
+                                borderRadius: '999px',
+                                padding: '2px',
+                                gap: '3px',
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => handleToggleBillSettled(o)}
+                                disabled={settlingOrderId === o.id}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem',
+                                  background: '#d97706',
+                                  color: '#ffffff',
+                                  border: 'none',
+                                  borderRadius: '999px',
+                                  padding: '0.22rem 0.65rem',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 750,
+                                  cursor: 'pointer',
+                                  height: '24px',
+                                  lineHeight: 1,
+                                  whiteSpace: 'nowrap',
+                                  boxShadow: '0 1px 4px rgba(217, 119, 6, 0.3)',
+                                }}
+                              >
+                                <Check size={12} />
+                                {settlingOrderId === o.id ? 'Saving...' : 'Settle'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingOrderId(null)}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  background: 'transparent',
+                                  color: 'var(--text-secondary)',
+                                  border: 'none',
+                                  borderRadius: '50%',
+                                  width: '22px',
+                                  height: '22px',
+                                  cursor: 'pointer',
+                                  padding: 0,
+                                }}
+                                title="Cancel"
+                              >
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="badge badge-amber"
+                              onClick={() => {
+                                playTapSound();
+                                setConfirmingOrderId(o.id);
+                              }}
+                              style={{
+                                fontSize: '0.70rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                                whiteSpace: 'nowrap',
+                                cursor: 'pointer',
+                                border: '1px solid #f59e0b',
+                                background: 'rgba(245, 158, 11, 0.18)',
+                                color: '#d97706',
+                                fontWeight: 750,
+                                padding: '0.28rem 0.55rem',
+                                borderRadius: '999px',
+                                transition: 'all 0.15s ease',
+                              }}
+                              title="Click to mark this record as Settled"
+                            >
+                              <Flag size={11} /> Unsettled
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     );
                   })
@@ -947,17 +1167,17 @@ ${splitsText}
             </button>
           </div>
 
-          <div className="table-responsive">
-            <table className="data-table" style={{ width: '100%', fontSize: '0.82rem' }}>
+          <div className="table-responsive" style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            <table className="data-table" style={{ width: '100%', minWidth: '780px', fontSize: '0.82rem' }}>
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Partner</th>
-                  <th>Type</th>
-                  <th>Method</th>
-                  <th>Memo / Reference</th>
-                  <th style={{ textAlign: 'right' }}>Amount</th>
-                  <th style={{ textAlign: 'center' }}>Action</th>
+                  <th style={{ minWidth: '95px' }}>Date</th>
+                  <th style={{ minWidth: '100px' }}>Partner</th>
+                  <th style={{ minWidth: '110px' }}>Type</th>
+                  <th style={{ minWidth: '130px' }}>Method</th>
+                  <th style={{ minWidth: '180px' }}>Memo / Reference</th>
+                  <th style={{ textAlign: 'right', minWidth: '100px' }}>Amount</th>
+                  <th style={{ textAlign: 'center', width: '60px' }}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -970,28 +1190,41 @@ ${splitsText}
                 ) : (
                   payouts.map((p) => (
                     <tr key={p.id}>
-                      <td>{p.transaction_date}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{p.transaction_date}</td>
                       <td>
                         <strong>{p.partner_name}</strong>
                       </td>
                       <td>
-                        <span className={`badge ${p.type === 'capital_in' ? 'badge-teal' : 'badge-amber'}`} style={{ fontSize: '0.68rem' }}>
+                        <span className={`badge ${p.type === 'capital_in' ? 'badge-teal' : 'badge-amber'}`} style={{ fontSize: '0.68rem', whiteSpace: 'nowrap' }}>
                           {p.type === 'capital_in' ? 'Investment (+)' : 'Withdrawal (−)'}
                         </span>
                       </td>
-                      <td>{p.payment_method}</td>
-                      <td>{p.notes || '—'}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: p.type === 'capital_in' ? 'var(--status-paid)' : 'var(--status-overdue)' }}>
+                      <td style={{ whiteSpace: 'nowrap' }}>{p.payment_method}</td>
+                      <td style={{ minWidth: '180px', wordBreak: 'break-word' }}>{p.notes || '—'}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', color: p.type === 'capital_in' ? 'var(--status-paid)' : 'var(--status-overdue)' }}>
                         {p.type === 'capital_in' ? '+' : '−'}{currencySymbol} {formatPkMoney(p.amount)}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <button
                           type="button"
-                          className="btn-icon btn-ghost is-danger"
-                          onClick={() => handleDeletePayout(p.id)}
+                          onClick={() => promptDeletePayout(p.id)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '8px',
+                            background: 'rgba(234, 67, 53, 0.12)',
+                            border: '1px solid rgba(234, 67, 53, 0.3)',
+                            color: '#ea4335',
+                            cursor: 'pointer',
+                            padding: 0,
+                            transition: 'all 0.15s ease',
+                          }}
                           title="Delete payout"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={13} />
                         </button>
                       </td>
                     </tr>
@@ -1010,57 +1243,70 @@ ${splitsText}
             <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0 }}>Settlement Checkpoint History</h3>
           </div>
 
-          <div className="table-responsive">
-            <table className="data-table" style={{ width: '100%', fontSize: '0.82rem' }}>
+          <div className="table-responsive" style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            <table className="data-table" style={{ width: '100%', minWidth: '1080px', fontSize: '0.82rem' }}>
               <thead>
                 <tr>
-                  <th>Code</th>
-                  <th>Settlement Date</th>
-                  <th>Period Settled</th>
-                  <th style={{ textAlign: 'right' }}>Total Sales</th>
-                  <th style={{ textAlign: 'right' }}>Buying Cost</th>
-                  <th style={{ textAlign: 'right' }}>Net Settled Profit</th>
-                  <th style={{ textAlign: 'right' }}>Nomi 50%</th>
-                  <th style={{ textAlign: 'right' }}>Haris 50%</th>
-                  <th>Notes</th>
-                  <th style={{ textAlign: 'center' }}>Action</th>
+                  <th style={{ minWidth: '140px' }}>Code</th>
+                  <th style={{ minWidth: '105px' }}>Settlement Date</th>
+                  <th style={{ minWidth: '140px' }}>Period Settled</th>
+                  <th style={{ textAlign: 'right', minWidth: '100px' }}>Total Sales</th>
+                  <th style={{ textAlign: 'right', minWidth: '100px' }}>Buying Cost</th>
+                  <th style={{ textAlign: 'right', minWidth: '115px' }}>Net Settled Profit</th>
+                  <th style={{ textAlign: 'right', minWidth: '95px' }}>Nomi 50%</th>
+                  <th style={{ textAlign: 'right', minWidth: '95px' }}>Haris 50%</th>
+                  <th style={{ minWidth: '220px' }}>Notes / Memo</th>
+                  <th style={{ textAlign: 'center', width: '60px' }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {settlements.length === 0 ? (
                   <tr>
                     <td colSpan={10} style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-muted)' }}>
-                      No settlement checkpoints created yet. Click "Mark as Settled" above to create your first milestone!
+                      No settlement checkpoints recorded yet.
                     </td>
                   </tr>
                 ) : (
                   settlements.map((s) => (
                     <tr key={s.id}>
-                      <td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         <code style={{ fontWeight: 700, color: '#d97706' }}>{s.settlement_code}</code>
                       </td>
-                      <td>{s.settled_at?.slice(0, 10)}</td>
-                      <td>{s.period_start ? `${s.period_start} to ${s.period_end}` : `Up to ${s.period_end}`}</td>
-                      <td style={{ textAlign: 'right' }}>{currencySymbol} {formatPkMoney(s.total_sales)}</td>
-                      <td style={{ textAlign: 'right' }}>{currencySymbol} {formatPkMoney(s.total_buying)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--accent-teal)' }}>
+                      <td style={{ whiteSpace: 'nowrap' }}>{s.settled_at?.slice(0, 10)}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{s.period_start ? `${s.period_start} to ${s.period_end}` : `Up to ${s.period_end}`}</td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{currencySymbol} {formatPkMoney(s.total_sales)}</td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{currencySymbol} {formatPkMoney(s.total_buying)}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', color: 'var(--accent-teal)' }}>
                         {currencySymbol} {formatPkMoney(s.net_profit)}
                       </td>
-                      <td style={{ textAlign: 'right', color: '#3b82f6', fontWeight: 600 }}>
+                      <td style={{ textAlign: 'right', color: '#3b82f6', fontWeight: 600, whiteSpace: 'nowrap' }}>
                         {currencySymbol} {formatPkMoney(s.nomi_share)}
                       </td>
-                      <td style={{ textAlign: 'right', color: 'var(--accent-teal)', fontWeight: 600 }}>
+                      <td style={{ textAlign: 'right', color: 'var(--accent-teal)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                         {currencySymbol} {formatPkMoney(s.haris_share)}
                       </td>
-                      <td>{s.notes || '—'}</td>
+                      <td style={{ minWidth: '220px', wordBreak: 'break-word', lineHeight: 1.45 }}>{s.notes || '—'}</td>
                       <td style={{ textAlign: 'center' }}>
                         <button
                           type="button"
-                          className="btn-icon btn-ghost is-danger"
-                          onClick={() => handleDeleteSettlement(s.id)}
+                          onClick={() => promptDeleteSettlement(s.id)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '8px',
+                            background: 'rgba(234, 67, 53, 0.12)',
+                            border: '1px solid rgba(234, 67, 53, 0.3)',
+                            color: '#ea4335',
+                            cursor: 'pointer',
+                            padding: 0,
+                            transition: 'all 0.15s ease',
+                          }}
                           title="Undo settlement marker"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={13} />
                         </button>
                       </td>
                     </tr>
@@ -1073,155 +1319,100 @@ ${splitsText}
       )}
 
       {/* MODAL 1: Record Payout */}
-      {showPayoutModal && (
-        <div className="more-menu-overlay" onClick={() => setShowPayoutModal(false)}>
-          <div className="glass-panel" onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: '440px', padding: '1.5rem', borderRadius: 'var(--radius-lg)' }}>
-            <h3 style={{ fontSize: '1.15rem', fontWeight: 800, marginBottom: '0.8rem' }}>Record Partner Payout</h3>
+      {showPayoutModal &&
+        createPortal(
+          <div className="client-modal-overlay" onClick={() => setShowPayoutModal(false)} role="presentation">
+            <div className="client-modal-card glass-panel" onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: '460px' }}>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 800, marginBottom: '0.8rem' }}>Record Partner Payout</h3>
 
-            <form onSubmit={handleCreatePayout}>
-              <div style={{ marginBottom: '0.8rem' }}>
-                <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.3rem' }}>Partner</label>
-                <select
-                  className="input"
-                  value={payoutForm.partner_id}
-                  onChange={(e) => setPayoutForm({ ...payoutForm, partner_id: e.target.value })}
-                  required
-                >
-                  {partners.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.profit_share_pct || 50}% Share)
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <form onSubmit={handleCreatePayout}>
+                <div style={{ marginBottom: '0.8rem' }}>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.3rem' }}>Partner</label>
+                  <select
+                    className="input"
+                    value={payoutForm.partner_id}
+                    onChange={(e) => setPayoutForm({ ...payoutForm, partner_id: e.target.value })}
+                    required
+                  >
+                    {partners.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.profit_share_pct || 50}% Share)
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              <div style={{ marginBottom: '0.8rem' }}>
-                <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.3rem' }}>Transaction Type</label>
-                <select
-                  className="input"
-                  value={payoutForm.type}
-                  onChange={(e) => setPayoutForm({ ...payoutForm, type: e.target.value })}
-                >
-                  <option value="payout">Profit Withdrawal / Payout (−)</option>
-                  <option value="capital_in">Capital / Investment (+)</option>
-                </select>
-              </div>
+                <div style={{ marginBottom: '0.8rem' }}>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.3rem' }}>Transaction Type</label>
+                  <select
+                    className="input"
+                    value={payoutForm.type}
+                    onChange={(e) => setPayoutForm({ ...payoutForm, type: e.target.value })}
+                  >
+                    <option value="payout">Profit Withdrawal / Payout (−)</option>
+                    <option value="capital_in">Capital / Investment (+)</option>
+                  </select>
+                </div>
 
-              <div style={{ marginBottom: '0.8rem' }}>
-                <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.3rem' }}>Amount ({currencySymbol})</label>
-                <input
-                  type="number"
-                  step="any"
-                  className="input"
-                  placeholder="e.g. 50000"
-                  value={payoutForm.amount}
-                  onChange={(e) => setPayoutForm({ ...payoutForm, amount: e.target.value })}
-                  required
-                />
-              </div>
+                <div style={{ marginBottom: '0.8rem' }}>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.3rem' }}>Amount ({currencySymbol})</label>
+                  <input
+                    type="number"
+                    step="any"
+                    className="input"
+                    placeholder="e.g. 50000"
+                    value={payoutForm.amount}
+                    onChange={(e) => setPayoutForm({ ...payoutForm, amount: e.target.value })}
+                    required
+                  />
+                </div>
 
-              <div style={{ marginBottom: '0.8rem' }}>
-                <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.3rem' }}>Date</label>
-                <input
-                  type="date"
-                  className="input"
-                  value={payoutForm.transaction_date}
-                  onChange={(e) => setPayoutForm({ ...payoutForm, transaction_date: e.target.value })}
-                  required
-                />
-              </div>
+                <div style={{ marginBottom: '0.8rem' }}>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.3rem' }}>Date</label>
+                  <input
+                    type="date"
+                    className="input"
+                    value={payoutForm.transaction_date}
+                    onChange={(e) => setPayoutForm({ ...payoutForm, transaction_date: e.target.value })}
+                    required
+                  />
+                </div>
 
-              <div style={{ marginBottom: '0.8rem' }}>
-                <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.3rem' }}>Payment Method / Bank</label>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="e.g. Meezan Bank / Cash / Raast"
-                  value={payoutForm.payment_method}
-                  onChange={(e) => setPayoutForm({ ...payoutForm, payment_method: e.target.value })}
-                />
-              </div>
+                <div style={{ marginBottom: '0.8rem' }}>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.3rem' }}>Payment Method / Bank</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="e.g. Meezan Bank / Cash / Raast"
+                    value={payoutForm.payment_method}
+                    onChange={(e) => setPayoutForm({ ...payoutForm, payment_method: e.target.value })}
+                  />
+                </div>
 
-              <div style={{ marginBottom: '1.2rem' }}>
-                <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.3rem' }}>Notes / Memo</label>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="e.g. Profit distribution for July batch"
-                  value={payoutForm.notes}
-                  onChange={(e) => setPayoutForm({ ...payoutForm, notes: e.target.value })}
-                />
-              </div>
+                <div style={{ marginBottom: '1.2rem' }}>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.3rem' }}>Notes / Memo</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="e.g. Profit distribution for July batch"
+                    value={payoutForm.notes}
+                    onChange={(e) => setPayoutForm({ ...payoutForm, notes: e.target.value })}
+                  />
+                </div>
 
-              <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn-secondary" onClick={() => setShowPayoutModal(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" disabled={submittingPayout}>
-                  {submittingPayout ? 'Saving...' : 'Save Payout'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 2: Create Settlement Checkpoint */}
-      {showSettleModal && (
-        <div className="more-menu-overlay" onClick={() => setShowSettleModal(false)}>
-          <div className="glass-panel" onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: '460px', padding: '1.5rem', borderRadius: 'var(--radius-lg)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.6rem' }}>
-              <Flag size={20} style={{ color: '#d97706' }} />
-              <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>Create Settlement Checkpoint</h3>
+                <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn-secondary" onClick={() => setShowPayoutModal(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-primary" disabled={submittingPayout}>
+                    {submittingPayout ? 'Saving...' : 'Save Payout'}
+                  </button>
+                </div>
+              </form>
             </div>
-
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
-              Freezes and records the profit distribution for this period. Future "Unsettled" calculations will start cleanly after this point.
-            </p>
-
-            <div style={{ background: 'rgba(0,0,0,0.03)', padding: '0.8rem', borderRadius: 'var(--radius-md)', marginBottom: '1rem', fontSize: '0.8rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
-                <span>Period Net Profit:</span>
-                <strong>{currencySymbol} {formatPkMoney(summary.net_profit || 0)}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#3b82f6', marginBottom: '0.3rem' }}>
-                <span>Nomi Share (50%):</span>
-                <strong>{currencySymbol} {formatPkMoney((summary.net_profit || 0) * 0.5)}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--accent-teal)' }}>
-                <span>Haris Share (50%):</span>
-                <strong>{currencySymbol} {formatPkMoney((summary.net_profit || 0) * 0.5)}</strong>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '1.2rem' }}>
-              <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.3rem' }}>Settlement Memo / Notes</label>
-              <input
-                type="text"
-                className="input"
-                placeholder="e.g. Saudia shipment batch 2 distribution settled"
-                value={settleNotes}
-                onChange={(e) => setSettleNotes(e.target.value)}
-              />
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end' }}>
-              <button type="button" className="btn-secondary" onClick={() => setShowSettleModal(false)}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={handleCreateSettlement}
-                disabled={submittingSettle}
-                style={{ background: '#d97706', borderColor: '#d97706' }}
-              >
-                {submittingSettle ? 'Creating Checkpoint...' : 'Confirm & Freeze Settlement'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
 
       {/* 1-Tap WhatsApp Partner Digest Modal */}
       <PartnerWhatsAppDigestModal
@@ -1232,6 +1423,16 @@ ${splitsText}
         currencySymbol={currencySymbol}
         settings={settings}
         latestSettlement={settlements[0] || null}
+      />
+
+      {/* In-App Confirmation Modal */}
+      <ConfirmDialog
+        open={confirmDialog.open}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel || 'Delete'}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog((prev) => ({ ...prev, open: false }))}
       />
     </div>
   );

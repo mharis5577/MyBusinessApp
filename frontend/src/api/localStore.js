@@ -2061,15 +2061,7 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
 
       let unsettledSales = 0;
       let unsettledBuying = 0;
-      const unsettledBills = bills.filter((b) => {
-        if (!lastSettlement) return true;
-        const bDate = String(b.bill_date || '');
-        const pEnd = String(lastSettlement.period_end || '');
-        const lastId = Number(lastSettlement.last_bill_id) || 0;
-        if (bDate > pEnd) return true;
-        if (bDate === pEnd && Number(b.id) > lastId) return true;
-        return false;
-      });
+      const unsettledBills = bills.filter((b) => !b.is_partner_settled);
 
       unsettledBills.forEach((b) => {
         const t = normalizeBillType(b.bill_type);
@@ -2118,6 +2110,58 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
       });
     }
 
+    // PATCH /api/partners/bills/:id/settle
+    if (parts[2] === 'bills' && parts[4] === 'settle' && (method === 'PATCH' || method === 'POST')) {
+      const billId = Number(parts[3]);
+      const isSettled = body.is_partner_settled !== undefined ? (body.is_partner_settled ? 1 : 0) : 1;
+      const bill = await db.get('bills', billId);
+      if (bill) {
+        bill.is_partner_settled = isSettled;
+        bill.partner_settled_at = isSettled ? new Date().toISOString() : null;
+        await db.put('bills', bill);
+
+        const allSettlements = await db.getAll('partner_settlements');
+        if (isSettled) {
+          const isSupplier = bill.bill_type === 'supplier';
+          const isHelp = bill.bill_type === 'help' || bill.bill_type === 'loan';
+          const amount = Number(bill.total_amount) || 0;
+          const profitEffect = isHelp ? 0 : isSupplier ? -amount : amount;
+          const totalSales = isSupplier || isHelp ? 0 : amount;
+          const totalBuying = isSupplier ? amount : 0;
+          const dateStr = pakistanToday().replace(/-/g, '');
+          const code = `SETTL-${dateStr}-B${bill.id}`;
+
+          const exists = allSettlements.some((s) => Number(s.last_bill_id) === Number(bill.id));
+          if (!exists) {
+            const newId = await nextId(db, 'partner_settlements');
+            const entry = {
+              id: newId,
+              settlement_code: code,
+              period_start: bill.bill_date || pakistanToday(),
+              period_end: bill.bill_date || pakistanToday(),
+              last_bill_id: bill.id,
+              last_bill_date: bill.bill_date || pakistanToday(),
+              total_sales: totalSales,
+              total_buying: totalBuying,
+              net_profit: profitEffect,
+              nomi_share: profitEffect * 0.5,
+              haris_share: profitEffect * 0.5,
+              notes: body.notes || `Settled 50/50 for #${bill.invoice_number} (${bill.customer_name})`,
+              created_by: 'Owner',
+              settled_at: pakistanToday(),
+            };
+            await db.put('partner_settlements', entry);
+          }
+        } else {
+          const linked = allSettlements.find((s) => Number(s.last_bill_id) === Number(bill.id));
+          if (linked) {
+            await db.delete('partner_settlements', linked.id);
+          }
+        }
+      }
+      return jsonOk({ success: true, billId, is_partner_settled: isSettled });
+    }
+
     // 2. PUT /api/partners/:id
     if (parts[2] && !isNaN(Number(parts[2])) && method === 'PUT') {
       const id = Number(parts[2]);
@@ -2140,16 +2184,7 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
       let bills = (await db.getAll('bills')).filter((b) => !isCancelled(b));
 
       if (sinceLastSettlement === 'true') {
-        if (lastSettlement) {
-          const pEnd = String(lastSettlement.period_end || '');
-          const lastId = Number(lastSettlement.last_bill_id) || 0;
-          bills = bills.filter((b) => {
-            const bDate = String(b.bill_date || '');
-            if (bDate > pEnd) return true;
-            if (bDate === pEnd && Number(b.id) > lastId) return true;
-            return false;
-          });
-        }
+        bills = bills.filter((b) => !b.is_partner_settled);
       } else {
         if (startDate && endDate) {
           bills = bills.filter((b) => {
@@ -2204,6 +2239,7 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
           status: b.status,
           notes: b.notes || '',
           profit_effect: profitEffect,
+          is_partner_settled: Boolean(b.is_partner_settled),
         };
       });
 
@@ -2268,7 +2304,7 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
         haris_share: Number(body.haris_share) || 0,
         notes: body.notes || '',
         created_by: body.created_by || 'Owner',
-        settled_at: new Date().toISOString(),
+        settled_at: pakistanToday(),
       };
 
       await db.put('partner_settlements', entry);
@@ -2286,8 +2322,17 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
     // 6. DELETE /api/partners/settlements/:id
     if (parts[2] === 'settlements' && parts[3] && method === 'DELETE') {
       const id = Number(parts[3]);
+      const settl = await db.get('partner_settlements', id);
+      if (settl && settl.last_bill_id) {
+        const bill = await db.get('bills', Number(settl.last_bill_id));
+        if (bill) {
+          bill.is_partner_settled = 0;
+          bill.partner_settled_at = null;
+          await db.put('bills', bill);
+        }
+      }
       await db.delete('partner_settlements', id);
-      return jsonOk({ success: true, message: 'Settlement checkpoint removed.' });
+      return jsonOk({ success: true });
     }
 
     // 7. POST /api/partners/payouts

@@ -2418,6 +2418,61 @@ app.put('/api/partners/:id', async (req, res) => {
   }
 });
 
+app.patch('/api/partners/bills/:id/settle', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const isSettled = req.body.is_partner_settled !== undefined ? (req.body.is_partner_settled ? 1 : 0) : 1;
+    await dbRun(
+      'UPDATE bills SET is_partner_settled = ?, partner_settled_at = ? WHERE id = ?',
+      [isSettled, isSettled ? new Date().toISOString() : null, id]
+    );
+
+    const bill = await dbGet('SELECT * FROM bills WHERE id = ?', [id]);
+    if (bill) {
+      if (isSettled) {
+        const isSupplier = bill.bill_type === 'supplier';
+        const isHelp = bill.bill_type === 'help' || bill.bill_type === 'loan';
+        const amount = Number(bill.total_amount) || 0;
+        const profitEffect = isHelp ? 0 : isSupplier ? -amount : amount;
+        const totalSales = isSupplier || isHelp ? 0 : amount;
+        const totalBuying = isSupplier ? amount : 0;
+        const dateStr = pakistanToday().replace(/-/g, '');
+        const code = `SETTL-${dateStr}-B${bill.id}`;
+
+        const existing = await dbGet('SELECT id FROM partner_settlements WHERE last_bill_id = ?', [bill.id]);
+        if (!existing) {
+          await dbRun(
+            `INSERT INTO partner_settlements (
+              settlement_code, period_start, period_end, last_bill_id, last_bill_date,
+              total_sales, total_buying, net_profit, nomi_share, haris_share, notes, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              code,
+              bill.bill_date || pakistanToday(),
+              bill.bill_date || pakistanToday(),
+              bill.id,
+              bill.bill_date || pakistanToday(),
+              totalSales,
+              totalBuying,
+              profitEffect,
+              profitEffect * 0.5,
+              profitEffect * 0.5,
+              req.body.notes || `Settled 50/50 for #${bill.invoice_number} (${bill.customer_name})`,
+              'Owner',
+            ]
+          );
+        }
+      } else {
+        await dbRun('DELETE FROM partner_settlements WHERE last_bill_id = ?', [bill.id]);
+      }
+    }
+
+    res.json({ success: true, billId: Number(id), is_partner_settled: isSettled });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 3. Custom Profit Breakdown & Order/Shipment Ledger Calculator
 app.get('/api/partners/profit-breakdown', async (req, res) => {
   try {
@@ -2431,14 +2486,8 @@ app.get('/api/partners/profit-breakdown', async (req, res) => {
     let whereClause = "status != 'cancelled'";
     const params = [];
 
-    if (sinceLastSettlement === 'true' && lastSettlement) {
-      if (lastSettlement.last_bill_id && lastSettlement.period_end) {
-        whereClause += ' AND (bill_date > ? OR (bill_date = ? AND id > ?))';
-        params.push(lastSettlement.period_end, lastSettlement.period_end, lastSettlement.last_bill_id);
-      } else if (lastSettlement.period_end) {
-        whereClause += ' AND bill_date > ?';
-        params.push(lastSettlement.period_end);
-      }
+    if (sinceLastSettlement === 'true') {
+      whereClause += ' AND COALESCE(is_partner_settled, 0) = 0';
     } else {
       if (startDate) {
         whereClause += ' AND bill_date >= ?';
@@ -2452,7 +2501,7 @@ app.get('/api/partners/profit-breakdown', async (req, res) => {
 
     // Fetch all qualifying orders/bills
     const rawBills = await dbAll(
-      `SELECT id, bill_type, invoice_number, customer_name, customer_phone, bill_date, total_amount, amount_paid, status, notes
+      `SELECT id, bill_type, invoice_number, customer_name, customer_phone, bill_date, total_amount, amount_paid, status, notes, is_partner_settled
        FROM bills 
        WHERE ${whereClause}
        ORDER BY bill_date DESC, id DESC`,
@@ -2494,6 +2543,7 @@ app.get('/api/partners/profit-breakdown', async (req, res) => {
         status: b.status,
         notes: b.notes || '',
         profit_effect: profitEffect,
+        is_partner_settled: Boolean(b.is_partner_settled),
       };
     });
 
@@ -2607,6 +2657,10 @@ app.get('/api/partners/settlements', async (req, res) => {
 app.delete('/api/partners/settlements/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const settl = await dbGet('SELECT * FROM partner_settlements WHERE id = ?', [id]);
+    if (settl && settl.last_bill_id) {
+      await dbRun('UPDATE bills SET is_partner_settled = 0, partner_settled_at = NULL WHERE id = ?', [settl.last_bill_id]);
+    }
     await dbRun('DELETE FROM partner_settlements WHERE id = ?', [id]);
     res.json({ success: true, message: 'Settlement checkpoint removed.' });
   } catch (err) {

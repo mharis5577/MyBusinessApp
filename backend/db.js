@@ -187,6 +187,8 @@ function initTables() {
     db.run(`ALTER TABLE bills ADD COLUMN cancelled_at TEXT DEFAULT ''`, () => {});
     db.run(`ALTER TABLE bills ADD COLUMN bill_time TEXT DEFAULT ''`, () => {});
     db.run(`ALTER TABLE bills ADD COLUMN is_bookmarked INTEGER DEFAULT 0`, () => {});
+    db.run(`ALTER TABLE bills ADD COLUMN is_partner_settled INTEGER DEFAULT 0`, () => {});
+    db.run(`ALTER TABLE bills ADD COLUMN partner_settled_at DATETIME`, () => {});
 
     // Bill Items Table
     db.run(`

@@ -775,8 +775,8 @@ export async function downloadPartnerReportPdf({
   pdf.text(`Itemized Orders & Shipments Breakdown (${orders.length} transactions)`, margin, y);
   y += 10;
 
-  const orderHeaders = ['Date', 'Invoice #', 'Type', 'Party / Shipment', 'Sales (Rs.)', 'Buying (Rs.)', 'Profit Margin'];
-  const orderColW = [usableW * 0.13, usableW * 0.17, usableW * 0.11, usableW * 0.27, usableW * 0.11, usableW * 0.11, usableW * 0.10];
+  const orderHeaders = ['Date', 'Invoice #', 'Type', 'Party / Shipment', 'Sales (Rs.)', 'Buying (Rs.)', 'Profit Effect', 'Status'];
+  const orderColW = [usableW * 0.12, usableW * 0.15, usableW * 0.10, usableW * 0.24, usableW * 0.11, usableW * 0.10, usableW * 0.10, usableW * 0.08];
   const orderColX = [];
   {
     let curX = margin;
@@ -823,7 +823,7 @@ export async function downloadPartnerReportPdf({
       const dStr = String(o.bill_date || '');
       const invStr = String(o.invoice_number || '');
       const tStr = (o.bill_type || 'sale').toUpperCase();
-      const partyStr = String(o.customer_name || '').substring(0, 24);
+      const partyStr = String(o.customer_name || '').substring(0, 22);
       const isBuy = o.is_supplier || o.bill_type === 'supplier';
       const isHelp = o.is_help || o.bill_type === 'help';
 
@@ -831,12 +831,15 @@ export async function downloadPartnerReportPdf({
       const buyStr = isBuy ? `${exportMoney(o.total_amount || 0)}` : '−';
       const profitStr = isHelp ? 'Rs. 0' : isBuy ? `-Rs. ${exportMoney(o.total_amount)}` : `+Rs. ${exportMoney(o.total_amount)}`;
 
-      pdf.text(dStr, orderColX[0] + 3, y + 10);
-      pdf.text(invStr, orderColX[1] + 3, y + 10);
-      pdf.text(tStr, orderColX[2] + 3, y + 10);
-      pdf.text(partyStr, orderColX[3] + 3, y + 10);
-      pdf.text(salesStr, orderColX[4] + 3, y + 10);
-      pdf.text(buyStr, orderColX[5] + 3, y + 10);
+      const isSettled = Boolean(settlementInfo && (dStr < (settlementInfo.period_end || '') || (dStr === (settlementInfo.period_end || '') && Number(o.id) <= Number(settlementInfo.last_bill_id || Infinity))));
+      const statusStr = isSettled ? 'Settled' : 'Unsettled';
+
+      pdf.text(dStr, orderColX[0] + 2, y + 10);
+      pdf.text(invStr, orderColX[1] + 2, y + 10);
+      pdf.text(tStr, orderColX[2] + 2, y + 10);
+      pdf.text(partyStr, orderColX[3] + 2, y + 10);
+      pdf.text(salesStr, orderColX[4] + 2, y + 10);
+      pdf.text(buyStr, orderColX[5] + 2, y + 10);
 
       pdf.setFont('helvetica', 'bold');
       if (isBuy) {
@@ -844,7 +847,14 @@ export async function downloadPartnerReportPdf({
       } else {
         pdf.setTextColor(16, 185, 129);
       }
-      pdf.text(profitStr, orderColX[6] + 3, y + 10);
+      pdf.text(profitStr, orderColX[6] + 2, y + 10);
+
+      if (isSettled) {
+        pdf.setTextColor(16, 185, 129);
+      } else {
+        pdf.setTextColor(217, 119, 6);
+      }
+      pdf.text(statusStr, orderColX[7] + 2, y + 10);
 
       y += 16;
     });
@@ -884,6 +894,7 @@ export async function downloadPartnerReportCsv({
   orders = [],
   currencySymbol = 'Rs.',
   filename = 'Partner_Profit_Export.csv',
+  settlementInfo = null,
 }) {
   const rows = [
     ['=== PARTNER PROFIT 50/50 SETTLEMENT STATEMENT ==='],
@@ -903,7 +914,7 @@ export async function downloadPartnerReportCsv({
 
   rows.push([]);
   rows.push(['=== SHIPMENT & ORDER-BY-ORDER BREAKDOWN ===']);
-  rows.push(['Date', 'Invoice #', 'Type', 'Party / Shipment', `Sales (${currencySymbol})`, `Buying (${currencySymbol})`, `Profit Effect (${currencySymbol})`, 'Notes']);
+  rows.push(['Date', 'Invoice #', 'Type', 'Party / Shipment', `Sales (${currencySymbol})`, `Buying (${currencySymbol})`, `Profit Effect (${currencySymbol})`, 'Settlement Status', 'Notes']);
 
   orders.forEach((o) => {
     const isBuy = o.is_supplier || o.bill_type === 'supplier';
@@ -911,6 +922,9 @@ export async function downloadPartnerReportCsv({
     const salesAmt = isBuy || isHelp ? 0 : o.total_amount;
     const buyingAmt = isBuy ? o.total_amount : 0;
     const profitEffect = isHelp ? 0 : isBuy ? -o.total_amount : o.total_amount;
+
+    const isSettled = Boolean(settlementInfo && (String(o.bill_date || '') < (settlementInfo.period_end || '') || (String(o.bill_date || '') === (settlementInfo.period_end || '') && Number(o.id) <= Number(settlementInfo.last_bill_id || Infinity))));
+    const statusLabel = isSettled ? 'Settled' : 'Unsettled';
 
     rows.push([
       `"${o.bill_date || ''}"`,
@@ -920,6 +934,7 @@ export async function downloadPartnerReportCsv({
       salesAmt,
       buyingAmt,
       profitEffect,
+      `"${statusLabel}"`,
       `"${String(o.notes || '').replace(/"/g, '""')}"`,
     ]);
   });

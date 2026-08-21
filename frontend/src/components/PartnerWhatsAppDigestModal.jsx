@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   MessageCircle,
   X,
@@ -29,6 +30,20 @@ export default function PartnerWhatsAppDigestModal({
   const [activeTemplate, setActiveTemplate] = useState('weekly'); // 'weekly' | 'settlement' | 'payout'
   const [copied, setCopied] = useState(false);
   const [selectedPartnerId, setSelectedPartnerId] = useState(partners[0]?.id || 1);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose?.();
+    };
+    window.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -141,12 +156,12 @@ export default function PartnerWhatsAppDigestModal({
     window.open(url, '_blank');
   };
 
-  return (
-    <div className="modal-overlay" onClick={onClose} role="presentation">
+  return createPortal(
+    <div className="client-modal-overlay" onClick={onClose} role="presentation">
       <div
-        className="modal-content glass-panel"
+        className="client-modal-card glass-panel"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: '580px', width: '92%', maxHeight: '90vh', overflowY: 'auto' }}
+        style={{ maxWidth: '580px', width: '100%' }}
         role="dialog"
         aria-modal="true"
       >
@@ -332,6 +347,7 @@ export default function PartnerWhatsAppDigestModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
