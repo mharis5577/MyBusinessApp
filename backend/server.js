@@ -67,6 +67,7 @@ function enrichBill(bill) {
   bill.subtotal = subtotal;
   bill.balance_due = balance_due;
   bill.status = status;
+  bill.is_bookmarked = Number(bill.is_bookmarked) ? 1 : 0;
   return bill;
 }
 
@@ -839,7 +840,8 @@ app.post('/api/bills/:id/bookmark', async (req, res) => {
   try {
     const bill = await dbGet('SELECT is_bookmarked FROM bills WHERE id = ?', [req.params.id]);
     if (!bill) return res.status(404).json({ error: 'Bill not found' });
-    const next = bill.is_bookmarked ? 0 : 1;
+    const current = Number(bill.is_bookmarked) || 0;
+    const next = current ? 0 : 1;
     await dbRun('UPDATE bills SET is_bookmarked = ? WHERE id = ?', [next, req.params.id]);
     res.json({ id: Number(req.params.id), is_bookmarked: next });
   } catch (err) {
@@ -1704,8 +1706,8 @@ app.post('/api/restore', async (req, res) => {
             bill_date, bill_time, due_date, subtotal, tax_rate, tax_amount, discount_rate, discount_amount,
             total_amount, amount_paid, status, notes, payment_method, bank_details,
             payee_bank_name, payee_account_title, payee_account_number, payee_payment_notes,
-            cancel_reason, cancelled_at, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            is_bookmarked, cancel_reason, cancelled_at, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             b.id, b.bill_type || 'customer', b.invoice_number, b.customer_name, b.customer_email || '',
             b.customer_phone || '', b.customer_address || '', b.bill_date, b.bill_time || '', b.due_date,
@@ -1713,7 +1715,7 @@ app.post('/api/restore', async (req, res) => {
             b.total_amount || 0, b.amount_paid || 0, b.status || 'pending', b.notes || '',
             b.payment_method || '', b.bank_details || '',
             b.payee_bank_name || '', b.payee_account_title || '', b.payee_account_number || '',
-            b.payee_payment_notes || '', b.cancel_reason || '', b.cancelled_at || '', b.created_at || null,
+            b.payee_payment_notes || '', Number(b.is_bookmarked) ? 1 : 0, b.cancel_reason || '', b.cancelled_at || '', b.created_at || null,
           ]
         );
       }

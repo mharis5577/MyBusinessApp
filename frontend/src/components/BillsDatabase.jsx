@@ -621,7 +621,8 @@ export default function BillsDatabase({
       e.preventDefault();
       e.stopPropagation();
     }
-    const nextVal = bill.is_bookmarked ? 0 : 1;
+    const currentVal = Number(bill.is_bookmarked) ? 1 : 0;
+    const nextVal = currentVal ? 0 : 1;
     setBills((prev) =>
       prev.map((b) => (b.id === bill.id ? { ...b, is_bookmarked: nextVal } : b))
     );
@@ -629,21 +630,23 @@ export default function BillsDatabase({
       const res = await apiFetch(`/api/bills/${bill.id}/bookmark`, { method: 'POST' });
       if (!res.ok) throw new Error('Bookmark toggle failed');
       const data = await res.json();
+      const confirmedVal = Number(data.is_bookmarked) ? 1 : 0;
       setBills((prev) =>
-        prev.map((b) => (b.id === bill.id ? { ...b, is_bookmarked: data.is_bookmarked } : b))
+        prev.map((b) => (b.id === bill.id ? { ...b, is_bookmarked: confirmedVal } : b))
       );
-      toast.success(nextVal ? 'Bill bookmarked ⭐' : 'Bookmark removed');
-    } catch {
+      toast.success(nextVal ? 'Bill starred ⭐' : 'Bookmark removed');
+    } catch (err) {
+      console.error('Bookmark toggle error:', err);
       setBills((prev) =>
-        prev.map((b) => (b.id === bill.id ? { ...b, is_bookmarked: bill.is_bookmarked } : b))
+        prev.map((b) => (b.id === bill.id ? { ...b, is_bookmarked: currentVal } : b))
       );
       toast.error('Failed to update bookmark');
     }
   };
 
-  const bookmarkedCount = bills.filter((b) => Boolean(b.is_bookmarked)).length;
+  const bookmarkedCount = bills.filter((b) => Number(b.is_bookmarked) === 1).length;
   const filteredBills = bills.filter((b) => {
-    if (showBookmarkedOnly && !b.is_bookmarked) return false;
+    if (showBookmarkedOnly && Number(b.is_bookmarked) !== 1) return false;
     return true;
   });
   const totalPages = Math.max(1, Math.ceil(filteredBills.length / BILLS_PAGE_SIZE));
@@ -834,7 +837,7 @@ export default function BillsDatabase({
                           type="button"
                           className="btn-bookmark-icon"
                           onClick={(e) => handleToggleBookmark(bill, e)}
-                          title={bill.is_bookmarked ? 'Remove bookmark' : 'Bookmark bill'}
+                          title={Number(bill.is_bookmarked) === 1 ? 'Remove bookmark' : 'Bookmark bill'}
                           style={{
                             background: 'transparent',
                             border: 'none',
@@ -842,11 +845,11 @@ export default function BillsDatabase({
                             padding: 2,
                             display: 'inline-flex',
                             alignItems: 'center',
-                            color: bill.is_bookmarked ? '#d4af37' : 'var(--text-muted)',
+                            color: Number(bill.is_bookmarked) === 1 ? '#d4af37' : 'var(--text-muted)',
                             transition: 'transform 0.15s ease, color 0.15s ease',
                           }}
                         >
-                          <Bookmark size={15} fill={bill.is_bookmarked ? '#d4af37' : 'none'} />
+                          <Bookmark size={15} fill={Number(bill.is_bookmarked) === 1 ? '#d4af37' : 'none'} />
                         </button>
                         <span>{bill.invoice_number}</span>
                       </div>
@@ -967,7 +970,7 @@ export default function BillsDatabase({
                         type="button"
                         className="btn-bookmark-icon"
                         onClick={(e) => handleToggleBookmark(bill, e)}
-                        title={bill.is_bookmarked ? 'Remove bookmark' : 'Bookmark bill'}
+                        title={Number(bill.is_bookmarked) === 1 ? 'Remove bookmark' : 'Bookmark bill'}
                         style={{
                           background: 'transparent',
                           border: 'none',
@@ -975,10 +978,10 @@ export default function BillsDatabase({
                           padding: 2,
                           display: 'inline-flex',
                           alignItems: 'center',
-                          color: bill.is_bookmarked ? '#d4af37' : 'var(--text-muted)',
+                          color: Number(bill.is_bookmarked) === 1 ? '#d4af37' : 'var(--text-muted)',
                         }}
                       >
-                        <Bookmark size={16} fill={bill.is_bookmarked ? '#d4af37' : 'none'} />
+                        <Bookmark size={16} fill={Number(bill.is_bookmarked) === 1 ? '#d4af37' : 'none'} />
                       </button>
                     </div>
                     <div className="bills-card-inv invoice-mono">{bill.invoice_number}</div>

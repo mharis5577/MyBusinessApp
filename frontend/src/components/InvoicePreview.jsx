@@ -228,26 +228,32 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onEdit, onBi
       .catch((err) => console.error(err));
   }, [settingsProp]);
 
-  const [isBookmarked, setIsBookmarked] = useState(Boolean(bill?.is_bookmarked));
+  const [isBookmarked, setIsBookmarked] = useState(Boolean(Number(bill?.is_bookmarked)));
 
   useEffect(() => {
-    setIsBookmarked(Boolean(liveBill?.is_bookmarked));
+    setIsBookmarked(Boolean(Number(liveBill?.is_bookmarked)));
   }, [liveBill?.id, liveBill?.is_bookmarked]);
 
   const handleToggleBookmark = async () => {
     if (!liveBill?.id) return;
-    const nextVal = isBookmarked ? 0 : 1;
+    const current = isBookmarked ? 1 : 0;
+    const nextVal = current ? 0 : 1;
     setIsBookmarked(Boolean(nextVal));
     setLiveBill((prev) => (prev ? { ...prev, is_bookmarked: nextVal } : prev));
     try {
       const res = await apiFetch(`/api/bills/${liveBill.id}/bookmark`, { method: 'POST' });
       if (!res.ok) throw new Error('Bookmark toggle failed');
       const data = await res.json();
-      setIsBookmarked(Boolean(data.is_bookmarked));
-      setLiveBill((prev) => (prev ? { ...prev, is_bookmarked: data.is_bookmarked } : prev));
-      toast.success(nextVal ? 'Bill bookmarked ⭐' : 'Bookmark removed');
-    } catch {
-      setIsBookmarked(Boolean(liveBill?.is_bookmarked));
+      const confirmed = Number(data.is_bookmarked) ? 1 : 0;
+      setIsBookmarked(Boolean(confirmed));
+      const updated = { ...liveBill, is_bookmarked: confirmed };
+      setLiveBill((prev) => (prev ? { ...prev, is_bookmarked: confirmed } : prev));
+      if (onBillUpdated) onBillUpdated(updated);
+      toast.success(nextVal ? 'Bill starred ⭐' : 'Bookmark removed');
+    } catch (err) {
+      console.error('Invoice bookmark error:', err);
+      setIsBookmarked(Boolean(current));
+      setLiveBill((prev) => (prev ? { ...prev, is_bookmarked: current } : prev));
       toast.error('Failed to update bookmark');
     }
   };
@@ -634,9 +640,29 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onEdit, onBi
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       <div className="no-print glass-panel invoice-actions">
         <div className="invoice-actions-top">
-          <button type="button" className="btn-secondary invoice-back-btn" onClick={onBack} disabled={busy}>
-            <ArrowLeft size={16} /> <span>Back</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <button type="button" className="btn-secondary invoice-back-btn" onClick={onBack} disabled={busy}>
+              <ArrowLeft size={16} /> <span>Back</span>
+            </button>
+            <button
+              type="button"
+              className={`btn-secondary${isBookmarked ? ' is-bookmarked-btn' : ''}`}
+              onClick={handleToggleBookmark}
+              disabled={busy}
+              title={isBookmarked ? 'Remove bookmark' : 'Bookmark this bill'}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                color: isBookmarked ? '#d4af37' : 'var(--text-secondary)',
+                borderColor: isBookmarked ? '#d4af37' : 'var(--border-color)',
+                background: isBookmarked ? 'rgba(212, 175, 55, 0.12)' : undefined,
+              }}
+            >
+              <Bookmark size={15} fill={isBookmarked ? '#d4af37' : 'none'} />
+              <span>{isBookmarked ? 'Starred' : 'Star'}</span>
+            </button>
+          </div>
           <button type="button" className="btn-primary invoice-send-btn" onClick={() => setSendOpen(true)} disabled={busy}>
             {sharing === 'send' || sharing === 'save' ? <Loader2 size={16} className="spin" /> : <Share2 size={16} />}
             <span>Send bill</span>

@@ -85,6 +85,7 @@ function enrichBill(bill) {
 
   return {
     ...bill,
+    is_bookmarked: Number(bill.is_bookmarked) ? 1 : 0,
     amount_paid: paid,
     total_amount: total,
     subtotal,
@@ -946,6 +947,7 @@ async function handleLocalRequestInner(url, options = {}) {
         discount_amount: Number(body.discount_amount) || 0,
         total_amount: Math.round(totalAmount * 100) / 100,
         amount_paid: 0,
+        is_bookmarked: Number(body.is_bookmarked) ? 1 : 0,
         status: body.status || 'pending',
         notes: body.notes || '',
         payment_method: body.payment_method || 'Bank Transfer / Raast / Cash',
@@ -1085,6 +1087,7 @@ async function handleLocalRequestInner(url, options = {}) {
         payee_account_title: body.payee_account_title ?? existing.payee_account_title ?? '',
         payee_account_number: body.payee_account_number ?? existing.payee_account_number ?? '',
         payee_payment_notes: body.payee_payment_notes ?? existing.payee_payment_notes ?? '',
+        is_bookmarked: Number(existing.is_bookmarked) ? 1 : 0,
       };
       const paidAmt = Number(updated.amount_paid) || 0;
       const totalAmt = Number(updated.total_amount) || 0;
@@ -1286,6 +1289,17 @@ async function handleLocalRequestInner(url, options = {}) {
         (a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)
       );
       return jsonOk(paymentsWithoutScreenshots(payments));
+    }
+
+    if (parts[3] === 'bookmark' && method === 'POST') {
+      const id = Number(parts[2]);
+      const bill = await db.get('bills', id);
+      if (!bill) return jsonErr('Bill not found', 404);
+      const current = Number(bill.is_bookmarked) || 0;
+      const next = current ? 0 : 1;
+      const updated = { ...bill, is_bookmarked: next };
+      await db.put('bills', updated);
+      return jsonOk({ id, is_bookmarked: next });
     }
   }
 

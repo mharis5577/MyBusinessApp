@@ -172,6 +172,7 @@ function initTables() {
         payee_account_title TEXT DEFAULT '',
         payee_account_number TEXT DEFAULT '',
         payee_payment_notes TEXT DEFAULT '',
+        is_bookmarked INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
