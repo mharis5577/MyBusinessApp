@@ -16,6 +16,9 @@ import {
   Clock,
   Sparkles,
   Users2,
+  Crown,
+  Compass,
+  Heart,
 } from 'lucide-react';
 import DashboardStats from './components/DashboardStats';
 import MoreMenu from './components/MoreMenu';
@@ -37,6 +40,7 @@ import {
   lockRequired,
   pinEnabled,
 } from './utils/appSecurity';
+import { APP_THEMES, getNextQuickTheme, getQuickThemes } from './utils/themeConfig';
 
 const SmartBillForm = lazy(() => import('./components/SmartBillForm'));
 const InvoicePreview = lazy(() => import('./components/InvoicePreview'));
@@ -357,9 +361,8 @@ export default function App() {
   const toggleTheme = () => {
     playTapSound();
     setTheme((prev) => {
-      if (prev === 'light') return 'dark';
-      if (prev === 'dark') return 'chocolatier';
-      return 'light';
+      const next = getNextQuickTheme(prev);
+      return next;
     });
   };
 
@@ -523,13 +526,19 @@ export default function App() {
             type="button"
             className="nav-btn icon-only"
             onClick={toggleTheme}
-            title={theme === 'chocolatier' ? 'Theme: Chocolatier Velvet' : theme === 'dark' ? 'Theme: Dark Mode' : 'Theme: Light Mode'}
+            title={`Active: ${APP_THEMES.find((t) => t.id === theme)?.name || theme} (Tap to quick toggle)`}
             aria-label="Toggle App Theme"
           >
             {theme === 'dark' ? (
               <Sun size={18} />
             ) : theme === 'chocolatier' ? (
               <Sparkles size={18} style={{ color: '#d4af37' }} />
+            ) : theme === 'emerald' ? (
+              <Crown size={18} style={{ color: '#e4c56b' }} />
+            ) : theme === 'sapphire' ? (
+              <Compass size={18} style={{ color: '#38bdf8' }} />
+            ) : theme === 'rose' ? (
+              <Heart size={18} style={{ color: '#f4a4b4' }} />
             ) : (
               <Moon size={18} />
             )}
@@ -673,6 +682,8 @@ export default function App() {
                   onSettingsUpdated={fetchSettings}
                   focusBackup={focusBackup}
                   onFocusHandled={() => setFocusBackup(false)}
+                  currentTheme={theme}
+                  onThemeChange={(nextTheme) => setTheme(nextTheme)}
                 />
               )}
             </Suspense>

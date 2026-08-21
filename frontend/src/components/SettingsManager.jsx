@@ -18,6 +18,8 @@ import {
   Layout,
   Volume2,
   VolumeX,
+  Sparkles,
+  Repeat,
 } from 'lucide-react';
 import { playSuccessChime, setSoundEnabled } from '../utils/audioEffects';
 import { compressImageToDataUrl } from '../utils/imageCompress';
@@ -49,8 +51,16 @@ import AppSelect from './AppSelect';
 import { emptyPaymentMethod, getPaymentMethods, withPaymentMethods } from '../utils/paymentMethods';
 import { INVOICE_TEMPLATES } from '../utils/invoiceTemplates';
 import { getDefaultLogoDataUrl, getDefaultStampDataUrl } from '../utils/defaultBranding';
+import { APP_THEMES, getQuickThemes, saveQuickThemes } from '../utils/themeConfig';
 
-export default function SettingsManager({ onSettingsUpdated, focusBackup = false, onFocusHandled, appSettings = null }) {
+export default function SettingsManager({
+  onSettingsUpdated,
+  focusBackup = false,
+  onFocusHandled,
+  appSettings = null,
+  currentTheme = 'dark',
+  onThemeChange = null,
+}) {
   const toast = useToast();
   const backupPanelRef = useRef(null);
   const deleteConfirmRef = useRef(null);
@@ -88,6 +98,15 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
   const [resetMsg, setResetMsg] = useState('');
   const [wipeConfirm, setWipeConfirm] = useState('');
   const [purgeConfirm, setPurgeConfirm] = useState('');
+  const [quickPair, setQuickPair] = useState(getQuickThemes);
+
+  const handleSetQuickSlot = (index, themeId) => {
+    const updated = [...quickPair];
+    updated[index] = themeId;
+    setQuickPair(updated);
+    saveQuickThemes(updated);
+    toast.success(`Header quick-toggle slot ${index + 1} updated to "${APP_THEMES.find((t) => t.id === themeId)?.name}"`);
+  };
   const [restoreConfirm, setRestoreConfirm] = useState('');
   const [pendingRestore, setPendingRestore] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
@@ -1119,14 +1138,16 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 6,
-                    padding: '0.35rem 0.7rem',
-                    borderRadius: 20,
-                    border: active ? '2px solid var(--primary, #00b3a6)' : '1px solid var(--border-color)',
-                    background: active ? 'var(--surface-active, rgba(0, 179, 166, 0.12))' : 'var(--surface-secondary)',
+                    gap: 7,
+                    padding: '0.4rem 0.8rem',
+                    borderRadius: 999,
+                    border: active ? '2px solid var(--accent-teal)' : '1px solid var(--border-color)',
+                    background: active ? 'color-mix(in srgb, var(--accent-teal) 18%, transparent)' : 'var(--surface-muted)',
+                    color: 'var(--text-primary)',
                     cursor: 'pointer',
-                    fontSize: '0.8rem',
-                    fontWeight: active ? 700 : 500,
+                    fontSize: '0.82rem',
+                    fontWeight: active ? 800 : 600,
+                    transition: 'all 0.15s ease',
                   }}
                 >
                   <span
@@ -1137,21 +1158,22 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
                       backgroundColor: swatch.hex || '#00b3a6',
                       border: swatch.hex ? 'none' : '1px dashed #888',
                       display: 'inline-block',
+                      flexShrink: 0,
                     }}
                   />
-                  <span>{swatch.label}</span>
+                  <span style={{ color: 'var(--text-primary)' }}>{swatch.label}</span>
                 </button>
               );
             })}
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 6 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 6 }}>
               <input
                 type="color"
                 value={settings.custom_brand_color || '#00b3a6'}
                 onChange={(e) => handleChange('custom_brand_color', e.target.value)}
-                style={{ width: 32, height: 32, padding: 0, border: 'none', borderRadius: 6, cursor: 'pointer', background: 'transparent' }}
+                style={{ width: 34, height: 34, padding: 2, border: '1px solid var(--border-color)', borderRadius: 8, cursor: 'pointer', background: 'var(--surface-muted)' }}
                 title="Pick exact hex color"
               />
-              <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+              <span style={{ fontSize: '0.80rem', color: 'var(--text-primary)', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
                 {settings.custom_brand_color || 'Template Default'}
               </span>
             </div>
@@ -1186,6 +1208,110 @@ export default function SettingsManager({ onSettingsUpdated, focusBackup = false
                     {active ? <Check size={16} style={{ color: 'var(--primary, #00b3a6)' }} /> : null}
                   </div>
                   <div className="template-card-tagline">{layout.desc}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* App UI Theme Studio & Quick-Toggle Configuration */}
+        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.4rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Sparkles size={17} style={{ color: 'var(--accent-teal)' }} />
+              <h4 style={{ fontSize: '0.98rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>
+                App UI Theme & Quick-Toggle
+              </h4>
+            </div>
+            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+              Active Theme: <strong style={{ color: 'var(--text-primary)' }}>{APP_THEMES.find((t) => t.id === currentTheme)?.name || currentTheme}</strong>
+            </span>
+          </div>
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.85rem' }}>
+            Tap any theme below to activate it across the app. Choose which 2 themes the top header button switches between.
+          </p>
+
+          {/* Quick-Toggle 2-Slot Selector */}
+          <div
+            style={{
+              background: 'var(--surface-muted)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 12,
+              padding: '0.85rem 1rem',
+              marginBottom: '1rem',
+            }}
+          >
+            <div style={{ fontSize: '0.82rem', fontWeight: 750, color: 'var(--text-primary)', marginBottom: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <Repeat size={14} style={{ color: 'var(--accent-teal)' }} />
+              Header Button Quick-Toggle Pair (Swaps between Slot 1 & 2):
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem' }}>
+              <div>
+                <label className="form-label" style={{ fontSize: '0.75rem', marginBottom: '0.3rem' }}>
+                  Slot 1 (Primary Theme)
+                </label>
+                <AppSelect
+                  value={quickPair[0]}
+                  onChange={(val) => handleSetQuickSlot(0, val)}
+                  options={APP_THEMES.map((t) => ({ value: t.id, label: t.name }))}
+                />
+              </div>
+              <div>
+                <label className="form-label" style={{ fontSize: '0.75rem', marginBottom: '0.3rem' }}>
+                  Slot 2 (Secondary Theme)
+                </label>
+                <AppSelect
+                  value={quickPair[1]}
+                  onChange={(val) => handleSetQuickSlot(1, val)}
+                  options={APP_THEMES.map((t) => ({ value: t.id, label: t.name }))}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Theme Gallery Cards */}
+          <div className="template-picker-grid">
+            {APP_THEMES.map((th) => {
+              const active = currentTheme === th.id;
+              const isSlot1 = quickPair[0] === th.id;
+              const isSlot2 = quickPair[1] === th.id;
+              return (
+                <button
+                  key={th.id}
+                  type="button"
+                  className={`template-card ${active ? 'is-active' : ''}`}
+                  onClick={() => onThemeChange?.(th.id)}
+                  style={{
+                    border: active ? '2px solid var(--accent-teal)' : undefined,
+                    boxShadow: active ? '0 0 14px rgba(0, 179, 166, 0.25)' : undefined,
+                  }}
+                >
+                  <div className="template-card-header">
+                    <div className="template-swatch-badge">
+                      <span
+                        className="template-swatch-dot"
+                        style={{
+                          backgroundColor: th.accent,
+                          boxShadow: `0 0 8px ${th.accent}`,
+                        }}
+                      />
+                      <span style={{ fontWeight: active ? 800 : 600 }}>{th.name}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      {isSlot1 && (
+                        <span style={{ fontSize: '0.66rem', background: 'rgba(255,255,255,0.1)', padding: '0.1rem 0.35rem', borderRadius: 4, fontWeight: 700 }}>
+                          Slot 1
+                        </span>
+                      )}
+                      {isSlot2 && (
+                        <span style={{ fontSize: '0.66rem', background: 'rgba(255,255,255,0.1)', padding: '0.1rem 0.35rem', borderRadius: 4, fontWeight: 700 }}>
+                          Slot 2
+                        </span>
+                      )}
+                      {active ? <Check size={16} style={{ color: 'var(--accent-teal)' }} /> : null}
+                    </div>
+                  </div>
+                  <div className="template-card-tagline">{th.tagline}</div>
                 </button>
               );
             })}
