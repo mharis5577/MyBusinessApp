@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -31,6 +31,34 @@ ChartJS.register(
 );
 
 export default function PartnerEquityCharts({ orders = [], summary = {}, partners = [], currencySymbol = 'Rs.' }) {
+  // Theme observer for reactive Chart.js canvas redraw
+  const [currentTheme, setCurrentTheme] = useState(() => {
+    return typeof document !== 'undefined'
+      ? document.documentElement.getAttribute('data-theme') || 'dark'
+      : 'dark';
+  });
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const observer = new MutationObserver(() => {
+      const t = document.documentElement.getAttribute('data-theme') || 'dark';
+      setCurrentTheme(t);
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  const isLight = currentTheme === 'light';
+  const textColor = isLight ? '#0f172a' : '#f8fafc';
+  const mutedColor = isLight ? '#334155' : '#cbd5e1';
+  const gridColor = isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.12)';
+  const tooltipBg = isLight ? '#0f172a' : '#1e293b';
+  const tooltipTitleColor = '#ffffff';
+  const tooltipBodyColor = '#e2e8f0';
+
   // 1. Prepare Daily Aggregate Data for Trend Line & Bar Charts
   const dailyData = useMemo(() => {
     const map = {};
@@ -177,14 +205,18 @@ export default function PartnerEquityCharts({ orders = [], summary = {}, partner
       legend: {
         position: 'top',
         labels: {
-          color: 'var(--text-secondary, #94a3b8)',
-          font: { size: 11, weight: '600', family: 'Outfit, sans-serif' },
+          color: textColor,
+          font: { size: 11, weight: '700', family: 'Outfit, sans-serif' },
           boxWidth: 12,
           padding: 10,
         },
       },
       tooltip: {
-        backgroundColor: 'rgba(15, 23, 42, 0.92)',
+        backgroundColor: tooltipBg,
+        titleColor: tooltipTitleColor,
+        bodyColor: tooltipBodyColor,
+        borderColor: isLight ? 'rgba(0, 0, 0, 0.15)' : 'rgba(255, 255, 255, 0.18)',
+        borderWidth: 1,
         titleFont: { size: 12, weight: '700', family: 'Outfit, sans-serif' },
         bodyFont: { size: 12, family: 'Outfit, sans-serif' },
         padding: 10,
@@ -199,14 +231,14 @@ export default function PartnerEquityCharts({ orders = [], summary = {}, partner
     },
     scales: {
       x: {
-        grid: { color: 'rgba(255, 255, 255, 0.05)' },
-        ticks: { color: 'var(--text-muted, #64748b)', font: { size: 10 } },
+        grid: { color: gridColor },
+        ticks: { color: mutedColor, font: { size: 10, weight: '600' } },
       },
       y: {
-        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+        grid: { color: gridColor },
         ticks: {
-          color: 'var(--text-muted, #64748b)',
-          font: { size: 10 },
+          color: mutedColor,
+          font: { size: 10, weight: '600' },
           callback: (v) => formatCurrency(currencySymbol, v, { maximumFractionDigits: 0 }),
         },
       },
@@ -220,13 +252,17 @@ export default function PartnerEquityCharts({ orders = [], summary = {}, partner
       legend: {
         position: 'bottom',
         labels: {
-          color: 'var(--text-secondary, #94a3b8)',
-          font: { size: 11, weight: '600', family: 'Outfit, sans-serif' },
+          color: textColor,
+          font: { size: 11, weight: '700', family: 'Outfit, sans-serif' },
           padding: 14,
         },
       },
       tooltip: {
-        backgroundColor: 'rgba(15, 23, 42, 0.92)',
+        backgroundColor: tooltipBg,
+        titleColor: tooltipTitleColor,
+        bodyColor: tooltipBodyColor,
+        borderColor: isLight ? 'rgba(0, 0, 0, 0.15)' : 'rgba(255, 255, 255, 0.18)',
+        borderWidth: 1,
         callbacks: {
           label: (ctx) => {
             const val = ctx.raw || 0;
@@ -240,7 +276,7 @@ export default function PartnerEquityCharts({ orders = [], summary = {}, partner
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', marginTop: '0.5rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', marginTop: '0.5rem', paddingBottom: '3.5rem' }}>
       {/* 2-Column Analytics Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
         
@@ -264,7 +300,7 @@ export default function PartnerEquityCharts({ orders = [], summary = {}, partner
           </div>
 
           <div style={{ height: '230px', position: 'relative' }}>
-            <Bar data={trendChartData} options={chartOptions} />
+            <Bar key={`bar-${currentTheme}`} data={trendChartData} options={chartOptions} />
           </div>
         </div>
 
@@ -288,7 +324,7 @@ export default function PartnerEquityCharts({ orders = [], summary = {}, partner
           </div>
 
           <div style={{ height: '230px', position: 'relative' }}>
-            <Line data={cumulativeChartData} options={chartOptions} />
+            <Line key={`line-${currentTheme}`} data={cumulativeChartData} options={chartOptions} />
           </div>
         </div>
       </div>
@@ -327,7 +363,7 @@ export default function PartnerEquityCharts({ orders = [], summary = {}, partner
         </div>
 
         <div style={{ height: '190px', position: 'relative' }}>
-          <Doughnut data={doughnutData} options={doughnutOptions} />
+          <Doughnut key={`donut-${currentTheme}`} data={doughnutData} options={doughnutOptions} />
           {/* Centered Margin Text */}
           <div
             style={{
