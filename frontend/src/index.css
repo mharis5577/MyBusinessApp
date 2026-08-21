@@ -2428,6 +2428,183 @@ body {
   color: #881337;
 }
 
+/* 7. Sapphire VIP */
+.invoice-sheet.inv-template-sapphire_luxe .inv-topbar {
+  height: 6px;
+  background: linear-gradient(90deg, #0369a1 0%, #0284c7 60%, #38bdf8 100%);
+}
+.invoice-sheet.inv-template-sapphire_luxe .inv-header {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%) !important;
+  border-bottom: 2px solid #0284c7;
+  color: #ffffff;
+}
+.invoice-sheet.inv-template-sapphire_luxe .inv-elite {
+  color: #38bdf8 !important;
+  letter-spacing: 0.3em;
+}
+.invoice-sheet.inv-template-sapphire_luxe .inv-company {
+  color: #ffffff !important;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-sapphire_luxe .inv-eyebrow {
+  color: #93c5fd !important;
+}
+.invoice-sheet.inv-template-sapphire_luxe .inv-contact {
+  color: #bfdbfe !important;
+}
+.invoice-sheet.inv-template-sapphire_luxe .inv-doc-label {
+  color: #38bdf8 !important;
+}
+.invoice-sheet.inv-template-sapphire_luxe .inv-number {
+  color: #ffffff !important;
+}
+.invoice-sheet.inv-template-sapphire_luxe .inv-table th {
+  background: #0f172a;
+  color: #ffffff;
+  border-bottom: 2px solid #0284c7;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-sapphire_luxe .inv-table td.strong {
+  color: #0284c7;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-sapphire_luxe .inv-total-row.is-grand {
+  background: linear-gradient(135deg, #0f172a 0%, #0369a1 100%);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin-top: 0.35rem;
+}
+.invoice-sheet.inv-template-sapphire_luxe .inv-total-row.is-grand span {
+  color: #ffffff;
+}
+.invoice-sheet.inv-template-sapphire_luxe .inv-paybox {
+  background: #f0f9ff;
+  border-left: 4px solid #0284c7;
+  border-color: #bae6fd;
+}
+.invoice-sheet.inv-template-sapphire_luxe .inv-paybox strong {
+  color: #0369a1;
+}
+
+/* 8. Rose Velvet Boutique */
+.invoice-sheet.inv-template-rose_velvet .inv-topbar {
+  height: 6px;
+  background: linear-gradient(90deg, #831843 0%, #be185d 60%, #fb7185 100%);
+}
+.invoice-sheet.inv-template-rose_velvet .inv-header {
+  background: linear-gradient(135deg, #4c0519 0%, #831843 100%) !important;
+  border-bottom: 2px solid #f43f5e;
+  color: #ffffff;
+}
+.invoice-sheet.inv-template-rose_velvet .inv-elite {
+  color: #fbcfe8 !important;
+  letter-spacing: 0.3em;
+}
+.invoice-sheet.inv-template-rose_velvet .inv-company {
+  color: #ffffff !important;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-rose_velvet .inv-eyebrow {
+  color: #fda4af !important;
+}
+.invoice-sheet.inv-template-rose_velvet .inv-contact {
+  color: #ffe4e6 !important;
+}
+.invoice-sheet.inv-template-rose_velvet .inv-doc-label {
+  color: #fb7185 !important;
+}
+.invoice-sheet.inv-template-rose_velvet .inv-number {
+  color: #ffffff !important;
+}
+.invoice-sheet.inv-template-rose_velvet .inv-table th {
+  background: #4c0519;
+  color: #ffffff;
+  border-bottom: 2px solid #fb7185;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-rose_velvet .inv-table td.strong {
+  color: #be185d;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-rose_velvet .inv-total-row.is-grand {
+  background: linear-gradient(135deg, #4c0519 0%, #9d174d 100%);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin-top: 0.35rem;
+}
+.invoice-sheet.inv-template-rose_velvet .inv-total-row.is-grand span {
+  color: #ffffff;
+}
+.invoice-sheet.inv-template-rose_velvet .inv-paybox {
+  background: #fff1f2;
+  border-left: 4px solid #be185d;
+  border-color: #fecdd3;
+}
+.invoice-sheet.inv-template-rose_velvet .inv-paybox strong {
+  color: #9f1239;
+}
+
+/* 9. 24K Gold Artisan */
+.invoice-sheet.inv-template-gold_artisan .inv-topbar {
+  height: 6px;
+  background: linear-gradient(90deg, #78350f 0%, #b45309 50%, #f59e0b 100%);
+}
+.invoice-sheet.inv-template-gold_artisan .inv-header {
+  background: linear-gradient(135deg, #1c1917 0%, #292524 100%) !important;
+  border-bottom: 3px solid #d97706;
+  color: #ffffff;
+}
+.invoice-sheet.inv-template-gold_artisan .inv-elite {
+  color: #fcd34d !important;
+  letter-spacing: 0.35em;
+}
+.invoice-sheet.inv-template-gold_artisan .inv-company {
+  color: #fef3c7 !important;
+  font-weight: 900;
+}
+.invoice-sheet.inv-template-gold_artisan .inv-eyebrow {
+  color: #fde68a !important;
+}
+.invoice-sheet.inv-template-gold_artisan .inv-contact {
+  color: #d6d3d1 !important;
+}
+.invoice-sheet.inv-template-gold_artisan .inv-doc-label {
+  color: #f59e0b !important;
+}
+.invoice-sheet.inv-template-gold_artisan .inv-number {
+  color: #fef3c7 !important;
+}
+.invoice-sheet.inv-template-gold_artisan .inv-table th {
+  background: #1c1917;
+  color: #fcd34d;
+  border-bottom: 2px solid #d97706;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-gold_artisan .inv-table td.strong {
+  color: #b45309;
+  font-weight: 800;
+}
+.invoice-sheet.inv-template-gold_artisan .inv-total-row.is-grand {
+  background: linear-gradient(135deg, #1c1917 0%, #78350f 50%, #b45309 100%);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin-top: 0.35rem;
+}
+.invoice-sheet.inv-template-gold_artisan .inv-total-row.is-grand span {
+  color: #ffffff;
+}
+.invoice-sheet.inv-template-gold_artisan .inv-paybox {
+  background: #fffbeb;
+  border-left: 4px solid #d97706;
+  border-color: #fde68a;
+}
+.invoice-sheet.inv-template-gold_artisan .inv-paybox strong {
+  color: #92400e;
+}
+
 /* ==========================================================================
    GIFT BOX INSERT & STORY RECEIPT LAYOUTS
    ========================================================================== */

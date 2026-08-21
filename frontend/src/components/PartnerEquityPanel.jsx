@@ -6,6 +6,7 @@ import {
   TrendingUp,
   Download,
   FileSpreadsheet,
+  FileText,
   Share2,
   CheckCircle2,
   Flag,
@@ -1043,14 +1044,45 @@ ${splitsText}
                 </button>
               </div>
 
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={handleDownloadCsv}
-                style={{ padding: '0.42rem 0.85rem', fontSize: '0.78rem', borderRadius: '999px', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-              >
-                <FileSpreadsheet size={13} /> Export Excel
-              </button>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'nowrap' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handleDownloadPdf}
+                  style={{
+                    padding: '0.42rem 0.85rem',
+                    fontSize: '0.78rem',
+                    borderRadius: '999px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    borderColor: 'var(--accent-teal)',
+                    color: 'var(--accent-teal)',
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap',
+                  }}
+                  title="Download / Share Partner Statement PDF"
+                >
+                  <FileText size={13} /> Export PDF
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handleDownloadCsv}
+                  style={{
+                    padding: '0.42rem 0.85rem',
+                    fontSize: '0.78rem',
+                    borderRadius: '999px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title="Export to CSV / Excel spreadsheet"
+                >
+                  <FileSpreadsheet size={13} /> Export Excel
+                </button>
+              </div>
             </div>
           </div>
 

@@ -666,24 +666,33 @@ export async function downloadPartnerReportPdf({
 
   // 1. Header Banner
   pdf.setFillColor(15, 23, 42); // slate-900
-  pdf.rect(margin, y, usableW, 54, 'F');
+  pdf.rect(margin, y, usableW, 58, 'F');
+
+  // Gold luxury accent line
+  pdf.setFillColor(212, 175, 55); // 24k gold
+  pdf.rect(margin, y + 55, usableW, 3, 'F');
 
   pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(14);
+  pdf.setFontSize(13.5);
   pdf.setTextColor(255, 255, 255);
-  pdf.text('ELITE CHOCOLATE · PARTNER PROFIT STATEMENT', margin + 14, y + 22);
+  pdf.text('ELITE CHOCOLATE · LUXURY CONFECTIONERY', margin + 14, y + 20);
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(9);
+  pdf.setTextColor(212, 175, 55);
+  pdf.text('MONTHLY PARTNER DIVIDEND & SETTLEMENT STATEMENT (50/50 EQUITY)', margin + 14, y + 34);
 
   pdf.setFont('helvetica', 'normal');
-  pdf.setFontSize(8.5);
+  pdf.setFontSize(8);
   pdf.setTextColor(148, 163, 184);
-  pdf.text(`Period: ${periodLabel} ${dateRange ? `(${dateRange})` : ''} · Generated: ${new Date().toLocaleDateString('en-PK')}`, margin + 14, y + 40);
+  pdf.text(`Period: ${periodLabel} ${dateRange ? `(${dateRange})` : ''} · Issue Date: ${new Date().toLocaleDateString('en-PK')}`, margin + 14, y + 48);
 
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(8);
   pdf.setTextColor(45, 212, 191);
-  pdf.text('50/50 EQUITY DIVISION', pageWidth - margin - 120, y + 22);
+  pdf.text('NOMI & HARIS EQUITY', pageWidth - margin - 110, y + 20);
 
-  y += 64;
+  y += 68;
 
   // 2. Financial Overview Cards (4 Columns)
   const cardW = (usableW - 18) / 4;
@@ -863,19 +872,45 @@ export async function downloadPartnerReportPdf({
   y += 16;
 
   // 6. Footer / Signatures
-  checkPageBreak(50);
+  checkPageBreak(65);
   pdf.setDrawColor(203, 213, 225);
   pdf.setLineWidth(1);
   pdf.line(margin, y, pageWidth - margin, y);
-  y += 14;
+  y += 12;
 
   pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(8);
-  pdf.setTextColor(71, 85, 105);
-  pdf.text('Partner Approval Signatures:', margin, y);
+  pdf.setFontSize(8.5);
+  pdf.setTextColor(15, 23, 42);
+  pdf.text('Partner Approval & Dividend Sign-off:', margin, y);
+  y += 14;
 
-  pdf.text('Nomi: ________________________', margin + 140, y);
-  pdf.text('Haris: ________________________', margin + 340, y);
+  const sigBoxW = (usableW - 20) / 2;
+
+  // Nomi signature box
+  pdf.setFillColor(248, 250, 252);
+  pdf.setDrawColor(226, 232, 240);
+  pdf.roundedRect(margin, y, sigBoxW, 36, 3, 3, 'FD');
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(8);
+  pdf.setTextColor(51, 65, 85);
+  pdf.text('Partner: Nomi (50% Equity)', margin + 8, y + 12);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(7.5);
+  pdf.setTextColor(148, 163, 184);
+  pdf.text('Signature: __________________________  Date: _________', margin + 8, y + 26);
+
+  // Haris signature box
+  pdf.setFillColor(248, 250, 252);
+  pdf.setDrawColor(226, 232, 240);
+  pdf.roundedRect(margin + sigBoxW + 20, y, sigBoxW, 36, 3, 3, 'FD');
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(8);
+  pdf.setTextColor(51, 65, 85);
+  pdf.text('Partner: Haris (50% Equity)', margin + sigBoxW + 28, y + 12);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(7.5);
+  pdf.setTextColor(148, 163, 184);
+  pdf.text('Signature: __________________________  Date: _________', margin + sigBoxW + 28, y + 26);
 
   const blob = pdf.output('blob');
   await downloadBlob(blob, filename, 'application/pdf');

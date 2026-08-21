@@ -62,6 +62,33 @@ export const INVOICE_TEMPLATES = [
     accentColor: '#be123c',
     previewBadge: 'Crimson',
   },
+  {
+    id: 'sapphire_luxe',
+    name: 'Sapphire VIP',
+    tagline: 'Imperial royal navy & icy platinum neon accents',
+    primaryColor: '#0369a1',
+    headerBg: '#0f172a',
+    accentColor: '#38bdf8',
+    previewBadge: 'Sapphire',
+  },
+  {
+    id: 'rose_velvet',
+    name: 'Rose Velvet Boutique',
+    tagline: 'Deep wine burgundy & rose gold for luxury gifts',
+    primaryColor: '#9d174d',
+    headerBg: '#4c0519',
+    accentColor: '#fb7185',
+    previewBadge: 'Rose',
+  },
+  {
+    id: 'gold_artisan',
+    name: '24K Gold Artisan',
+    tagline: 'Pure 24K gold foil borders & artisan monogram',
+    primaryColor: '#b45309',
+    headerBg: '#1c1917',
+    accentColor: '#f59e0b',
+    previewBadge: 'Gold',
+  },
 ];
 
 const TEMPLATE_STORAGE_KEY = 'cocoadesk-invoice-template';
