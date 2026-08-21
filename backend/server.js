@@ -2473,6 +2473,81 @@ app.patch('/api/partners/bills/:id/settle', async (req, res) => {
   }
 });
 
+// Settle or Revert all bills for a specific date (Consolidated Daily Settlement)
+app.patch('/api/partners/dates/:date/settle', async (req, res) => {
+  try {
+    const { date } = req.params;
+    const isSettled = req.body.is_partner_settled !== undefined ? (req.body.is_partner_settled ? 1 : 0) : 1;
+
+    // Update all non-cancelled bills on this date
+    await dbRun(
+      `UPDATE bills 
+       SET is_partner_settled = ?, partner_settled_at = ? 
+       WHERE bill_date = ? AND status != 'cancelled'`,
+      [isSettled, isSettled ? new Date().toISOString() : null, date]
+    );
+
+    const dateStr = date.replace(/-/g, '');
+    const dailyCode = `SETTL-DAILY-${dateStr}`;
+
+    if (isSettled) {
+      // Calculate consolidated day total
+      const dayBills = await dbAll(
+        `SELECT bill_type, total_amount FROM bills WHERE bill_date = ? AND status != 'cancelled'`,
+        [date]
+      );
+
+      let totalSales = 0;
+      let totalBuying = 0;
+      dayBills.forEach((b) => {
+        const t = normalizeBillType(b.bill_type);
+        const amt = Number(b.total_amount) || 0;
+        if (t === 'supplier') totalBuying += amt;
+        else if (t !== 'help' && t !== 'loan') totalSales += amt;
+      });
+
+      const netProfit = totalSales - totalBuying;
+
+      const existing = await dbGet('SELECT id FROM partner_settlements WHERE settlement_code = ?', [dailyCode]);
+      if (existing) {
+        await dbRun(
+          `UPDATE partner_settlements 
+           SET total_sales = ?, total_buying = ?, net_profit = ?, nomi_share = ?, haris_share = ?
+           WHERE id = ?`,
+          [totalSales, totalBuying, netProfit, netProfit * 0.5, netProfit * 0.5, existing.id]
+        );
+      } else {
+        await dbRun(
+          `INSERT INTO partner_settlements (
+            settlement_code, period_start, period_end, last_bill_date,
+            total_sales, total_buying, net_profit, nomi_share, haris_share, notes, created_by
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            dailyCode,
+            date,
+            date,
+            date,
+            totalSales,
+            totalBuying,
+            netProfit,
+            netProfit * 0.5,
+            netProfit * 0.5,
+            req.body.notes || `Consolidated Daily Settlement for ${date}`,
+            'Owner',
+          ]
+        );
+      }
+    } else {
+      // Revert settlement marker
+      await dbRun('DELETE FROM partner_settlements WHERE settlement_code = ? OR (period_start = ? AND period_end = ?)', [dailyCode, date, date]);
+    }
+
+    res.json({ success: true, date, is_partner_settled: isSettled });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 3. Custom Profit Breakdown & Order/Shipment Ledger Calculator
 app.get('/api/partners/profit-breakdown', async (req, res) => {
   try {
@@ -2508,28 +2583,22 @@ app.get('/api/partners/profit-breakdown', async (req, res) => {
       params
     );
 
+    const orders = [];
+    const help_orders = [];
     let totalSales = 0;
     let totalBuying = 0;
     let salesCount = 0;
     let buyingCount = 0;
+    let totalHelp = 0;
+    let helpCount = 0;
 
-    const orders = rawBills.map((b) => {
+    rawBills.forEach((b) => {
       const t = normalizeBillType(b.bill_type);
       const isSupplier = t === 'supplier';
       const isHelp = t === 'help' || t === 'loan';
       const amount = Number(b.total_amount) || 0;
 
-      if (isSupplier) {
-        totalBuying += amount;
-        buyingCount += 1;
-      } else if (!isHelp) {
-        totalSales += amount;
-        salesCount += 1;
-      }
-
-      const profitEffect = isHelp ? 0 : isSupplier ? -amount : amount;
-
-      return {
+      const record = {
         id: b.id,
         invoice_number: b.invoice_number,
         bill_date: b.bill_date,
@@ -2542,9 +2611,24 @@ app.get('/api/partners/profit-breakdown', async (req, res) => {
         amount_paid: Number(b.amount_paid) || 0,
         status: b.status,
         notes: b.notes || '',
-        profit_effect: profitEffect,
+        profit_effect: isHelp ? 0 : isSupplier ? -amount : amount,
         is_partner_settled: Boolean(b.is_partner_settled),
       };
+
+      if (isHelp) {
+        totalHelp += amount;
+        helpCount += 1;
+        help_orders.push(record);
+      } else {
+        if (isSupplier) {
+          totalBuying += amount;
+          buyingCount += 1;
+        } else {
+          totalSales += amount;
+          salesCount += 1;
+        }
+        orders.push(record);
+      }
     });
 
     const netProfit = totalSales - totalBuying;
@@ -2566,7 +2650,6 @@ app.get('/api/partners/profit-breakdown', async (req, res) => {
     const sortedDates = rawBills.map((b) => b.bill_date).filter(Boolean).sort();
     const effectiveStart = startDate || (sortedDates.length > 0 ? sortedDates[0] : '');
     const effectiveEnd = endDate || (sortedDates.length > 0 ? sortedDates[sortedDates.length - 1] : '');
-    const maxBillId = rawBills.length > 0 ? Math.max(...rawBills.map((b) => b.id)) : null;
 
     res.json({
       period: {
@@ -2581,10 +2664,14 @@ app.get('/api/partners/profit-breakdown', async (req, res) => {
         buying_count: buyingCount,
         net_profit: netProfit,
         profit_margin_pct: profitMarginPct,
-        max_bill_id: maxBillId,
+      },
+      help_summary: {
+        total_help: totalHelp,
+        help_count: helpCount,
       },
       partner_splits: partnerSplits,
       orders,
+      help_orders,
       last_settlement: lastSettlement || null,
     });
   } catch (err) {

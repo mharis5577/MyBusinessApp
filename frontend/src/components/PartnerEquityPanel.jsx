@@ -23,6 +23,7 @@ import {
   Layers,
   Sparkles,
   ShieldCheck,
+  Handshake,
   AlertCircle,
   BarChart3,
   PieChart,
@@ -30,6 +31,8 @@ import {
   Search,
   Check,
   X,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
@@ -85,8 +88,12 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
     onConfirm: null,
   });
 
-  const [activeSubTab, setActiveSubTab] = useState('breakdown'); // 'breakdown' | 'analytics' | 'payouts' | 'settlements'
+  const [activeSubTab, setActiveSubTab] = useState('breakdown'); // 'breakdown' | 'help' | 'analytics' | 'payouts' | 'settlements'
   const [searchQuery, setSearchQuery] = useState('');
+  const [viewMode, setViewMode] = useState('daily'); // 'daily' | 'itemized'
+  const [expandedDates, setExpandedDates] = useState({});
+  const [settlingDate, setSettlingDate] = useState(null);
+  const [confirmingDate, setConfirmingDate] = useState(null);
 
   // 1. Fetch Partner Profiles & Lifetime Overview
   const fetchPartners = useCallback(async () => {
@@ -264,6 +271,40 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
     }
   };
 
+  // Toggle consolidated entire day settlement status
+  const handleToggleDateSettled = async (date, isCurrentlySettled) => {
+    setSettlingDate(date);
+    try {
+      const newStatus = !isCurrentlySettled;
+      await apiFetch(`/api/partners/dates/${encodeURIComponent(date)}/settle`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_partner_settled: newStatus }),
+      });
+
+      playSuccessChime();
+      toast.success(
+        newStatus
+          ? `All bills on ${date} marked as 50/50 Settled!`
+          : `Bills on ${date} reverted to Unsettled.`
+      );
+      setConfirmingDate(null);
+      await Promise.all([fetchPartners(), fetchAuxData(), fetchBreakdown()]);
+    } catch (err) {
+      toast.error('Failed to update daily settlement: ' + err.message);
+    } finally {
+      setSettlingDate(null);
+    }
+  };
+
+  const toggleDateExpanded = (date) => {
+    playTapSound();
+    setExpandedDates((prev) => ({
+      ...prev,
+      [date]: prev[date] === undefined ? false : !prev[date],
+    }));
+  };
+
   const promptDeleteSettlement = (id) => {
     playTapSound();
     setConfirmDialog({
@@ -394,6 +435,49 @@ ${splitsText}
         (o.notes || '').toLowerCase().includes(q)
     );
   }, [calcData.orders, searchQuery]);
+
+  // Filtered help / friendly loan orders list by search
+  const filteredHelpOrders = useMemo(() => {
+    if (!searchQuery.trim()) return calcData.help_orders || [];
+    const q = searchQuery.toLowerCase();
+    return (calcData.help_orders || []).filter(
+      (o) =>
+        (o.customer_name || '').toLowerCase().includes(q) ||
+        (o.invoice_number || '').toLowerCase().includes(q) ||
+        (o.notes || '').toLowerCase().includes(q)
+    );
+  }, [calcData.help_orders, searchQuery]);
+
+  // Consolidated Daily Groups for the Daily Rollup view
+  const dailyGroups = useMemo(() => {
+    const map = {};
+    (filteredOrders || []).forEach((o) => {
+      const d = o.bill_date || 'Other';
+      if (!map[d]) {
+        map[d] = {
+          date: d,
+          sales: 0,
+          buying: 0,
+          salesCount: 0,
+          buyingCount: 0,
+          orders: [],
+          allSettled: true,
+          anySettled: false,
+        };
+      }
+      if (o.is_supplier || o.bill_type === 'supplier') {
+        map[d].buying += Number(o.total_amount) || 0;
+        map[d].buyingCount += 1;
+      } else {
+        map[d].sales += Number(o.total_amount) || 0;
+        map[d].salesCount += 1;
+      }
+      if (!o.is_partner_settled) map[d].allSettled = false;
+      if (o.is_partner_settled) map[d].anySettled = true;
+      map[d].orders.push(o);
+    });
+    return Object.values(map).sort((a, b) => b.date.localeCompare(a.date));
+  }, [filteredOrders]);
 
   if (loading) {
     return (
@@ -784,7 +868,7 @@ ${splitsText}
         })()}
       </div>
 
-      {/* 5. Sub-Tabs (Itemized Orders | Visual Analytics | Payouts Ledger | Checkpoints History) */}
+      {/* 5. Sub-Tabs (Itemized Sales & Buying | Help & Loans | Visual Analytics | Payouts | History) */}
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.4rem', flexWrap: 'wrap' }}>
         <button
           type="button"
@@ -795,7 +879,24 @@ ${splitsText}
           }}
           style={{ padding: '0.4rem 0.8rem', fontSize: '0.82rem', fontWeight: activeSubTab === 'breakdown' ? 700 : 500 }}
         >
-          <Layers size={14} /> Itemized Shipment / Order Breakdown ({calcData.orders?.length || 0})
+          <Layers size={14} /> Itemized Sales & Buying ({calcData.orders?.length || 0})
+        </button>
+
+        <button
+          type="button"
+          className={`btn-secondary${activeSubTab === 'help' ? ' active' : ''}`}
+          onClick={() => {
+            playTapSound();
+            setActiveSubTab('help');
+          }}
+          style={{
+            padding: '0.4rem 0.8rem',
+            fontSize: '0.82rem',
+            fontWeight: activeSubTab === 'help' ? 700 : 500,
+            borderColor: activeSubTab === 'help' ? 'var(--accent-indigo, #6366f1)' : undefined,
+          }}
+        >
+          <Handshake size={14} style={{ color: 'var(--accent-indigo, #6366f1)' }} /> Help & Loan Float ({calcData.help_orders?.length || 0})
         </button>
 
         <button
@@ -889,7 +990,59 @@ ${splitsText}
                 </button>
               )}
             </div>
-            <div style={{ display: 'flex', gap: '0.4rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* View Mode Toggle: Daily Grouped vs All Bills */}
+              <div
+                style={{
+                  display: 'inline-flex',
+                  background: 'rgba(0,0,0,0.05)',
+                  borderRadius: '999px',
+                  padding: '2px',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    playTapSound();
+                    setViewMode('daily');
+                  }}
+                  style={{
+                    padding: '0.32rem 0.75rem',
+                    fontSize: '0.75rem',
+                    borderRadius: '999px',
+                    border: 'none',
+                    fontWeight: viewMode === 'daily' ? 750 : 500,
+                    background: viewMode === 'daily' ? 'var(--accent-teal, #14b8a6)' : 'transparent',
+                    color: viewMode === 'daily' ? '#ffffff' : 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  📅 Group by Date
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    playTapSound();
+                    setViewMode('itemized');
+                  }}
+                  style={{
+                    padding: '0.32rem 0.75rem',
+                    fontSize: '0.75rem',
+                    borderRadius: '999px',
+                    border: 'none',
+                    fontWeight: viewMode === 'itemized' ? 750 : 500,
+                    background: viewMode === 'itemized' ? 'var(--accent-teal, #14b8a6)' : 'transparent',
+                    color: viewMode === 'itemized' ? '#ffffff' : 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  📄 All Bills
+                </button>
+              </div>
+
               <button
                 type="button"
                 className="btn-secondary"
@@ -900,6 +1053,327 @@ ${splitsText}
               </button>
             </div>
           </div>
+
+          {viewMode === 'daily' ? (
+            /* 1. Daily Consolidated Rollup Table */
+            <div className="table-responsive" style={{ maxHeight: '460px', overflowY: 'auto', overflowX: 'auto', WebkitOverflowScrolling: 'touch', width: '100%' }}>
+              <table className="data-table" style={{ width: '100%', minWidth: '820px', fontSize: '0.82rem' }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: '32px' }}></th>
+                    <th>Date</th>
+                    <th>Transactions Included</th>
+                    <th style={{ textAlign: 'right' }}>Total Sales (+)</th>
+                    <th style={{ textAlign: 'right' }}>Buying Cost (−)</th>
+                    <th style={{ textAlign: 'right' }}>Net Daily Profit</th>
+                    <th style={{ textAlign: 'center' }}>50/50 Division</th>
+                    <th style={{ textAlign: 'center' }}>Daily Settlement</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dailyGroups.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '2.5rem 0', color: 'var(--text-muted)' }}>
+                        No orders or shipments found for this time period.
+                      </td>
+                    </tr>
+                  ) : (
+                    dailyGroups.map((group) => {
+                      const isExpanded = expandedDates[group.date] !== false; // default expanded
+                      const netProfit = group.sales - group.buying;
+                      const nomiShare = Math.round((netProfit * 0.5) * 100) / 100;
+                      const harisShare = nomiShare;
+                      const isSettling = settlingDate === group.date;
+                      const isConfirming = confirmingDate === group.date;
+
+                      return (
+                        <React.Fragment key={`day-${group.date}`}>
+                          {/* Daily Summary Row */}
+                          <tr
+                            style={{
+                              background: group.allSettled
+                                ? 'rgba(52, 168, 83, 0.05)'
+                                : 'rgba(245, 158, 11, 0.05)',
+                              fontWeight: 600,
+                            }}
+                          >
+                            <td style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => toggleDateExpanded(group.date)}>
+                              <button
+                                type="button"
+                                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', padding: 0 }}
+                              >
+                                {isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                              </button>
+                            </td>
+                            <td onClick={() => toggleDateExpanded(group.date)} style={{ cursor: 'pointer' }}>
+                              <strong style={{ fontSize: '0.88rem' }}>{group.date}</strong>
+                            </td>
+                            <td onClick={() => toggleDateExpanded(group.date)} style={{ cursor: 'pointer' }}>
+                              <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                {group.salesCount > 0 && (
+                                  <span className="badge badge-teal" style={{ fontSize: '0.66rem' }}>
+                                    {group.salesCount} Sales
+                                  </span>
+                                )}
+                                {group.buyingCount > 0 && (
+                                  <span className="badge badge-amber" style={{ fontSize: '0.66rem' }}>
+                                    {group.buyingCount} Saudia Buying
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: group.sales > 0 ? 'var(--status-paid)' : 'inherit' }}>
+                              {group.sales > 0 ? `${currencySymbol} ${formatPkMoney(group.sales)}` : '—'}
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: group.buying > 0 ? 'var(--status-overdue)' : 'inherit' }}>
+                              {group.buying > 0 ? `${currencySymbol} ${formatPkMoney(group.buying)}` : '—'}
+                            </td>
+                            <td
+                              style={{
+                                textAlign: 'right',
+                                fontWeight: 800,
+                                fontSize: '0.88rem',
+                                color: netProfit >= 0 ? 'var(--status-paid)' : 'var(--status-overdue)',
+                              }}
+                            >
+                              {netProfit >= 0 ? '+' : ''}{currencySymbol} {formatPkMoney(netProfit)}
+                            </td>
+                            <td style={{ textAlign: 'center', fontSize: '0.74rem' }}>
+                              <span style={{ color: '#3b82f6', fontWeight: 700 }}>N: {currencySymbol} {formatPkMoney(nomiShare)}</span>
+                              <span style={{ margin: '0 0.25rem', color: 'var(--text-muted)' }}>|</span>
+                              <span style={{ color: 'var(--accent-teal)', fontWeight: 700 }}>H: {currencySymbol} {formatPkMoney(harisShare)}</span>
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {group.allSettled ? (
+                                isConfirming ? (
+                                  <div
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      background: 'rgba(239, 68, 68, 0.12)',
+                                      border: '1px solid rgba(239, 68, 68, 0.35)',
+                                      borderRadius: '999px',
+                                      padding: '2px',
+                                      gap: '3px',
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="btn-danger"
+                                      onClick={() => handleToggleDateSettled(group.date, true)}
+                                      disabled={isSettling}
+                                      style={{
+                                        padding: '0.22rem 0.55rem',
+                                        fontSize: '0.68rem',
+                                        borderRadius: '999px',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.25rem',
+                                        fontWeight: 700,
+                                        height: '24px',
+                                      }}
+                                    >
+                                      {isSettling ? 'Reverting...' : 'Revert Day'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmingDate(null)}
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        background: 'transparent',
+                                        color: 'var(--text-secondary)',
+                                        border: 'none',
+                                        borderRadius: '50%',
+                                        width: '22px',
+                                        height: '22px',
+                                        cursor: 'pointer',
+                                        padding: 0,
+                                      }}
+                                      title="Cancel"
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="badge badge-paid"
+                                    onClick={() => {
+                                      playTapSound();
+                                      setConfirmingDate(group.date);
+                                    }}
+                                    style={{
+                                      fontSize: '0.70rem',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.25rem',
+                                      whiteSpace: 'nowrap',
+                                      cursor: 'pointer',
+                                      border: '1px solid var(--status-paid)',
+                                      background: 'rgba(52, 168, 83, 0.15)',
+                                    }}
+                                    title="All bills settled for this day. Click to revert."
+                                  >
+                                    <CheckCircle2 size={11} /> Day Settled
+                                  </button>
+                                )
+                              ) : isConfirming ? (
+                                <div
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    background: 'rgba(217, 119, 6, 0.12)',
+                                    border: '1px solid rgba(217, 119, 6, 0.35)',
+                                    borderRadius: '999px',
+                                    padding: '2px',
+                                    gap: '3px',
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    className="btn-primary"
+                                    onClick={() => handleToggleDateSettled(group.date, false)}
+                                    disabled={isSettling}
+                                    style={{
+                                      padding: '0.22rem 0.6rem',
+                                      fontSize: '0.68rem',
+                                      borderRadius: '999px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.25rem',
+                                      fontWeight: 700,
+                                      height: '24px',
+                                    }}
+                                  >
+                                    <Check size={12} />
+                                    {isSettling ? 'Settling...' : 'Confirm Settle'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmingDate(null)}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      background: 'transparent',
+                                      color: 'var(--text-secondary)',
+                                      border: 'none',
+                                      borderRadius: '50%',
+                                      width: '22px',
+                                      height: '22px',
+                                      cursor: 'pointer',
+                                      padding: 0,
+                                    }}
+                                    title="Cancel"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="badge badge-amber"
+                                  onClick={() => {
+                                    playTapSound();
+                                    setConfirmingDate(group.date);
+                                  }}
+                                  style={{
+                                    fontSize: '0.70rem',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    whiteSpace: 'nowrap',
+                                    cursor: 'pointer',
+                                    border: '1px solid #f59e0b',
+                                    background: 'rgba(245, 158, 11, 0.18)',
+                                    color: '#d97706',
+                                    fontWeight: 750,
+                                    padding: '0.28rem 0.55rem',
+                                    borderRadius: '999px',
+                                    transition: 'all 0.15s ease',
+                                  }}
+                                  title="Click to settle all bills on this date"
+                                >
+                                  <Flag size={11} /> Settle Day ({group.orders.length})
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+
+                          {/* Expandable Drilldown Itemized Sub-Table */}
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={8} style={{ padding: '0.4rem 0.6rem 0.8rem 1.8rem', background: 'rgba(0,0,0,0.015)' }}>
+                                <div style={{ borderLeft: '2px solid var(--border-color)', paddingLeft: '0.75rem' }}>
+                                  <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.35rem', textTransform: 'uppercase' }}>
+                                    Individual Invoices on {group.date}:
+                                  </div>
+                                  <table style={{ width: '100%', fontSize: '0.78rem', borderCollapse: 'collapse' }}>
+                                    <tbody>
+                                      {group.orders.map((o) => {
+                                        const isBuy = o.is_supplier || o.bill_type === 'supplier';
+                                        const isOrderSettled = Boolean(o.is_partner_settled);
+
+                                        return (
+                                          <tr key={`item-${o.id}`} style={{ borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
+                                            <td style={{ padding: '0.35rem 0.4rem', width: '110px' }}>
+                                              <strong>{o.invoice_number}</strong>
+                                            </td>
+                                            <td style={{ padding: '0.35rem 0.4rem', width: '120px' }}>
+                                              <span
+                                                className={`badge ${isBuy ? 'badge-amber' : 'badge-teal'}`}
+                                                style={{ fontSize: '0.64rem', textTransform: 'uppercase' }}
+                                              >
+                                                {isBuy ? 'Saudia Buying' : 'Customer Sale'}
+                                              </span>
+                                            </td>
+                                            <td style={{ padding: '0.35rem 0.4rem' }}>
+                                              <span style={{ fontWeight: 600 }}>{o.customer_name}</span>
+                                              {o.notes && <span style={{ fontSize: '0.70rem', color: 'var(--text-muted)', marginLeft: '0.5rem' }}>({o.notes})</span>}
+                                            </td>
+                                            <td style={{ padding: '0.35rem 0.4rem', textAlign: 'right', fontWeight: 700, color: isBuy ? 'var(--status-overdue)' : 'var(--status-paid)', width: '130px' }}>
+                                              {isBuy ? '−' : '+'}{currencySymbol} {formatPkMoney(o.total_amount)}
+                                            </td>
+                                            <td style={{ padding: '0.35rem 0.4rem', textAlign: 'center', width: '130px' }}>
+                                              <button
+                                                type="button"
+                                                className={`badge ${isOrderSettled ? 'badge-paid' : 'badge-amber'}`}
+                                                onClick={() => handleToggleBillSettled(o)}
+                                                disabled={settlingOrderId === o.id}
+                                                style={{
+                                                  fontSize: '0.65rem',
+                                                  display: 'inline-flex',
+                                                  alignItems: 'center',
+                                                  gap: '0.2rem',
+                                                  cursor: 'pointer',
+                                                  padding: '0.15rem 0.45rem',
+                                                  borderRadius: '999px',
+                                                }}
+                                              >
+                                                {isOrderSettled ? <CheckCircle2 size={10} /> : <Flag size={10} />}
+                                                <span>{isOrderSettled ? 'Settled' : 'Unsettled'}</span>
+                                              </button>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            /* 2. Flat Itemized Table */
 
           <div className="table-responsive" style={{ maxHeight: '420px', overflowY: 'auto', overflowX: 'auto', WebkitOverflowScrolling: 'touch', width: '100%' }}>
             <table className="data-table" style={{ width: '100%', minWidth: '780px', fontSize: '0.82rem' }}>
@@ -1120,6 +1594,232 @@ ${splitsText}
                               onClick={() => {
                                 playTapSound();
                                 setConfirmingOrderId(o.id);
+                              }}
+                              style={{
+                                fontSize: '0.70rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                                whiteSpace: 'nowrap',
+                                cursor: 'pointer',
+                                border: '1px solid #f59e0b',
+                                background: 'rgba(245, 158, 11, 0.18)',
+                                color: '#d97706',
+                                fontWeight: 750,
+                                padding: '0.28rem 0.55rem',
+                                borderRadius: '999px',
+                                transition: 'all 0.15s ease',
+                              }}
+                              title="Click to mark this record as Settled"
+                            >
+                              <Flag size={11} /> Unsettled
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    )}
+
+      {/* Sub-Tab 1.5: Help & Loan Float Ledger (Separated from Sales & Buying Dividends) */}
+      {activeSubTab === 'help' && (
+        <div className="glass-panel" style={{ padding: '1rem', borderRadius: 'var(--radius-lg)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem', flexWrap: 'wrap', gap: '0.6rem' }}>
+            <div>
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Handshake size={18} style={{ color: 'var(--accent-indigo, #6366f1)' }} /> Help & Friendly Loan Float Ledger
+              </h3>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>
+                These transactions represent capital float and friendly loans. They are tracked separately and do not affect the 50/50 profit pool.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+              <div style={{ padding: '0.4rem 0.75rem', borderRadius: 'var(--radius-md)', background: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
+                <span style={{ fontSize: '0.68rem', color: 'var(--accent-indigo, #6366f1)', fontWeight: 700 }}>TOTAL FLOAT: </span>
+                <strong style={{ fontSize: '0.88rem' }}>{currencySymbol} {formatPkMoney(calcData.help_summary?.total_help || 0)}</strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="table-responsive" style={{ maxHeight: '420px', overflowY: 'auto', overflowX: 'auto', WebkitOverflowScrolling: 'touch', width: '100%' }}>
+            <table className="data-table" style={{ width: '100%', minWidth: '780px', fontSize: '0.82rem' }}>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Ref #</th>
+                  <th>Beneficiary / Party</th>
+                  <th>Description / Notes</th>
+                  <th style={{ textAlign: 'right' }}>Float / Loan Amount</th>
+                  <th style={{ textAlign: 'center' }}>Status</th>
+                  <th style={{ textAlign: 'center' }}>Settlement Tag</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredHelpOrders.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ textAlign: 'center', padding: '2.5rem 0', color: 'var(--text-muted)' }}>
+                      No help or friendly loan records found for this period.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredHelpOrders.map((h) => {
+                    const isSettled = Boolean(h.is_partner_settled);
+                    return (
+                      <tr key={h.id}>
+                        <td>{h.bill_date}</td>
+                        <td><strong>{h.invoice_number}</strong></td>
+                        <td><div style={{ fontWeight: 700 }}>{h.customer_name}</div></td>
+                        <td><div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{h.notes || 'Friendly Float / Assistance'}</div></td>
+                        <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--accent-indigo, #6366f1)' }}>
+                          {currencySymbol} {formatPkMoney(h.total_amount)}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <span className={`badge ${h.status === 'paid' ? 'badge-paid' : 'badge-amber'}`} style={{ fontSize: '0.68rem' }}>
+                            {h.status === 'paid' ? 'Cleared' : h.status || 'Pending'}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {isSettled ? (
+                            confirmingOrderId === h.id ? (
+                              <div
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  background: 'rgba(239, 68, 68, 0.12)',
+                                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                                  borderRadius: '999px',
+                                  padding: '2px',
+                                  gap: '3px',
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  className="btn-danger"
+                                  onClick={() => handleToggleBillSettled(h)}
+                                  disabled={settlingOrderId === h.id}
+                                  style={{
+                                    padding: '0.22rem 0.55rem',
+                                    fontSize: '0.68rem',
+                                    borderRadius: '999px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    fontWeight: 700,
+                                    height: '24px',
+                                  }}
+                                >
+                                  {settlingOrderId === h.id ? 'Reverting...' : 'Revert'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmingOrderId(null)}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    background: 'transparent',
+                                    color: 'var(--text-secondary)',
+                                    border: 'none',
+                                    borderRadius: '50%',
+                                    width: '22px',
+                                    height: '22px',
+                                    cursor: 'pointer',
+                                    padding: 0,
+                                  }}
+                                  title="Cancel"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="badge badge-paid"
+                                onClick={() => {
+                                  playTapSound();
+                                  setConfirmingOrderId(h.id);
+                                }}
+                                style={{
+                                  fontSize: '0.70rem',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem',
+                                  whiteSpace: 'nowrap',
+                                  cursor: 'pointer',
+                                  border: '1px solid var(--status-paid)',
+                                  background: 'rgba(52, 168, 83, 0.15)',
+                                }}
+                                title="Click to revert this record to Unsettled"
+                              >
+                                <CheckCircle2 size={11} /> Settled
+                              </button>
+                            )
+                          ) : confirmingOrderId === h.id ? (
+                            <div
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                background: 'rgba(217, 119, 6, 0.12)',
+                                border: '1px solid rgba(217, 119, 6, 0.35)',
+                                borderRadius: '999px',
+                                padding: '2px',
+                                gap: '3px',
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className="btn-primary"
+                                onClick={() => handleToggleBillSettled(h)}
+                                disabled={settlingOrderId === h.id}
+                                style={{
+                                  padding: '0.22rem 0.6rem',
+                                  fontSize: '0.68rem',
+                                  borderRadius: '999px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem',
+                                  fontWeight: 700,
+                                  height: '24px',
+                                }}
+                              >
+                                <Check size={12} />
+                                {settlingOrderId === h.id ? 'Saving...' : 'Settle'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingOrderId(null)}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  background: 'transparent',
+                                  color: 'var(--text-secondary)',
+                                  border: 'none',
+                                  borderRadius: '50%',
+                                  width: '22px',
+                                  height: '22px',
+                                  cursor: 'pointer',
+                                  padding: 0,
+                                }}
+                                title="Cancel"
+                              >
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="badge badge-amber"
+                              onClick={() => {
+                                playTapSound();
+                                setConfirmingOrderId(h.id);
                               }}
                               style={{
                                 fontSize: '0.70rem',

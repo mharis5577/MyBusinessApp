@@ -2162,6 +2162,63 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
       return jsonOk({ success: true, billId, is_partner_settled: isSettled });
     }
 
+    // 1.5. PATCH /api/partners/dates/:date/settle
+    if (parts[2] === 'dates' && parts[4] === 'settle' && method === 'PATCH') {
+      const date = parts[3];
+      const isSettled = body.is_partner_settled !== undefined ? Boolean(body.is_partner_settled) : true;
+      const allBills = await db.getAll('bills');
+
+      for (const bill of allBills) {
+        if (bill.bill_date === date && !isCancelled(bill)) {
+          bill.is_partner_settled = isSettled;
+          bill.partner_settled_at = isSettled ? new Date().toISOString() : null;
+          await db.put('bills', bill);
+        }
+      }
+
+      const dailyCode = `SETTL-DAILY-${date.replace(/-/g, '')}`;
+      const allSettlements = await db.getAll('partner_settlements');
+
+      if (isSettled) {
+        let totalSales = 0;
+        let totalBuying = 0;
+        allBills.filter((b) => b.bill_date === date && !isCancelled(b)).forEach((b) => {
+          const t = normalizeBillType(b.bill_type);
+          const amt = Number(b.total_amount) || 0;
+          if (t === 'supplier') totalBuying += amt;
+          else if (t !== 'help' && t !== 'loan') totalSales += amt;
+        });
+
+        const netProfit = totalSales - totalBuying;
+        const existing = allSettlements.find((s) => s.settlement_code === dailyCode);
+        const entry = {
+          ...(existing || {}),
+          settlement_code: dailyCode,
+          period_start: date,
+          period_end: date,
+          last_bill_date: date,
+          total_sales: totalSales,
+          total_buying: totalBuying,
+          net_profit: netProfit,
+          nomi_share: netProfit * 0.5,
+          haris_share: netProfit * 0.5,
+          notes: body.notes || `Consolidated Daily Settlement for ${date}`,
+          created_by: 'Owner',
+          settled_at: pakistanToday(),
+        };
+        await db.put('partner_settlements', entry);
+      } else {
+        const linked = allSettlements.filter(
+          (s) => s.settlement_code === dailyCode || (s.period_start === date && s.period_end === date)
+        );
+        for (const s of linked) {
+          if (s.id) await db.delete('partner_settlements', s.id);
+        }
+      }
+
+      return jsonOk({ success: true, date, is_partner_settled: isSettled });
+    }
+
     // 2. PUT /api/partners/:id
     if (parts[2] && !isNaN(Number(parts[2])) && method === 'PUT') {
       const id = Number(parts[2]);
@@ -2204,28 +2261,22 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
         return (Number(b.id) || 0) - (Number(a.id) || 0);
       });
 
+      const orders = [];
+      const help_orders = [];
       let totalSales = 0;
       let totalBuying = 0;
       let salesCount = 0;
       let buyingCount = 0;
+      let totalHelp = 0;
+      let helpCount = 0;
 
-      const orders = bills.map((b) => {
+      bills.forEach((b) => {
         const t = normalizeBillType(b.bill_type);
         const isSupplier = t === 'supplier';
         const isHelp = t === 'help' || t === 'loan';
         const amount = Number(b.total_amount) || 0;
 
-        if (isSupplier) {
-          totalBuying += amount;
-          buyingCount += 1;
-        } else if (!isHelp) {
-          totalSales += amount;
-          salesCount += 1;
-        }
-
-        const profitEffect = isHelp ? 0 : isSupplier ? -amount : amount;
-
-        return {
+        const record = {
           id: b.id,
           invoice_number: b.invoice_number,
           bill_date: b.bill_date,
@@ -2238,9 +2289,24 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
           amount_paid: Number(b.amount_paid) || 0,
           status: b.status,
           notes: b.notes || '',
-          profit_effect: profitEffect,
+          profit_effect: isHelp ? 0 : isSupplier ? -amount : amount,
           is_partner_settled: Boolean(b.is_partner_settled),
         };
+
+        if (isHelp) {
+          totalHelp += amount;
+          helpCount += 1;
+          help_orders.push(record);
+        } else {
+          if (isSupplier) {
+            totalBuying += amount;
+            buyingCount += 1;
+          } else {
+            totalSales += amount;
+            salesCount += 1;
+          }
+          orders.push(record);
+        }
       });
 
       const netProfit = totalSales - totalBuying;
@@ -2260,7 +2326,6 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
       const sortedDates = bills.map((b) => b.bill_date).filter(Boolean).sort();
       const effectiveStart = startDate || (sortedDates.length > 0 ? sortedDates[0] : '');
       const effectiveEnd = endDate || (sortedDates.length > 0 ? sortedDates[sortedDates.length - 1] : '');
-      const maxBillId = bills.length > 0 ? Math.max(...bills.map((b) => Number(b.id) || 0)) : null;
 
       return jsonOk({
         period: {
@@ -2275,10 +2340,14 @@ Please kindly share the payment transfer screenshot once processed. Thank you!`;
           buying_count: buyingCount,
           net_profit: netProfit,
           profit_margin_pct: profitMarginPct,
-          max_bill_id: maxBillId,
+        },
+        help_summary: {
+          total_help: totalHelp,
+          help_count: helpCount,
         },
         partner_splits: partnerSplits,
         orders,
+        help_orders,
         last_settlement: lastSettlement || null,
       });
     }

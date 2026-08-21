@@ -538,7 +538,22 @@ export default function CustomerManager({
             )}
           </div>
 
-          <div className="party-filter-row" style={{ margin: 0 }}>
+          <div
+            className="party-filter-row"
+            style={{
+              margin: 0,
+              display: 'flex',
+              flexDirection: 'row',
+              flexWrap: 'nowrap',
+              gap: '0.45rem',
+              overflowX: 'auto',
+              WebkitOverflowScrolling: 'touch',
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+              padding: '2px 0',
+              maxWidth: '100%',
+            }}
+          >
             {[
               ['all', `All (${customers.length})`],
               ['customer', 'Customers'],
@@ -553,6 +568,12 @@ export default function CustomerManager({
                 onClick={() => {
                   playTapSound();
                   setPartyFilter(key);
+                }}
+                style={{
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  flex: '0 0 auto',
+                  width: 'auto',
                 }}
               >
                 {label}

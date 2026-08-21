@@ -7147,6 +7147,43 @@ textarea.input:focus,
   color: var(--text-secondary);
 }
 
+/* Pagination Bar & Buttons — Guaranteed Horizontal Single Row on all screen sizes */
+.bills-pagination-bar {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.65rem !important;
+  width: 100% !important;
+}
+
+.bills-pagination-controls {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.35rem !important;
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  padding: 2px 4px !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+
+.bills-pagination-btn {
+  width: auto !important;
+  min-width: 32px !important;
+  max-width: max-content !important;
+  flex: 0 0 auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0.35rem 0.65rem !important;
+  font-size: 0.78rem !important;
+  white-space: nowrap !important;
+  box-sizing: border-box !important;
+}
+
 .client-ledger-value {
   font-weight: 800;
   font-family: var(--font-display);
@@ -7159,6 +7196,174 @@ textarea.input:focus,
   margin: 0 0 0.7rem;
   font-size: 0.75rem;
   color: var(--text-secondary);
+}
+
+/* Customer / Party Filter Chips — Single Row Horizontal Scroll */
+.party-filter-row {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  gap: 0.45rem !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+  padding: 2px 0 !important;
+  max-width: 100% !important;
+}
+
+.party-filter-row::-webkit-scrollbar {
+  display: none !important;
+}
+
+.party-filter-chip {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  flex: 0 0 auto !important;
+  width: auto !important;
+  padding: 0.35rem 0.85rem !important;
+  font-size: 0.8rem !important;
+  font-weight: 600 !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12)) !important;
+  background: var(--card-bg, rgba(255, 255, 255, 0.04)) !important;
+  color: var(--text-secondary, #94a3b8) !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.party-filter-chip:hover {
+  background: var(--card-hover-bg, rgba(255, 255, 255, 0.08)) !important;
+  color: var(--text-primary, #ffffff) !important;
+}
+
+.party-filter-chip.active {
+  background: var(--accent-teal, #14b8a6) !important;
+  border-color: var(--accent-teal, #14b8a6) !important;
+  color: #ffffff !important;
+  font-weight: 750 !important;
+  box-shadow: 0 2px 8px rgba(20, 184, 166, 0.35) !important;
+}
+
+/* Collections Aging Report Styling */
+.aging-bucket-tabs {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  gap: 0.45rem !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+  padding: 3px 0 !important;
+  margin-bottom: 0.95rem !important;
+  max-width: 100% !important;
+}
+
+.aging-bucket-tabs::-webkit-scrollbar {
+  display: none !important;
+}
+
+.aging-bucket-tile {
+  background: var(--card-bg, rgba(255, 255, 255, 0.03)) !important;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08)) !important;
+  border-radius: var(--radius-md, 10px) !important;
+  padding: 0.65rem 0.75rem !important;
+  transition: all 0.2s ease !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+}
+
+.aging-bucket-tile:hover {
+  background: var(--card-hover-bg, rgba(255, 255, 255, 0.06)) !important;
+  border-color: var(--border-color-strong, rgba(255, 255, 255, 0.16)) !important;
+}
+
+.aging-row {
+  width: 100% !important;
+  text-align: left !important;
+  background: var(--card-bg, rgba(255, 255, 255, 0.03)) !important;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08)) !important;
+  border-radius: var(--radius-md, 12px) !important;
+  padding: 0.75rem 0.9rem !important;
+  cursor: pointer !important;
+  transition: all 0.18s ease !important;
+  color: var(--text-primary, #ffffff) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.35rem !important;
+  box-sizing: border-box !important;
+}
+
+.aging-row:hover {
+  background: var(--card-hover-bg, rgba(255, 255, 255, 0.07)) !important;
+  border-color: var(--accent-teal, #14b8a6) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
+}
+
+.aging-row strong {
+  color: var(--text-primary, #ffffff) !important;
+}
+
+/* Dashboard Latest Bills Modern Feed Styling */
+.dashboard-recent-item {
+  width: 100% !important;
+  text-align: left !important;
+  background: var(--card-bg, rgba(255, 255, 255, 0.035)) !important;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.09)) !important;
+  border-radius: var(--radius-md, 12px) !important;
+  padding: 0.8rem 1rem !important;
+  cursor: pointer !important;
+  transition: all 0.18s ease !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.45rem !important;
+  box-sizing: border-box !important;
+  margin-bottom: 0.55rem !important;
+  position: relative !important;
+}
+
+.dashboard-recent-item:hover {
+  background: var(--card-hover-bg, rgba(255, 255, 255, 0.07)) !important;
+  border-color: var(--accent-teal, #14b8a6) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25) !important;
+}
+
+.dashboard-recent-item.type-customer {
+  border-left: 3.5px solid #10b981 !important;
+}
+
+.dashboard-recent-item.type-supplier {
+  border-left: 3.5px solid #6366f1 !important;
+}
+
+.dashboard-recent-item.type-help {
+  border-left: 3.5px solid #a855f7 !important;
+}
+
+.dashboard-recent-all {
+  background: none !important;
+  border: none !important;
+  color: var(--accent-teal, #14b8a6) !important;
+  font-size: 0.8rem !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.25rem !important;
+  padding: 0.2rem 0.4rem !important;
+  border-radius: 6px !important;
+  transition: all 0.15s ease !important;
+}
+
+.dashboard-recent-all:hover {
+  background: rgba(20, 184, 166, 0.1) !important;
 }
 
 .client-ledger-row {

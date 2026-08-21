@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle, FileText, ChevronDown, Bookmark } from 'lucide-react';
+import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle, FileText, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Bookmark, CheckCircle2 } from 'lucide-react';
 import BillAdjustSheet from './BillAdjustSheet';
 import StatusBadge, { StatusSelect } from './StatusBadge';
 import TypeSelect from './TypeSelect';
@@ -33,7 +33,7 @@ import {
   normalizeBillType,
 } from '../utils/billTypes';
 
-const BILLS_PAGE_SIZE = 50;
+const BILLS_PAGE_SIZE = 5;
 
 function BillsCardMenu({ id, openId, setOpenId, label, icon: Icon, children, danger = false }) {
   const ref = useRef(null);
@@ -97,6 +97,21 @@ function BillsCardMenuItem({ icon: Icon, label, onClick, danger = false }) {
   );
 }
 
+function getPaginationItems(current, total) {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const items = [];
+  if (current <= 3) {
+    items.push(1, 2, 3, 4, '...', total);
+  } else if (current >= total - 2) {
+    items.push(1, '...', total - 3, total - 2, total - 1, total);
+  } else {
+    items.push(1, '...', current - 1, current, current + 1, '...', total);
+  }
+  return items;
+}
+
 export default function BillsDatabase({
   onViewBill,
   onDuplicateBill,
@@ -126,7 +141,7 @@ export default function BillsDatabase({
   const [showBookmarkedOnly, setShowBookmarkedOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [visibleCount, setVisibleCount] = useState(BILLS_PAGE_SIZE);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Edit Modal State
   const [editingBill, setEditingBill] = useState(null);
@@ -167,6 +182,10 @@ export default function BillsDatabase({
     const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [billTypeFilter, statusFilter, debouncedSearch, showBookmarkedOnly]);
 
   const apiFetchBills = async (opts = {}) => {
     const soft = opts.soft === true;
@@ -629,8 +648,10 @@ export default function BillsDatabase({
     if (showBookmarkedOnly && !b.is_bookmarked) return false;
     return true;
   });
-  const visibleBills = filteredBills.slice(0, visibleCount);
-  const hiddenCount = Math.max(0, filteredBills.length - visibleCount);
+  const totalPages = Math.max(1, Math.ceil(filteredBills.length / BILLS_PAGE_SIZE));
+  const validPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (validPage - 1) * BILLS_PAGE_SIZE;
+  const visibleBills = filteredBills.slice(startIndex, startIndex + BILLS_PAGE_SIZE);
 
   return (
     <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -848,14 +869,37 @@ export default function BillsDatabase({
                       {formatCurrency(currencySymbol, bill.total_amount)}
                     </td>
                     <td>
-                      {isCancelled(bill) ? (
-                        <StatusBadge status="cancelled" />
-                      ) : (
-                        <StatusSelect
-                          value={bill.status}
-                          onChange={(next) => handleUpdateStatus(bill.id, next)}
-                        />
-                      )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', alignItems: 'flex-start' }}>
+                        {isCancelled(bill) ? (
+                          <StatusBadge status="cancelled" />
+                        ) : (
+                          <StatusSelect
+                            value={bill.status}
+                            onChange={(next) => handleUpdateStatus(bill.id, next)}
+                          />
+                        )}
+                        {Boolean(bill.is_partner_settled) && (
+                          <span
+                            className="badge badge-paid"
+                            style={{
+                              fontSize: '0.66rem',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.22rem',
+                              fontWeight: 750,
+                              padding: '0.15rem 0.5rem',
+                              borderRadius: '999px',
+                              background: 'rgba(52, 168, 83, 0.15)',
+                              border: '1px solid var(--status-paid)',
+                              color: 'var(--status-paid)',
+                              whiteSpace: 'nowrap',
+                            }}
+                            title="50/50 Partner Profit Settled"
+                          >
+                            <CheckCircle2 size={10} /> 50/50 Settled
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -962,6 +1006,27 @@ export default function BillsDatabase({
                       value={bill.status}
                       onChange={(next) => handleUpdateStatus(bill.id, next)}
                     />
+                  )}
+                  {Boolean(bill.is_partner_settled) && (
+                    <span
+                      className="badge badge-paid"
+                      style={{
+                        fontSize: '0.68rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                        fontWeight: 750,
+                        padding: '0.25rem 0.6rem',
+                        borderRadius: '999px',
+                        background: 'rgba(52, 168, 83, 0.15)',
+                        border: '1px solid var(--status-paid)',
+                        color: 'var(--status-paid)',
+                        whiteSpace: 'nowrap',
+                      }}
+                      title="50/50 Partner Profit Settled"
+                    >
+                      <CheckCircle2 size={11} /> 50/50 Settled
+                    </span>
                   )}
                   {!isCancelled(bill) && (
                     <TypeSelect
@@ -1073,14 +1138,133 @@ export default function BillsDatabase({
               );
             })}
           </div>
-          {hiddenCount > 0 && (
-            <button
-              type="button"
-              className="btn-secondary bills-load-more"
-              onClick={() => setVisibleCount((n) => n + BILLS_PAGE_SIZE)}
+          {/* Pagination Page Shifter at Bottom — Centered */}
+          {filteredBills.length > 0 && (
+            <div
+              className="bills-pagination-bar"
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.65rem',
+                marginTop: '1.5rem',
+                paddingTop: '1.25rem',
+                borderTop: '1px solid var(--border-subtle)',
+                textAlign: 'center',
+                width: '100%',
+              }}
             >
-              Load more ({hiddenCount} left)
-            </button>
+              {totalPages > 1 && (
+                <div className="bills-pagination-controls" style={{ display: 'inline-flex', flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', justifyContent: 'center', gap: '0.35rem' }}>
+                  <button
+                    type="button"
+                    className="btn-secondary bills-pagination-btn"
+                    onClick={() => {
+                      setCurrentPage(1);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    disabled={validPage === 1}
+                    style={{ width: 'auto', minWidth: '32px', flex: '0 0 auto', padding: '0.35rem 0.6rem', fontSize: '0.78rem' }}
+                    title="First page"
+                  >
+                    <ChevronsLeft size={14} />
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn-secondary bills-pagination-btn"
+                    onClick={() => {
+                      setCurrentPage((p) => Math.max(1, p - 1));
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    disabled={validPage === 1}
+                    style={{ width: 'auto', flex: '0 0 auto', padding: '0.35rem 0.65rem', fontSize: '0.78rem' }}
+                    title="Previous page"
+                  >
+                    <ChevronLeft size={14} /> Prev
+                  </button>
+
+                  {/* Smart Windowed Page Number Buttons for up to 100+ pages */}
+                  {getPaginationItems(validPage, totalPages).map((item, idx) => {
+                    if (item === '...') {
+                      return (
+                        <span
+                          key={`dots-${idx}`}
+                          style={{
+                            color: 'var(--text-muted)',
+                            padding: '0 0.25rem',
+                            fontSize: '0.85rem',
+                            userSelect: 'none',
+                            flex: '0 0 auto',
+                          }}
+                        >
+                          …
+                        </span>
+                      );
+                    }
+                    const pageNum = Number(item);
+                    return (
+                      <button
+                        key={pageNum}
+                        type="button"
+                        className={`btn-${validPage === pageNum ? 'primary' : 'secondary'} bills-pagination-btn`}
+                        onClick={() => {
+                          setCurrentPage(pageNum);
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        style={{
+                          width: 'auto',
+                          minWidth: '32px',
+                          flex: '0 0 auto',
+                          padding: '0.35rem 0.65rem',
+                          fontSize: '0.78rem',
+                          fontWeight: validPage === pageNum ? 800 : 500,
+                        }}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+
+                  <button
+                    type="button"
+                    className="btn-secondary bills-pagination-btn"
+                    onClick={() => {
+                      setCurrentPage((p) => Math.min(totalPages, p + 1));
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    disabled={validPage === totalPages}
+                    style={{ width: 'auto', flex: '0 0 auto', padding: '0.35rem 0.65rem', fontSize: '0.78rem' }}
+                    title="Next page"
+                  >
+                    Next <ChevronRight size={14} />
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn-secondary bills-pagination-btn"
+                    onClick={() => {
+                      setCurrentPage(totalPages);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    disabled={validPage === totalPages}
+                    style={{ width: 'auto', minWidth: '32px', flex: '0 0 auto', padding: '0.35rem 0.6rem', fontSize: '0.78rem' }}
+                    title="Last page"
+                  >
+                    <ChevronsRight size={14} />
+                  </button>
+                </div>
+              )}
+
+              <div style={{ fontSize: '0.80rem', color: 'var(--text-secondary)' }}>
+                Showing <strong style={{ color: 'var(--text-primary)' }}>{startIndex + 1}</strong>–
+                <strong style={{ color: 'var(--text-primary)' }}>
+                  {Math.min(startIndex + BILLS_PAGE_SIZE, filteredBills.length)}
+                </strong> of <strong style={{ color: 'var(--text-primary)' }}>{filteredBills.length}</strong> bills
+                {totalPages > 1 && <span> · Page {validPage} of {totalPages}</span>}
+              </div>
+            </div>
           )}
         </div>
       )}

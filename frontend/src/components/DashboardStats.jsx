@@ -21,6 +21,7 @@ import {
   Zap,
   Bell,
   Users2,
+  Receipt,
 } from 'lucide-react';
 import { downloadDailyProfitSummaryPdf } from '../utils/tableExport';
 import { playSuccessChime, playTapSound } from '../utils/audioEffects';
@@ -804,42 +805,67 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
             />
           </div>
 
-          <div className="surface-block" style={{ padding: '1rem', borderRadius: 'var(--radius-md, 12px)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <strong style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>Latest Bills</strong>
+          <div className="surface-block" style={{ padding: '1.2rem', borderRadius: 'var(--radius-md, 14px)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                <Receipt size={18} style={{ color: 'var(--accent-teal, #14b8a6)' }} />
+                <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary)', fontWeight: 800 }}>Latest Bills</strong>
+              </div>
               <button
                 type="button"
                 className="dashboard-recent-all"
-                onClick={() => setActiveTab('recent')}
+                onClick={() => onNavigate ? onNavigate('database') : setActiveTab('recent')}
               >
                 View all ({recent_bills.length})
                 <ChevronRight size={14} />
               </button>
             </div>
-            {recent_bills.slice(0, 3).map((bill) => (
-              <button
-                key={bill.id}
-                className={`dashboard-recent-item is-${String(bill.status || '').toLowerCase()}`}
-                style={{ width: '100%', textAlign: 'left', marginBottom: '0.4rem' }}
-                onClick={() => (onViewBill ? onViewBill(bill) : onNavigate('database'))}
-              >
-                <span className="dashboard-recent-body">
-                  <span className="dashboard-recent-row">
-                    <span className="dashboard-recent-name">{bill.customer_name}</span>
-                    <span className="dashboard-recent-amount">{money(bill.total_amount)}</span>
-                  </span>
-                  <span className="dashboard-recent-row is-meta">
-                    <span className="dashboard-recent-meta">
-                      <span>{bill.invoice_number}</span>
-                      <span className="dashboard-recent-dot" />
-                      <span>{billTypeShortLabel(bill)}</span>
-                    </span>
-                    <StatusBadge status={bill.status} />
-                  </span>
-                </span>
-                <ChevronRight size={15} style={{ color: 'var(--text-muted)' }} />
-              </button>
-            ))}
+
+            {recent_bills.slice(0, 4).map((bill) => {
+              const typeClass = bill.bill_type === 'supplier' ? 'type-supplier' : bill.bill_type === 'help' ? 'type-help' : 'type-customer';
+              const typeColor = bill.bill_type === 'supplier' ? '#6366f1' : bill.bill_type === 'help' ? '#a855f7' : '#10b981';
+
+              return (
+                <button
+                  key={bill.id}
+                  className={`dashboard-recent-item ${typeClass}`}
+                  onClick={() => (onViewBill ? onViewBill(bill) : onNavigate('database'))}
+                  title="Click to view bill"
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', width: '100%' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                      <span style={{ fontSize: '0.92rem', fontWeight: 750, color: 'var(--text-primary)' }}>
+                        {bill.customer_name}
+                      </span>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        <span className="invoice-mono" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{bill.invoice_number}</span>
+                        <span>·</span>
+                        <span style={{ color: typeColor, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: typeColor, display: 'inline-block' }} />
+                          {billTypeShortLabel(bill)}
+                        </span>
+                        {bill.bill_date && (
+                          <>
+                            <span>·</span>
+                            <span>{bill.bill_date}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem', flexShrink: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                          {money(bill.total_amount)}
+                        </span>
+                        <ChevronRight size={14} style={{ color: 'var(--text-muted)' }} />
+                      </div>
+                      <StatusBadge status={bill.status} />
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
