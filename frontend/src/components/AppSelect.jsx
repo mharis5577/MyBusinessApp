@@ -137,7 +137,7 @@ export default function AppSelect({
                 top: menuBox.top,
                 bottom: menuBox.bottom,
                 maxHeight: menuBox.maxHeight,
-                zIndex: 13000,
+                zIndex: 10000000,
               }}
             >
               {normalized.map((opt) => {

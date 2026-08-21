@@ -7366,6 +7366,44 @@ textarea.input:focus,
   background: rgba(20, 184, 166, 0.1) !important;
 }
 
+/* Bills Database Header Action Buttons — Single Horizontal Bar Centered */
+.bills-header-actions {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.45rem !important;
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  padding: 2px 0 !important;
+}
+
+.bills-header-actions::-webkit-scrollbar {
+  display: none !important;
+}
+
+.bills-header-btn {
+  width: auto !important;
+  max-width: max-content !important;
+  flex: 0 0 auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.35rem !important;
+  padding: 0.45rem 0.85rem !important;
+  font-size: 0.82rem !important;
+  font-weight: 600 !important;
+  white-space: nowrap !important;
+  border-radius: 999px !important;
+}
+
+.bills-header-btn.is-icon-only {
+  padding: 0.45rem 0.55rem !important;
+  min-width: 36px !important;
+}
+
 .client-ledger-row {
   font-size: 0.78rem;
   display: flex;

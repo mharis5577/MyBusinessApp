@@ -664,21 +664,21 @@ export default function BillsDatabase({
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <button className="btn-secondary" onClick={handleExportCSV} disabled={!bills.length}>
-            <Download size={16} /> Export CSV
+        <div className="bills-header-actions" style={{ justifyContent: 'center' }}>
+          <button className="btn-secondary bills-header-btn" onClick={handleExportCSV} disabled={!bills.length}>
+            <Download size={15} /> Export CSV
           </button>
-          <button className="btn-secondary" onClick={handleExportPDF} disabled={!bills.length}>
-            <FileText size={16} /> Export PDF
+          <button className="btn-secondary bills-header-btn" onClick={handleExportPDF} disabled={!bills.length}>
+            <FileText size={15} /> Export PDF
           </button>
           <button
-            className="btn-secondary bills-refresh-btn"
+            className="btn-secondary bills-header-btn is-icon-only"
             onClick={() => apiFetchBills({ soft: true })}
             title="Refresh Database"
             disabled={refreshing || loading}
             aria-busy={refreshing}
           >
-            <RefreshCw size={16} className={refreshing ? 'spin' : undefined} />
+            <RefreshCw size={15} className={refreshing ? 'spin' : undefined} />
           </button>
         </div>
       </div>

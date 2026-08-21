@@ -3,6 +3,9 @@ import {
   ArrowDownUp,
   BarChart2,
   ChevronRight,
+  ChevronLeft,
+  ChevronsLeft,
+  ChevronsRight,
   RefreshCw,
   TrendingUp,
   DollarSign,
@@ -30,6 +33,11 @@ import { downloadCashflowReportPdf, downloadCashflowCsv } from '../utils/tableEx
 function DailyFinancialBreakdown({ data = [], currencySymbol = 'Rs.' }) {
   const [timeRange, setTimeRange] = useState('7d');
   const [filterMode, setFilterMode] = useState('all'); // 'all' | 'profitable' | 'costs'
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [timeRange, filterMode]);
 
   // Filter data based on selected time range
   const rangeLimit =
@@ -62,6 +70,12 @@ function DailyFinancialBreakdown({ data = [], currencySymbol = 'Rs.' }) {
     if (filterMode === 'costs') return (Number(item.buying) || 0) > 0;
     return true;
   });
+
+  const pageSize = 3;
+  const totalPages = Math.max(1, Math.ceil(displayedRows.length / pageSize));
+  const validPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (validPage - 1) * pageSize;
+  const pageRows = displayedRows.slice(startIndex, startIndex + pageSize);
 
   return (
     <div className="cashflow-chart-container" style={{ padding: '1.15rem' }}>
@@ -153,9 +167,9 @@ function DailyFinancialBreakdown({ data = [], currencySymbol = 'Rs.' }) {
         </div>
       </div>
 
-      {/* 3. Daily Ledger Cards List */}
+      {/* 3. Daily Ledger Cards List — 3 per page */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-        {displayedRows.map((item, idx) => {
+        {pageRows.map((item, idx) => {
           const sales = Number(item.sales) || 0;
           const buying = Number(item.buying) || 0;
           const profit = sales - buying;
@@ -272,6 +286,100 @@ function DailyFinancialBreakdown({ data = [], currencySymbol = 'Rs.' }) {
           );
         })}
       </div>
+
+      {/* Pagination Page Shifter — Max 3 Days per Page */}
+      {displayedRows.length > 0 && (
+        <div
+          className="bills-pagination-bar"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.6rem',
+            marginTop: '1.25rem',
+            paddingTop: '1rem',
+            borderTop: '1px solid var(--border-subtle)',
+            textAlign: 'center',
+          }}
+        >
+          {totalPages > 1 && (
+            <div className="bills-pagination-controls" style={{ display: 'inline-flex', flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', justifyContent: 'center', gap: '0.35rem' }}>
+              <button
+                type="button"
+                className="btn-secondary bills-pagination-btn"
+                onClick={() => setCurrentPage(1)}
+                disabled={validPage === 1}
+                style={{ width: 'auto', minWidth: '32px', flex: '0 0 auto', padding: '0.35rem 0.6rem', fontSize: '0.78rem' }}
+                title="First page"
+              >
+                <ChevronsLeft size={14} />
+              </button>
+
+              <button
+                type="button"
+                className="btn-secondary bills-pagination-btn"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={validPage === 1}
+                style={{ width: 'auto', flex: '0 0 auto', padding: '0.35rem 0.65rem', fontSize: '0.78rem' }}
+                title="Previous page"
+              >
+                <ChevronLeft size={14} /> Prev
+              </button>
+
+              {/* Page Number Buttons */}
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+                <button
+                  key={pageNum}
+                  type="button"
+                  className={`btn-${validPage === pageNum ? 'primary' : 'secondary'} bills-pagination-btn`}
+                  onClick={() => setCurrentPage(pageNum)}
+                  style={{
+                    width: 'auto',
+                    minWidth: '32px',
+                    flex: '0 0 auto',
+                    padding: '0.35rem 0.65rem',
+                    fontSize: '0.78rem',
+                    fontWeight: validPage === pageNum ? 800 : 500,
+                  }}
+                >
+                  {pageNum}
+                </button>
+              ))}
+
+              <button
+                type="button"
+                className="btn-secondary bills-pagination-btn"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={validPage === totalPages}
+                style={{ width: 'auto', flex: '0 0 auto', padding: '0.35rem 0.65rem', fontSize: '0.78rem' }}
+                title="Next page"
+              >
+                Next <ChevronRight size={14} />
+              </button>
+
+              <button
+                type="button"
+                className="btn-secondary bills-pagination-btn"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={validPage === totalPages}
+                style={{ width: 'auto', minWidth: '32px', flex: '0 0 auto', padding: '0.35rem 0.6rem', fontSize: '0.78rem' }}
+                title="Last page"
+              >
+                <ChevronsRight size={14} />
+              </button>
+            </div>
+          )}
+
+          <div style={{ fontSize: '0.80rem', color: 'var(--text-secondary)' }}>
+            Showing <strong style={{ color: 'var(--text-primary)' }}>{startIndex + 1}</strong>–
+            <strong style={{ color: 'var(--text-primary)' }}>
+              {Math.min(startIndex + pageSize, displayedRows.length)}
+            </strong> of <strong style={{ color: 'var(--text-primary)' }}>{displayedRows.length}</strong> days
+            {totalPages > 1 && <span> · Page {validPage} of {totalPages}</span>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

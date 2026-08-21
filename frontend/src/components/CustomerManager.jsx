@@ -538,47 +538,22 @@ export default function CustomerManager({
             )}
           </div>
 
-          <div
-            className="party-filter-row"
-            style={{
-              margin: 0,
-              display: 'flex',
-              flexDirection: 'row',
-              flexWrap: 'nowrap',
-              gap: '0.45rem',
-              overflowX: 'auto',
-              WebkitOverflowScrolling: 'touch',
-              scrollbarWidth: 'none',
-              msOverflowStyle: 'none',
-              padding: '2px 0',
-              maxWidth: '100%',
-            }}
-          >
-            {[
-              ['all', `All (${customers.length})`],
-              ['customer', 'Customers'],
-              ['dues', 'Has Dues'],
-              ['vip', 'VIPs'],
-              ['supplier', 'Suppliers'],
-            ].map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                className={`party-filter-chip${partyFilter === key ? ' active' : ''}`}
-                onClick={() => {
-                  playTapSound();
-                  setPartyFilter(key);
-                }}
-                style={{
-                  whiteSpace: 'nowrap',
-                  flexShrink: 0,
-                  flex: '0 0 auto',
-                  width: 'auto',
-                }}
-              >
-                {label}
-              </button>
-            ))}
+          <div style={{ minWidth: '185px', flex: '0 0 auto' }}>
+            <AppSelect
+              value={partyFilter}
+              onChange={(next) => {
+                playTapSound();
+                setPartyFilter(next);
+              }}
+              options={[
+                { value: 'all', label: `All Profiles (${customers.length})` },
+                { value: 'customer', label: 'Customers' },
+                { value: 'dues', label: 'Has Dues' },
+                { value: 'vip', label: 'VIPs ⭐' },
+                { value: 'supplier', label: 'Suppliers 📦' },
+              ]}
+              style={{ minWidth: 185 }}
+            />
           </div>
         </div>
       </div>
@@ -1101,14 +1076,49 @@ export default function CustomerManager({
             </div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-          <div className="form-group" style={{ margin: 0, width: '160px' }}>
-            <label className="form-label">Type MERGE</label>
-            <input className="form-input" value={mergeConfirm} onChange={(e) => setMergeConfirm(e.target.value)} placeholder="MERGE" autoComplete="off" />
+        <div style={{ marginTop: '1rem', paddingTop: '0.85rem', borderTop: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <label className="form-label" style={{ marginBottom: '0.5rem', display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+            Confirm Action (Type <strong style={{ color: 'var(--text-primary)' }}>MERGE</strong> to proceed)
+          </label>
+          <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
+            <input
+              className="form-input"
+              value={mergeConfirm}
+              onChange={(e) => setMergeConfirm(e.target.value)}
+              placeholder="MERGE"
+              autoComplete="off"
+              style={{
+                width: '140px',
+                height: '38px',
+                padding: '0 0.75rem',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                letterSpacing: '0.05em',
+                textAlign: 'center',
+                boxSizing: 'border-box',
+              }}
+            />
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={merging || !mergePrimary || !mergeDupes.length}
+              onClick={handleMerge}
+              style={{
+                width: 'auto',
+                height: '38px',
+                padding: '0 1.1rem',
+                fontSize: '0.82rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.4rem',
+                boxSizing: 'border-box',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <GitMerge size={15} /> Merge now
+            </button>
           </div>
-          <button type="button" className="btn-primary" style={{ width: 'auto', padding: '0.55rem 1.1rem' }} disabled={merging} onClick={handleMerge}>
-            <GitMerge size={15} /> Merge now
-          </button>
         </div>
       </div>
 
