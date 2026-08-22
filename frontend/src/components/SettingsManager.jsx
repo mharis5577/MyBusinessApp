@@ -20,7 +20,11 @@ import {
   VolumeX,
   Sparkles,
   Repeat,
+  Cloud,
+  Database,
 } from 'lucide-react';
+import { populateMockDatabase } from '../utils/mockDataGenerator';
+import FirebaseCloudSyncPanel from './FirebaseCloudSyncPanel';
 import { playSuccessChime, setSoundEnabled } from '../utils/audioEffects';
 import { compressImageToDataUrl } from '../utils/imageCompress';
 import { checkBiometricAvailable } from '../utils/appSecurity';
@@ -99,6 +103,7 @@ export default function SettingsManager({
   const [wipeConfirm, setWipeConfirm] = useState('');
   const [purgeConfirm, setPurgeConfirm] = useState('');
   const [quickPair, setQuickPair] = useState(getQuickThemes);
+  const [showCloudSync, setShowCloudSync] = useState(false);
 
   const handleSetQuickSlot = (index, themeId) => {
     const updated = [...quickPair];
@@ -622,6 +627,14 @@ export default function SettingsManager({
         <h3 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           <Download size={18} /> Backup & Restore
         </h3>
+
+        {/* Embedded Firebase Cloud Sync Vault Panel (Featured at Top) */}
+        <FirebaseCloudSyncPanel
+          companyPhone={settings.company_phone}
+          appPin={settings.app_pin}
+          onRestoreComplete={refreshSnapshots}
+        />
+
         <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.65rem' }}>
           Your shop data lives on this phone. Backups go to <b>3 places</b>: inside the app, phone folder <b>{PHONE_FOLDER}</b>, and (with Share) <b>Google Drive</b>.
         </p>
@@ -1502,6 +1515,48 @@ export default function SettingsManager({
             </div>
           </div>
         )}
+      </div>
+
+      {/* Seed Realistic Mock Data Panel */}
+      <div className="glass-panel" style={{ padding: '1.5rem', border: '1px solid rgba(56, 189, 248, 0.3)', background: 'rgba(56, 189, 248, 0.05)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          <div>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--info, #38bdf8)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <Database size={18} /> Populate Mock Data for Testing
+            </h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+              Instantly generates realistic chocolate products (truffles, pralines, bars), customer accounts (Attock Sweets, Sweet Tooth Cafe), and sample sales invoices with payment receipts.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={busy}
+            style={{
+              background: 'linear-gradient(135deg, #38bdf8, #0284c7)',
+              color: '#ffffff',
+              fontWeight: 800,
+              padding: '0.65rem 1.2rem',
+              width: 'auto',
+              alignSelf: 'flex-start',
+            }}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                toast.info('Generating mock products, customers, and bills...');
+                const res = await populateMockDatabase();
+                toast.success(`🎉 Mock Data Created! Generated ${res.products} products, ${res.customers} clients, and ${res.bills} sample bills.`);
+                if (onSettingsUpdated) onSettingsUpdated();
+              } catch (err) {
+                toast.error('Mock data generation failed: ' + err.message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <Database size={16} /> Generate Mock Test Data
+          </button>
+        </div>
       </div>
 
       <div className="glass-panel" style={{ padding: '1.5rem', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)' }}>

@@ -1,0 +1,35 @@
+=============================================================
+FIREBASE CLOUD BACKUP VAULT - PRODUCTION CONFIGURATION
+=============================================================
+
+Firebase Console Link:
+https://console.firebase.google.com/project/my-business-8aadb/settings/general/web:YjEwNDJkMTctYmE3Zi00MDVhLTliZWQtMWIwZmZjYWQ1ZTYy
+
+Project Details:
+- Project Name: My-Business
+- Project ID: my-business-8aadb
+- Database Type: Cloud Firestore Database
+- Region: Singapore (asia-southeast1)
+
+Production API Credentials:
+- apiKey: AIzaSyB1jcDCpb0FLy4mHePNLutnlGDBFyAUfIA
+- authDomain: my-business-8aadb.firebaseapp.com
+- databaseURL: https://my-business-8aadb-default-rtdb.asia-southeast1.firebasedatabase.app
+- projectId: my-business-8aadb
+- storageBucket: my-business-8aadb.firebasestorage.app
+- messagingSenderId: 1035521814001
+- appId: 1:1035521814001:web:a13c2e6888bbe97c88a850
+- measurementId: G-XLK87ECCMC
+
+Key Features & Behavior:
+------------------------
+1. Out-of-the-Box Setup:
+   These keys are saved directly in your app source code (frontend/src/utils/firebaseSync.js). When you update your app or build a new Android APK, Firebase Cloud Sync will BE PRESENT AND ACTIVE BY DEFAULT without needing to type anything!
+
+2. Vault ID & Security PIN:
+   - Vault ID: Defaults to your company phone (e.g. 03337669709).
+   - Security PIN: Automatically defaults to your Staff PIN (e.g. 1234).
+
+3. Backup & Restore:
+   - Push: 1-click upload of all bills, products, customers, and settings to Google Cloud.
+   - Restore: 1-click download on any phone, tablet, or PC to restore 100% of your data.

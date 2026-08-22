@@ -6,12 +6,51 @@ import ConfirmDialog from './ConfirmDialog';
 
 const STORAGE_KEY = 'elite-chocolate-notepad';
 
+export const DEFAULT_FIREBASE_NOTE = {
+  id: 'note-firebase-config-default',
+  title: '🔒 Firebase Cloud Vault Credentials & Links',
+  body: `FIREBASE CLOUD BACKUP VAULT — PRODUCTION INFO
+=============================================================
+
+Firebase Console URL:
+https://console.firebase.google.com/project/my-business-8aadb/settings/general/web:YjEwNDJkMTctYmE3Zi00MDVhLTliZWQtMWIwZmZjYWQ1ZTYy
+
+Project Details:
+- Project Name: My-Business
+- Project ID: my-business-8aadb
+- Database Type: Cloud Firestore Database
+- Region: Singapore (asia-southeast1)
+
+Production API Credentials (Preset in Source Code):
+- apiKey: AIzaSyB1jcDCpb0FLy4mHePNLutnlGDBFyAUfIA
+- authDomain: my-business-8aadb.firebaseapp.com
+- databaseURL: https://my-business-8aadb-default-rtdb.asia-southeast1.firebasedatabase.app
+- projectId: my-business-8aadb
+- storageBucket: my-business-8aadb.firebasestorage.app
+- messagingSenderId: 1035521814001
+- appId: 1:1035521814001:web:a13c2e6888bbe97c88a850
+- measurementId: G-XLK87ECCMC
+
+Key Features & Behavior:
+------------------------
+1. Default Setup: Active out-of-the-box on every app update or build.
+2. Vault ID: Defaults to Company Phone (e.g. 03337669709).
+3. Security PIN: Defaults to Staff PIN (e.g. 1234).
+4. Restore: 1-click download on any phone, tablet, or PC to restore 100% of your data.`,
+  updated_at: '2026-08-23T00:00:00.000Z',
+};
+
 function loadNotes() {
   try {
     const rows = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-    return Array.isArray(rows) ? rows : [];
+    let list = Array.isArray(rows) ? rows : [];
+    if (!list.some((n) => n.id === DEFAULT_FIREBASE_NOTE.id)) {
+      list.unshift(DEFAULT_FIREBASE_NOTE);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    }
+    return list;
   } catch {
-    return [];
+    return [DEFAULT_FIREBASE_NOTE];
   }
 }
 

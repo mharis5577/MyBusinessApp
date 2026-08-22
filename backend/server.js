@@ -1,6 +1,12 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import db, { dbAll, dbGet, dbRun } from './db.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import { pakistanToday, pakistanYearMonth, pakistanNowTime, addDaysToDateString, getPreviousYearMonth } from './pakistan.js';
 import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from './utils/paymentMethods.js';
 import { normalizeBillType, invoicePrefixForType, partyTypeForBill, outstandingByPartyName } from './utils/billTypes.js';
@@ -2848,10 +2854,21 @@ setInterval(async () => {
   }
 }, 1000 * 60 * 30);
 
+// Serve production static frontend build if dist folder exists
+const frontendDist = path.join(__dirname, '../frontend/dist');
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
+}
+
 // Start Server
 app.listen(PORT, () => {
   console.log(`====================================================`);
   console.log(`Auto Bill REST API Server running on port ${PORT}`);
   console.log(`API URL: http://localhost:${PORT}/api/bills`);
+  console.log(`Production URL: http://localhost:${PORT}`);
   console.log(`====================================================`);
 });

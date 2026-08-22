@@ -197,7 +197,7 @@ export default function BillsDatabase({
       const res = await apiFetch(url);
       const data = await res.json();
       setBills(data || []);
-      if (!soft) setVisibleCount(BILLS_PAGE_SIZE);
+      if (!soft) setCurrentPage(1);
     } catch (err) {
       console.error('Error apiFetching bills database:', err);
     } finally {
