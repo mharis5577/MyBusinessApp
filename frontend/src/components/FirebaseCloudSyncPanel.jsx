@@ -30,6 +30,9 @@ import {
   getStoredFirebaseConfig,
   saveStoredFirebaseConfig,
   DEFAULT_FIREBASE_CONFIG,
+  getAutoSyncSettings,
+  saveAutoSyncSettings,
+  triggerAutoCloudSyncIfNeeded,
 } from '../utils/firebaseSync';
 import {
   restoreFromPayload,
@@ -53,6 +56,9 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
   const [pinMismatchNotice, setPinMismatchNotice] = useState(null);
   const [pullConfirmNotice, setPullConfirmNotice] = useState(null);
 
+  // Auto-Cloud Sync state
+  const [autoSync, setAutoSync] = useState(getAutoSyncSettings);
+
   // Firebase Config state
   const [fbConfig, setFbConfig] = useState(getStoredFirebaseConfig);
   const [isUsingCustomConfig, setIsUsingCustomConfig] = useState(false);
@@ -61,12 +67,33 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
     const defaultVault = companyPhone
       ? normalizeVaultId(companyPhone)
       : 'elite_chocolate_store';
-    setVaultId((prev) => prev || defaultVault);
-    setPin((prev) => prev || appPin || '');
+    const activeVault = vaultId || defaultVault;
+    const activePin = pin || appPin || '';
+    setVaultId(activeVault);
+    setPin(activePin);
     setLastInfo(getLastCloudSyncInfo());
     const stored = getStoredFirebaseConfig();
     setFbConfig(stored);
     setIsUsingCustomConfig(Boolean(stored && stored.projectId !== DEFAULT_FIREBASE_CONFIG.projectId));
+
+    // Background Auto-Sync Check
+    if (activeVault && activePin && activePin.length >= 4) {
+      triggerAutoCloudSyncIfNeeded({
+        vaultId: activeVault,
+        pin: activePin,
+        deviceName,
+        getPayloadFn: async () => {
+          const res = await apiFetch('/api/backup');
+          return await res.json();
+        },
+      }).then((info) => {
+        if (info) {
+          setLastInfo(info);
+          setAutoSync(getAutoSyncSettings());
+          toast.success('✨ Auto-Backup quietly synced to Cloud Vault!');
+        }
+      }).catch(() => {});
+    }
   }, [companyPhone, appPin]);
 
   const handleInspect = async () => {
@@ -206,12 +233,12 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
   return (
     <div
       style={{
-        background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.14), rgba(28, 28, 26, 0.95))',
+        background: 'var(--bg-card, #1c1c1a)',
         border: '1px solid rgba(245, 158, 11, 0.4)',
-        borderRadius: 16,
-        marginBottom: '1.25rem',
+        borderRadius: 14,
+        marginBottom: '1rem',
         overflow: 'hidden',
-        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)',
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.12)',
       }}
     >
       {/* Header Bar */}
@@ -220,55 +247,57 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '1.1rem 1.25rem',
-          background: 'rgba(245, 158, 11, 0.1)',
+          padding: '0.65rem 0.9rem',
+          background: 'rgba(245, 158, 11, 0.12)',
           borderBottom: isExpanded ? '1px solid rgba(245, 158, 11, 0.25)' : 'none',
           cursor: 'pointer',
         }}
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
           <div
             style={{
-              padding: '0.55rem',
+              padding: '0.4rem',
               background: 'rgba(245, 158, 11, 0.22)',
-              border: '1px solid rgba(245, 158, 11, 0.45)',
-              borderRadius: 12,
-              color: '#f59e0b',
+              border: '1px solid rgba(245, 158, 11, 0.5)',
+              borderRadius: 10,
+              color: '#d97706',
               display: 'grid',
               placeItems: 'center',
             }}
           >
-            <Cloud size={22} />
+            <Cloud size={18} />
           </div>
           <div>
-            <strong style={{ fontSize: '1rem', color: '#fde68a', display: 'block', marginBottom: '2px' }}>
-              Firebase Cloud Sync & Backup Vault
+            <strong style={{ fontSize: '0.92rem', color: 'var(--text-primary)', display: 'block', lineHeight: 1.25 }}>
+              Firebase Cloud Sync Vault
             </strong>
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary, #c4c2b8)' }}>
-              PIN-protected cloud backup to sync or restore data across multiple devices
+            <span style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>
+              PIN-protected cloud backup & restore across devices
             </span>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           {lastInfo && (
-            <span style={{ fontSize: '0.72rem', background: 'rgba(52, 168, 83, 0.2)', color: 'var(--success)', padding: '0.2rem 0.55rem', borderRadius: 6, fontWeight: 700 }}>
+            <span style={{ fontSize: '0.68rem', background: 'rgba(52, 168, 83, 0.2)', color: 'var(--success, #16a34a)', padding: '0.15rem 0.45rem', borderRadius: 6, fontWeight: 700 }}>
               Synced {new Date(lastInfo.updatedAt).toLocaleDateString()}
             </span>
           )}
           <button
             type="button"
             style={{
-              background: 'rgba(255, 255, 255, 0.08)',
+              background: 'var(--surface-muted, rgba(0, 0, 0, 0.1))',
               border: 'none',
-              color: 'var(--text-secondary)',
-              padding: '0.35rem',
-              borderRadius: '8px',
+              color: 'var(--text-primary)',
+              padding: '0.25rem',
+              borderRadius: '6px',
               cursor: 'pointer',
+              display: 'grid',
+              placeItems: 'center',
             }}
           >
-            {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
         </div>
       </div>
@@ -276,12 +305,13 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
       {/* Expanded Panel Body */}
       {isExpanded && (
         <div>
-          {/* Mode Tabs */}
+          {/* Responsive Mode Tabs */}
           <div
             style={{
-              display: 'flex',
-              gap: '0.5rem',
-              padding: '0.6rem 1.25rem',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: '0.3rem',
+              padding: '0.35rem 0.65rem',
               background: 'var(--surface-muted, #1c1c1a)',
               borderBottom: '1px solid var(--border-color)',
             }}
@@ -290,123 +320,123 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
               type="button"
               onClick={() => { setTab('push'); setPinMismatchNotice(null); setPullConfirmNotice(null); }}
               style={{
-                flex: 1,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '0.4rem',
-                padding: '0.55rem 0.8rem',
-                borderRadius: '10px',
+                gap: '0.3rem',
+                padding: '0.4rem 0.25rem',
+                borderRadius: '8px',
                 fontWeight: 750,
-                fontSize: '0.82rem',
+                fontSize: '0.76rem',
+                whiteSpace: 'nowrap',
                 cursor: 'pointer',
-                border: tab === 'push' ? '1px solid #f59e0b' : '1px solid transparent',
-                background: tab === 'push' ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
-                color: tab === 'push' ? '#fde68a' : 'var(--text-secondary)',
-                transition: 'all 0.2s ease',
+                border: tab === 'push' ? '1px solid #d97706' : '1px solid transparent',
+                background: tab === 'push' ? 'rgba(245, 158, 11, 0.22)' : 'transparent',
+                color: tab === 'push' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                transition: 'all 0.15s ease',
               }}
             >
-              <CloudUpload size={16} />
-              <span>Push Backup (Upload)</span>
+              <CloudUpload size={14} />
+              <span>Push (Upload)</span>
             </button>
             <button
               type="button"
               onClick={() => { setTab('pull'); setPinMismatchNotice(null); setPullConfirmNotice(null); }}
               style={{
-                flex: 1,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '0.4rem',
-                padding: '0.55rem 0.8rem',
-                borderRadius: '10px',
+                gap: '0.3rem',
+                padding: '0.4rem 0.25rem',
+                borderRadius: '8px',
                 fontWeight: 750,
-                fontSize: '0.82rem',
+                fontSize: '0.76rem',
+                whiteSpace: 'nowrap',
                 cursor: 'pointer',
-                border: tab === 'pull' ? '1px solid #38bdf8' : '1px solid transparent',
-                background: tab === 'pull' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-                color: tab === 'pull' ? '#bae6fd' : 'var(--text-secondary)',
-                transition: 'all 0.2s ease',
+                border: tab === 'pull' ? '1px solid #0284c7' : '1px solid transparent',
+                background: tab === 'pull' ? 'rgba(56, 189, 248, 0.22)' : 'transparent',
+                color: tab === 'pull' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                transition: 'all 0.15s ease',
               }}
             >
-              <CloudDownload size={16} />
-              <span>Restore Vault (Download)</span>
+              <CloudDownload size={14} />
+              <span>Restore</span>
             </button>
             <button
               type="button"
               onClick={() => { setTab('config'); setPinMismatchNotice(null); setPullConfirmNotice(null); }}
               style={{
-                flex: 1,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '0.4rem',
-                padding: '0.55rem 0.8rem',
-                borderRadius: '10px',
+                gap: '0.3rem',
+                padding: '0.4rem 0.25rem',
+                borderRadius: '8px',
                 fontWeight: 750,
-                fontSize: '0.82rem',
+                fontSize: '0.76rem',
+                whiteSpace: 'nowrap',
                 cursor: 'pointer',
                 border: tab === 'config' ? '1px solid var(--accent-teal)' : '1px solid transparent',
                 background: tab === 'config' ? 'rgba(45, 212, 200, 0.18)' : 'transparent',
-                color: tab === 'config' ? 'var(--accent-teal)' : 'var(--text-secondary)',
-                transition: 'all 0.2s ease',
+                color: tab === 'config' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                transition: 'all 0.15s ease',
               }}
             >
-              <Settings size={16} />
+              <Settings size={14} />
               <span>Firebase Setup</span>
             </button>
           </div>
 
           {/* TAB 1 & 2: Push / Pull Forms */}
           {(tab === 'push' || tab === 'pull') && (
-            <form onSubmit={tab === 'push' ? handlePush : handleStartPull} style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
+            <form onSubmit={tab === 'push' ? handlePush : handleStartPull} style={{ padding: '0.85rem 0.9rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
                 {/* Vault Identifier Input */}
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Vault ID (Shop Phone / Account Code)
+                  <label className="form-label" style={{ fontSize: '0.74rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-primary)' }}>
+                    Vault ID (Shop Phone / Code)
                   </label>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', gap: '0.4rem' }}>
                     <div style={{ position: 'relative', flex: 1 }}>
-                      <Smartphone size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                      <Smartphone size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                       <input
                         type="text"
                         className="form-input"
-                        style={{ paddingLeft: '2.4rem' }}
+                        style={{ paddingLeft: '2.2rem', fontSize: '0.85rem' }}
                         value={vaultId}
                         onChange={(e) => setVaultId(e.target.value)}
-                        placeholder="e.g. 03337669709 or elite_attock"
+                        placeholder="e.g. 03337669709"
                         required
                       />
                     </div>
                     <button
                       type="button"
                       className="btn-secondary"
-                      style={{ width: 'auto', fontSize: '0.78rem', padding: '0 0.85rem', gap: '0.3rem' }}
+                      style={{ width: 'auto', fontSize: '0.75rem', padding: '0 0.75rem', gap: '0.25rem' }}
                       onClick={handleInspect}
                       disabled={inspecting}
                     >
-                      {inspecting ? <RefreshCw size={14} className="animate-spin" /> : <Database size={14} />}
+                      {inspecting ? <RefreshCw size={13} className="animate-spin" /> : <Database size={13} />}
                       <span>Inspect</span>
                     </button>
                   </div>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
-                    Identifies your cloud backup space across devices.
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.2rem', display: 'block' }}>
+                    Identifies your cloud backup space.
                   </span>
                 </div>
 
                 {/* PIN Input */}
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <label className="form-label" style={{ fontSize: '0.74rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-primary)' }}>
                     Security PIN Code
                   </label>
                   <div style={{ position: 'relative' }}>
-                    <Lock size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <Lock size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
                       type={showPin ? 'text' : 'password'}
                       className="form-input"
-                      style={{ paddingLeft: '2.4rem', paddingRight: '2.5rem', fontFamily: 'var(--font-mono)', letterSpacing: '0.1em' }}
+                      style={{ paddingLeft: '2.2rem', paddingRight: '2.3rem', fontFamily: 'var(--font-mono)', letterSpacing: '0.1em', fontSize: '0.85rem' }}
                       value={pin}
                       onChange={(e) => setPin(e.target.value)}
                       placeholder="Enter 4-6 digit PIN"
@@ -416,13 +446,13 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
                     <button
                       type="button"
                       onClick={() => setShowPin(!showPin)}
-                      style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                      style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
                     >
-                      {showPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {showPin ? <EyeOff size={15} /> : <Eye size={15} />}
                     </button>
                   </div>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
-                    Protects your vault data from unauthorized downloads.
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.2rem', display: 'block' }}>
+                    Protects your vault data from unauthorized access.
                   </span>
                 </div>
               </div>
@@ -430,16 +460,101 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
               {/* Device Label (Push Mode) */}
               {tab === 'push' && (
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <label className="form-label" style={{ fontSize: '0.74rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-primary)' }}>
                     Device Name / Label
                   </label>
                   <input
                     type="text"
                     className="form-input"
+                    style={{ fontSize: '0.85rem' }}
                     value={deviceName}
                     onChange={(e) => setDeviceName(e.target.value)}
                     placeholder="e.g. Main POS Terminal, Haris Phone"
                   />
+                </div>
+              )}
+
+              {/* Hands-Free Auto-Cloud Sync Control */}
+              {tab === 'push' && (
+                <div
+                  style={{
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: 10,
+                    background: 'var(--surface-muted, rgba(52, 168, 83, 0.08))',
+                    border: '1px solid rgba(52, 168, 83, 0.35)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.55rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <ShieldCheck size={18} style={{ color: '#16a34a' }} />
+                      <strong style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                        Hands-Free Auto-Cloud Sync
+                      </strong>
+                    </div>
+
+                    <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '0.4rem', fontSize: '0.78rem', fontWeight: 700, color: autoSync.enabled ? '#16a34a' : 'var(--text-secondary)' }}>
+                      <input
+                        type="checkbox"
+                        checked={autoSync.enabled}
+                        onChange={(e) => {
+                          const next = { ...autoSync, enabled: e.target.checked };
+                          setAutoSync(next);
+                          saveAutoSyncSettings(next);
+                          toast.info(e.target.checked ? 'Auto-Cloud Sync enabled!' : 'Auto-Cloud Sync paused.');
+                        }}
+                        style={{ width: '16px', height: '16px', accentColor: '#16a34a', cursor: 'pointer' }}
+                      />
+                      {autoSync.enabled ? 'Enabled' : 'Paused'}
+                    </label>
+                  </div>
+
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', margin: 0 }}>
+                    {autoSync.enabled
+                      ? `Automatically backs up shop data to Firebase ${autoSync.intervalHours === 168 ? 'every 7 days' : `every ${autoSync.intervalHours} hours`}`
+                      : 'Auto-Cloud Sync is currently paused'}
+                  </span>
+
+                  {/* High-Contrast Custom Pills */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.3rem', marginTop: '0.1rem' }}>
+                    {[
+                      { value: 12, label: '12 Hours' },
+                      { value: 24, label: '24 Hours' },
+                      { value: 48, label: '48 Hours' },
+                      { value: 168, label: '7 Days' },
+                    ].map((opt) => {
+                      const isSelected = autoSync.intervalHours === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          style={{
+                            padding: '0.35rem 0.2rem',
+                            borderRadius: '7px',
+                            fontSize: '0.72rem',
+                            fontWeight: 750,
+                            cursor: 'pointer',
+                            textAlign: 'center',
+                            border: isSelected ? '1px solid #16a34a' : '1px solid var(--border-color)',
+                            background: isSelected ? '#16a34a' : 'var(--bg-card, #ffffff)',
+                            color: isSelected ? '#ffffff' : 'var(--text-primary)',
+                            boxShadow: isSelected ? '0 2px 6px rgba(22, 163, 74, 0.3)' : 'none',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onClick={() => {
+                            const next = { ...autoSync, intervalHours: opt.value };
+                            setAutoSync(next);
+                            saveAutoSyncSettings(next);
+                            toast.success(`Auto-sync frequency set to ${opt.label}`);
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
@@ -448,38 +563,38 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
                 <div
                   className="surface-block"
                   style={{
-                    padding: '0.85rem',
+                    padding: '0.75rem',
                     border: cloudPreview.exists ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid var(--border-color)',
-                    background: cloudPreview.exists ? 'rgba(245, 158, 11, 0.08)' : 'var(--surface-muted)',
-                    borderRadius: 12,
+                    background: 'var(--surface-muted)',
+                    borderRadius: 10,
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem', fontSize: '0.82rem', fontWeight: 750 }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: cloudPreview.exists ? '#fde68a' : 'var(--text-muted)' }}>
-                      <CheckCircle2 size={16} style={{ color: cloudPreview.exists ? '#34a853' : 'var(--text-muted)' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem', fontSize: '0.8rem', fontWeight: 750 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={15} style={{ color: cloudPreview.exists ? '#16a34a' : 'var(--text-muted)' }} />
                       Vault: {cloudPreview.vaultId}
                     </span>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
                       {cloudPreview.exists ? `Updated: ${new Date(cloudPreview.updatedAt).toLocaleString()}` : 'Not Found'}
                     </span>
                   </div>
                   {cloudPreview.stats && (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', marginTop: '0.5rem', textAlign: 'center' }}>
-                      <div style={{ background: 'var(--bg-card)', padding: '0.4rem', borderRadius: 8, border: '1px solid var(--border-color)' }}>
-                        <div style={{ fontWeight: 800, color: '#f59e0b', fontSize: '0.95rem' }}>{cloudPreview.stats.bills}</div>
-                        <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Bills</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.4rem', marginTop: '0.4rem', textAlign: 'center' }}>
+                      <div style={{ background: 'var(--bg-card)', padding: '0.35rem', borderRadius: 6, border: '1px solid var(--border-color)' }}>
+                        <div style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.9rem' }}>{cloudPreview.stats.bills}</div>
+                        <div style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Bills</div>
                       </div>
-                      <div style={{ background: 'var(--bg-card)', padding: '0.4rem', borderRadius: 8, border: '1px solid var(--border-color)' }}>
-                        <div style={{ fontWeight: 800, color: '#f59e0b', fontSize: '0.95rem' }}>{cloudPreview.stats.products}</div>
-                        <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Products</div>
+                      <div style={{ background: 'var(--bg-card)', padding: '0.35rem', borderRadius: 6, border: '1px solid var(--border-color)' }}>
+                        <div style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.9rem' }}>{cloudPreview.stats.products}</div>
+                        <div style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Products</div>
                       </div>
-                      <div style={{ background: 'var(--bg-card)', padding: '0.4rem', borderRadius: 8, border: '1px solid var(--border-color)' }}>
-                        <div style={{ fontWeight: 800, color: '#f59e0b', fontSize: '0.95rem' }}>{cloudPreview.stats.customers}</div>
-                        <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Clients</div>
+                      <div style={{ background: 'var(--bg-card)', padding: '0.35rem', borderRadius: 6, border: '1px solid var(--border-color)' }}>
+                        <div style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.9rem' }}>{cloudPreview.stats.customers}</div>
+                        <div style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Clients</div>
                       </div>
-                      <div style={{ background: 'var(--bg-card)', padding: '0.4rem', borderRadius: 8, border: '1px solid var(--border-color)' }}>
-                        <div style={{ fontWeight: 800, color: '#f59e0b', fontSize: '0.95rem' }}>{cloudPreview.stats.payments}</div>
-                        <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Payments</div>
+                      <div style={{ background: 'var(--bg-card)', padding: '0.35rem', borderRadius: 6, border: '1px solid var(--border-color)' }}>
+                        <div style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.9rem' }}>{cloudPreview.stats.payments}</div>
+                        <div style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Payments</div>
                       </div>
                     </div>
                   )}
@@ -490,33 +605,33 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
               {pinMismatchNotice && (
                 <div
                   style={{
-                    padding: '1rem',
-                    borderRadius: 12,
+                    padding: '0.85rem',
+                    borderRadius: 10,
                     border: '1px solid rgba(245, 158, 11, 0.5)',
-                    background: 'rgba(245, 158, 11, 0.12)',
+                    background: 'var(--surface-muted)',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '0.65rem',
+                    gap: '0.55rem',
                   }}
                 >
-                  <div style={{ fontWeight: 800, color: '#fde68a', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <Key size={18} style={{ color: '#f59e0b' }} /> Cloud Vault PIN Update Needed
+                  <div style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Key size={16} style={{ color: '#d97706' }} /> Cloud Vault PIN Update Needed
                   </div>
-                  <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
+                  <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.45 }}>
                     This Cloud Vault (<strong>{pinMismatchNotice.vaultId}</strong>) was created with a different PIN.
                     Would you like to update the Vault PIN to <strong>"{pinMismatchNotice.pin}"</strong> and push this backup?
                   </p>
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
+                  <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.2rem' }}>
                     <button
                       type="button"
                       className="btn-primary"
                       style={{
                         flex: 1,
-                        background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                        color: '#0f172a',
+                        background: 'linear-gradient(135deg, #d97706, #b45309)',
+                        color: '#ffffff',
                         fontWeight: 800,
-                        fontSize: '0.8rem',
-                        padding: '0.5rem 0.85rem',
+                        fontSize: '0.78rem',
+                        padding: '0.45rem 0.75rem',
                       }}
                       onClick={async () => {
                         try {
@@ -538,12 +653,12 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
                         }
                       }}
                     >
-                      <Key size={14} /> Update Vault PIN to "{pinMismatchNotice.pin}" & Push
+                      <Key size={13} /> Update Vault PIN to "{pinMismatchNotice.pin}" & Push
                     </button>
                     <button
                       type="button"
                       className="btn-secondary"
-                      style={{ width: 'auto', fontSize: '0.8rem' }}
+                      style={{ width: 'auto', fontSize: '0.78rem', padding: '0.45rem 0.75rem' }}
                       onClick={() => setPinMismatchNotice(null)}
                     >
                       Cancel
@@ -556,41 +671,41 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
               {pullConfirmNotice && (
                 <div
                   style={{
-                    padding: '1rem',
-                    borderRadius: 12,
+                    padding: '0.85rem',
+                    borderRadius: 10,
                     border: '1px solid rgba(56, 189, 248, 0.5)',
-                    background: 'rgba(56, 189, 248, 0.12)',
+                    background: 'var(--surface-muted)',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '0.65rem',
+                    gap: '0.55rem',
                   }}
                 >
-                  <div style={{ fontWeight: 800, color: '#bae6fd', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <AlertTriangle size={18} style={{ color: '#38bdf8' }} /> Confirm Cloud Restore
+                  <div style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <AlertTriangle size={16} style={{ color: '#0284c7' }} /> Confirm Cloud Restore
                   </div>
-                  <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
+                  <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.45 }}>
                     Restoring from Cloud Vault (<strong>{pullConfirmNotice.vaultId}</strong>) will replace your current local data. A safety copy of your local data will be saved automatically first.
                   </p>
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
+                  <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.2rem' }}>
                     <button
                       type="button"
                       className="btn-primary"
                       style={{
                         flex: 1,
-                        background: 'linear-gradient(135deg, #38bdf8, #0284c7)',
+                        background: 'linear-gradient(135deg, #0284c7, #0369a1)',
                         color: '#ffffff',
                         fontWeight: 800,
-                        fontSize: '0.8rem',
-                        padding: '0.5rem 0.85rem',
+                        fontSize: '0.78rem',
+                        padding: '0.45rem 0.75rem',
                       }}
                       onClick={handleExecutePull}
                     >
-                      <CloudDownload size={14} /> Yes, Restore Local Database from Cloud
+                      <CloudDownload size={13} /> Yes, Restore Local Database from Cloud
                     </button>
                     <button
                       type="button"
                       className="btn-secondary"
-                      style={{ width: 'auto', fontSize: '0.8rem' }}
+                      style={{ width: 'auto', fontSize: '0.78rem', padding: '0.45rem 0.75rem' }}
                       onClick={() => setPullConfirmNotice(null)}
                     >
                       Cancel
@@ -601,38 +716,38 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
 
               {/* Main Submit Action Row */}
               {!pinMismatchNotice && !pullConfirmNotice && (
-                <div style={{ marginTop: '0.25rem' }}>
+                <div style={{ marginTop: '0.15rem' }}>
                   <button
                     type="submit"
                     className="btn-primary"
                     style={{
                       width: '100%',
-                      background: tab === 'push' ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'linear-gradient(135deg, #38bdf8, #0284c7)',
-                      color: tab === 'push' ? '#0f172a' : '#ffffff',
+                      background: tab === 'push' ? 'linear-gradient(135deg, #d97706, #b45309)' : 'linear-gradient(135deg, #0284c7, #0369a1)',
+                      color: '#ffffff',
                       fontWeight: 800,
-                      fontSize: '0.9rem',
-                      padding: '0.75rem',
+                      fontSize: '0.88rem',
+                      padding: '0.65rem',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: '0.4rem',
-                      borderRadius: 12,
+                      borderRadius: 10,
                     }}
                     disabled={busy}
                   >
                     {busy ? (
                       <>
-                        <RefreshCw size={18} className="animate-spin" />
+                        <RefreshCw size={16} className="animate-spin" />
                         <span>Processing Cloud Sync...</span>
                       </>
                     ) : tab === 'push' ? (
                       <>
-                        <CloudUpload size={18} />
+                        <CloudUpload size={16} />
                         <span>Push Backup to Cloud Vault</span>
                       </>
                     ) : (
                       <>
-                        <CloudDownload size={18} />
+                        <CloudDownload size={16} />
                         <span>Restore from Cloud Vault</span>
                       </>
                     )}
@@ -644,22 +759,22 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
 
           {/* TAB 3: Firebase Configuration & Setup Guide */}
           {tab === 'config' && (
-            <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+            <div style={{ padding: '0.85rem 0.9rem', display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
               
               {/* Guide Card */}
               <div
                 className="surface-block"
                 style={{
-                  padding: '0.9rem 1rem',
-                  background: 'rgba(45, 212, 200, 0.08)',
-                  border: '1px solid rgba(45, 212, 200, 0.25)',
-                  borderRadius: 12,
+                  padding: '0.75rem 0.85rem',
+                  background: 'var(--surface-muted)',
+                  border: '1px solid rgba(45, 212, 200, 0.3)',
+                  borderRadius: 10,
                 }}
               >
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--accent-teal)', margin: '0 0 0.4rem 0', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <HelpCircle size={16} /> How to Set Up Your Free Firebase Project
+                <h4 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 0.35rem 0', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <HelpCircle size={15} style={{ color: 'var(--accent-teal)' }} /> How to Set Up Your Free Firebase Project
                 </h4>
-                <ol style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', paddingLeft: '1.2rem', margin: 0, lineHeight: 1.6 }}>
+                <ol style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', paddingLeft: '1.1rem', margin: 0, lineHeight: 1.55 }}>
                   <li>Go to <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-teal)', textDecoration: 'underline' }}>console.firebase.google.com <ExternalLink size={11} style={{ display: 'inline' }} /></a> and click <strong>Create a Project</strong>.</li>
                   <li>In left sidebar: <strong>Build → Firestore Database</strong> → Click <strong>Create database</strong> (choose <strong>Test mode</strong>).</li>
                   <li>In Project Settings (⚙️ icon) → Click <strong>Add app (`&lt;/&gt;`)</strong> → Copy your Web app config keys below.</li>
@@ -667,25 +782,26 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
               </div>
 
               {/* Custom Config Form */}
-              <form onSubmit={handleSaveConfig} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+              <form onSubmit={handleSaveConfig} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <strong style={{ fontSize: '0.85rem' }}>Firebase Project Web Credentials</strong>
+                  <strong style={{ fontSize: '0.82rem', color: 'var(--text-primary)' }}>Firebase Project Web Credentials</strong>
                   {isUsingCustomConfig ? (
-                    <span style={{ fontSize: '0.7rem', background: 'rgba(52, 168, 83, 0.2)', color: 'var(--success)', padding: '0.2rem 0.5rem', borderRadius: 6, fontWeight: 700 }}>
+                    <span style={{ fontSize: '0.68rem', background: 'rgba(52, 168, 83, 0.2)', color: '#16a34a', padding: '0.15rem 0.45rem', borderRadius: 6, fontWeight: 700 }}>
                       Custom Project Active
                     </span>
                   ) : (
-                    <span style={{ fontSize: '0.7rem', background: 'rgba(245, 158, 11, 0.2)', color: '#f59e0b', padding: '0.2rem 0.5rem', borderRadius: 6, fontWeight: 700 }}>
+                    <span style={{ fontSize: '0.68rem', background: 'rgba(245, 158, 11, 0.2)', color: '#d97706', padding: '0.15rem 0.45rem', borderRadius: 6, fontWeight: 700 }}>
                       Default Preset Active
                     </span>
                   )}
                 </div>
 
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: '0.75rem' }}>API Key (apiKey)</label>
+                  <label className="form-label" style={{ fontSize: '0.74rem', color: 'var(--text-primary)' }}>API Key (apiKey)</label>
                   <input
                     type="text"
                     className="form-input"
+                    style={{ fontSize: '0.85rem' }}
                     value={fbConfig.apiKey || ''}
                     onChange={(e) => setFbConfig({ ...fbConfig, apiKey: e.target.value })}
                     placeholder="AIzaSy..."
@@ -694,10 +810,11 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
                 </div>
 
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Project ID (projectId)</label>
+                  <label className="form-label" style={{ fontSize: '0.74rem', color: 'var(--text-primary)' }}>Project ID (projectId)</label>
                   <input
                     type="text"
                     className="form-input"
+                    style={{ fontSize: '0.85rem' }}
                     value={fbConfig.projectId || ''}
                     onChange={(e) => setFbConfig({ ...fbConfig, projectId: e.target.value })}
                     placeholder="elite-chocolate-pos"
@@ -706,22 +823,23 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
                 </div>
 
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Auth Domain (authDomain)</label>
+                  <label className="form-label" style={{ fontSize: '0.74rem', color: 'var(--text-primary)' }}>Auth Domain (authDomain)</label>
                   <input
                     type="text"
                     className="form-input"
+                    style={{ fontSize: '0.85rem' }}
                     value={fbConfig.authDomain || ''}
                     onChange={(e) => setFbConfig({ ...fbConfig, authDomain: e.target.value })}
                     placeholder="project-id.firebaseapp.com"
                   />
                 </div>
 
-                <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
                   {isUsingCustomConfig && (
                     <button
                       type="button"
                       className="btn-secondary"
-                      style={{ flex: 1 }}
+                      style={{ flex: 1, fontSize: '0.78rem' }}
                       onClick={handleResetConfig}
                     >
                       Reset to Default
@@ -730,7 +848,7 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
                   <button
                     type="submit"
                     className="btn-primary"
-                    style={{ flex: 2 }}
+                    style={{ flex: 2, fontSize: '0.78rem' }}
                   >
                     Save Firebase Credentials
                   </button>

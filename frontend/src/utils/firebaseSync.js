@@ -297,3 +297,67 @@ export async function pullFromCloudVault({
     payload,
   };
 }
+
+// -------------------------------------------------------------
+// HANDS-FREE AUTO-CLOUD SYNC SCHEDULER
+// -------------------------------------------------------------
+const AUTO_SYNC_SETTINGS_KEY = 'elite_auto_cloud_sync_settings';
+
+export function getAutoSyncSettings() {
+  try {
+    const raw = localStorage.getItem(AUTO_SYNC_SETTINGS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        enabled: Boolean(parsed?.enabled ?? true),
+        intervalHours: Number(parsed?.intervalHours) || 24,
+        lastSyncTime: parsed?.lastSyncTime || null,
+      };
+    }
+  } catch (_) {}
+  return { enabled: true, intervalHours: 24, lastSyncTime: null };
+}
+
+export function saveAutoSyncSettings(settings) {
+  try {
+    localStorage.setItem(AUTO_SYNC_SETTINGS_KEY, JSON.stringify(settings));
+  } catch (_) {}
+}
+
+export async function triggerAutoCloudSyncIfNeeded({ vaultId, pin, deviceName = 'Auto-Sync POS', getPayloadFn }) {
+  const autoSettings = getAutoSyncSettings();
+  if (!autoSettings.enabled) return false;
+
+  const now = Date.now();
+  const lastSyncMs = autoSettings.lastSyncTime ? new Date(autoSettings.lastSyncTime).getTime() : 0;
+  const intervalMs = autoSettings.intervalHours * 60 * 60 * 1000;
+
+  if (now - lastSyncMs < intervalMs) {
+    return false; // Not due yet
+  }
+
+  if (!vaultId || !pin || pin.length < 4) return false;
+
+  try {
+    const payload = await getPayloadFn();
+    if (!payload) return false;
+
+    const syncInfo = await pushToCloudVault({
+      vaultId,
+      pin,
+      payload,
+      deviceName: `${deviceName} (Auto)`,
+      overwritePin: false,
+    });
+
+    const nextSettings = {
+      ...autoSettings,
+      lastSyncTime: new Date().toISOString(),
+    };
+    saveAutoSyncSettings(nextSettings);
+    return syncInfo;
+  } catch (err) {
+    console.warn('[Auto-Cloud Sync Background] Failed:', err.message);
+    return false;
+  }
+}
