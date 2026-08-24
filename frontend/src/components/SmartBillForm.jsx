@@ -398,6 +398,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
       const customRateObj = customerRates.find((r) => r.product_id === pId);
       if (customRateObj && customRateObj.custom_price !== undefined) {
         effectivePrice = customRateObj.custom_price;
+        toast.info(`Applied last price for ${customerName || 'client'}: ${currencySymbol}${effectivePrice}`);
       }
 
       const stock = Number(found.stock);
@@ -606,6 +607,27 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
       console.warn('Auto customer add skipped:', e);
     }
     return null;
+  };
+
+  // Automatically remember custom prices for this customer for future bills
+  const saveCustomerRatesOnBillSave = async (cId, currentItems) => {
+    if (!cId || !Array.isArray(currentItems) || billType === 'help') return;
+    for (const it of currentItems) {
+      if (it.product_id && Number(it.unit_price) > 0) {
+        try {
+          await apiFetch(`/api/customers/${cId}/rates`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              product_id: it.product_id,
+              custom_price: Number(it.unit_price),
+            }),
+          });
+        } catch (_) {
+          /* non-blocking */
+        }
+      }
+    }
   };
 
   const addItemRow = () => {
@@ -828,8 +850,13 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     setLoading(true);
     try {
       // Auto-save any newly typed customer and custom items directly into the directory & catalog
-      await autoSaveCustomerToDirectory();
+      const savedCust = await autoSaveCustomerToDirectory();
+      const finalCustId = selectedCustomerId || savedCust?.id;
       const enrichedItems = await autoSaveCustomProductsToCatalog(items);
+
+      if (finalCustId) {
+        saveCustomerRatesOnBillSave(finalCustId, enrichedItems);
+      }
 
       const payload = {
         bill_type: billType,

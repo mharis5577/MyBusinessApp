@@ -38,6 +38,10 @@ backend/data/*.db
 backend/data/*.db-*
 !backend/data/.gitkeep
 
+# Auto-backup snapshots
+backups/*.json
+!backups/.gitkeep
+
 # Capacitor generated noise
 frontend/android/app/src/main/assets/public/
 frontend/android/app/src/main/assets/capacitor.config.json
