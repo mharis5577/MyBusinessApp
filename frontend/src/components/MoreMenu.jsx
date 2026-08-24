@@ -1,4 +1,4 @@
-import { ArrowDownUp, Settings, X, Download, Sparkles, Clock, StickyNote, Users2 } from 'lucide-react';
+import { ArrowDownUp, Settings, X, Download, Sparkles, Clock, StickyNote, Users2, Package } from 'lucide-react';
 import { DeveloperCredit } from './BrandMark';
 
 export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, activeTab }) {
@@ -22,6 +22,18 @@ export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, acti
         <p className="more-menu-section-label">
           <Sparkles size={13} /> Extras
         </p>
+
+        <button
+          type="button"
+          className={`more-menu-item ${activeTab === 'catalog' ? 'active' : ''}`}
+          onClick={() => go('catalog')}
+        >
+          <Package size={20} style={{ color: 'var(--accent-primary)' }} />
+          <span>
+            <strong>Products & Catalog</strong>
+            <small>Manage items, prices, and stock</small>
+          </span>
+        </button>
 
         <button
           type="button"

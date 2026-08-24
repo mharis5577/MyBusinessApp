@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History, ChevronDown, ChevronUp, ShoppingCart, Package, HeartHandshake, Edit3 } from 'lucide-react';
+import { Plus, Trash2, Zap, Save, RefreshCw, UserCheck, PackageCheck, Calculator, FilePlus2, Camera, History, ChevronDown, ChevronUp, ShoppingCart, Package, HeartHandshake, Edit3, MessageCircle, Printer } from 'lucide-react';
 import { parseNaturalBillText } from '../utils/naturalParser';
 import { pakistanToday, addDaysToDateString, formatCurrency, pakistanNowTime } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
+import { openWhatsAppReminder, buildPaymentReminderText, normalizeWhatsAppPhone } from '../utils/paymentReminder';
 import BarcodeScanner from './BarcodeScanner';
 import ConfirmDialog from './ConfirmDialog';
 import AppSelect from './AppSelect';
@@ -358,9 +359,37 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     }
   };
 
-  // Select Product for an Item Row (Check for Customer Special Rate)
+  const productOptions = useMemo(() => [
+    { value: '', label: '-- Select Item from Catalog --' },
+    ...(products || []).map((p) => ({
+      value: String(p.id),
+      label: p.name,
+    })),
+    { value: 'custom', label: '✏️ Custom / Other item (type manually)...' },
+  ], [products]);
+
+  // Select Product for an Item Row (Check for Customer Special Rate, allow pricing edit)
   const handleSelectProduct = (index, productId) => {
-    if (!productId) return;
+    if (!productId) {
+      const updated = [...items];
+      updated[index] = {
+        product_id: null,
+        description: '',
+        quantity: updated[index]?.quantity || 1,
+        unit_price: 0,
+      };
+      setItems(updated);
+      return;
+    }
+    if (productId === 'custom') {
+      const updated = [...items];
+      updated[index] = {
+        ...updated[index],
+        product_id: null,
+      };
+      setItems(updated);
+      return;
+    }
     const pId = parseInt(productId, 10);
     const found = products.find((p) => p.id === pId);
     if (found) {
@@ -379,10 +408,11 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
       }
 
       const updated = [...items];
+      const prevQty = updated[index]?.quantity;
       updated[index] = {
         product_id: found.id,
         description: found.name,
-        quantity: 1,
+        quantity: prevQty && prevQty > 0 ? prevQty : 1,
         unit_price: effectivePrice,
       };
       setItems(updated);
@@ -413,6 +443,169 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     const updated = [...items];
     updated[index][field] = value;
     setItems(updated);
+  };
+
+  // Auto-save a newly written custom product into the database catalog
+  const handleCustomItemBlur = async (index) => {
+    const it = items[index];
+    const desc = String(it?.description || '').trim();
+    if (!desc || it?.product_id || billType === 'help') return;
+
+    const existing = (products || []).find(
+      (p) => p.name.trim().toLowerCase() === desc.toLowerCase()
+    );
+    if (existing) {
+      const updated = [...items];
+      updated[index] = { ...it, product_id: existing.id };
+      setItems(updated);
+      return;
+    }
+
+    try {
+      const unitPrice = parseFloat(it.unit_price) || 0;
+      const res = await apiFetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: desc,
+          description: desc,
+          price: unitPrice,
+          cost_price: 0,
+          unit: 'item',
+          stock: 100,
+          sku: '',
+        }),
+      });
+      if (res.ok) {
+        const newProd = await parseJsonSafe(res);
+        if (newProd && newProd.id) {
+          const updated = [...items];
+          updated[index] = { ...it, product_id: newProd.id };
+          setItems(updated);
+          const pRes = await apiFetch('/api/products');
+          const pData = await pRes.json();
+          if (Array.isArray(pData)) setProducts(pData);
+          toast.success(`"${desc}" added to catalog`);
+        }
+      }
+    } catch (e) {
+      console.warn('Auto catalog add on blur skipped:', e);
+    }
+  };
+
+  const autoSaveCustomProductsToCatalog = async (currentItems) => {
+    if (billType === 'help') return currentItems;
+    const itemsCopy = [...currentItems];
+    let updatedProducts = false;
+
+    for (let i = 0; i < itemsCopy.length; i++) {
+      const it = itemsCopy[i];
+      const desc = String(it.description || '').trim();
+      if (!desc || it.product_id) continue;
+
+      const existing = (products || []).find(
+        (p) => p.name.trim().toLowerCase() === desc.toLowerCase()
+      );
+
+      if (existing) {
+        itemsCopy[i] = {
+          ...it,
+          product_id: existing.id,
+        };
+      } else {
+        try {
+          const unitPrice = parseFloat(it.unit_price) || 0;
+          const res = await apiFetch('/api/products', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: desc,
+              description: desc,
+              price: unitPrice,
+              cost_price: 0,
+              unit: 'item',
+              stock: 100,
+              sku: '',
+            }),
+          });
+          if (res.ok) {
+            const newProd = await parseJsonSafe(res);
+            if (newProd && newProd.id) {
+              itemsCopy[i] = {
+                ...it,
+                product_id: newProd.id,
+              };
+              updatedProducts = true;
+            }
+          }
+        } catch (e) {
+          console.warn('Auto catalog add skipped:', e);
+        }
+      }
+    }
+
+    if (updatedProducts) {
+      try {
+        const pRes = await apiFetch('/api/products');
+        const pData = await pRes.json();
+        if (Array.isArray(pData)) setProducts(pData);
+      } catch (err) {
+        console.error('Error refreshing products:', err);
+      }
+    }
+
+    return itemsCopy;
+  };
+
+  // Auto-save a newly written customer into the customers directory
+  const autoSaveCustomerToDirectory = async () => {
+    const trimmedName = String(customerName || '').trim();
+    if (!trimmedName || billType === 'help' || selectedCustomerId) return null;
+    if (
+      trimmedName.toLowerCase() === 'saudia arabia supplier' ||
+      trimmedName.toLowerCase() === 'cash customer' ||
+      trimmedName.toLowerCase() === 'walk-in customer'
+    ) return null;
+
+    const existing = (customers || []).find(
+      (c) => c.name.trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (existing) {
+      setSelectedCustomerId(existing.id);
+      return existing;
+    }
+
+    try {
+      const res = await apiFetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: trimmedName,
+          email: String(customerEmail || '').trim(),
+          phone: String(customerPhone || '').trim(),
+          address: String(customerAddress || '').trim(),
+          party_type: billType === 'supplier' ? 'supplier' : 'customer',
+          payee_bank_name: payeeBankName || '',
+          payee_account_title: payeeAccountTitle || '',
+          payee_account_number: payeeAccountNumber || '',
+          payee_payment_notes: payeePaymentNotes || '',
+        }),
+      });
+      if (res.ok) {
+        const created = await parseJsonSafe(res);
+        if (created && created.id) {
+          setSelectedCustomerId(created.id);
+          const cRes = await apiFetch('/api/customers');
+          const cData = await cRes.json();
+          if (Array.isArray(cData)) setCustomers(cData);
+          toast.success(`Client "${trimmedName}" saved to directory`);
+          return created;
+        }
+      }
+    } catch (e) {
+      console.warn('Auto customer add skipped:', e);
+    }
+    return null;
   };
 
   const addItemRow = () => {
@@ -634,6 +827,10 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     savingRef.current = true;
     setLoading(true);
     try {
+      // Auto-save any newly typed customer and custom items directly into the directory & catalog
+      await autoSaveCustomerToDirectory();
+      const enrichedItems = await autoSaveCustomProductsToCatalog(items);
+
       const payload = {
         bill_type: billType,
         invoice_number: invoiceNumber,
@@ -660,7 +857,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         payee_account_title: billType === 'supplier' ? payeeAccountTitle : '',
         payee_account_number: billType === 'supplier' ? payeeAccountNumber : '',
         payee_payment_notes: billType === 'supplier' ? payeePaymentNotes : '',
-        items: items.map((it) => ({
+        items: (enrichedItems || items).map((it) => ({
           ...it,
           description: String(it.description || '').slice(0, 160),
         })),
@@ -710,7 +907,25 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
         return;
       }
 
-      if (mode === 'new') {
+      if (mode === 'whatsapp') {
+        const phone = savedBill.customer_phone || customerPhone;
+        const norm = normalizeWhatsAppPhone(phone);
+        if (norm) {
+          const reminder = buildPaymentReminderText({
+            bill: savedBill,
+            currencySymbol,
+          });
+          openWhatsAppReminder(phone, reminder);
+        } else {
+          toast.info('No phone number entered for WhatsApp invoice.');
+        }
+        onBillGenerated(savedBill);
+      } else if (mode === 'print') {
+        onBillGenerated(savedBill);
+        setTimeout(() => {
+          window.print();
+        }, 600);
+      } else if (mode === 'new') {
         await resetFormForNew();
         const remain = Number(savedBill?.balance_due) || 0;
         toast.success(
@@ -1411,44 +1626,62 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
               <tbody>
                 {items.map((item, index) => {
                   const lineTotal = (parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0);
+                  const selectedVal = item.product_id ? String(item.product_id) : (item.description ? 'custom' : '');
                   return (
                     <tr key={index}>
-                      <td>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                          {products.length > 0 && (
-                            <AppSelect
-                              style={{ padding: 0, fontSize: '0.75rem', marginBottom: '0.2rem' }}
-                              value=""
-                              placeholder="-- Load Preset Item --"
-                              onChange={(next) => handleSelectProduct(index, next)}
-                              options={[
-                                { value: '', label: '-- Load Preset Item --' },
-                                ...products.map((p) => ({
-                                  value: String(p.id),
-                                  label: `${p.sku ? `[${p.sku}] ` : ''}${p.name} (${currencySymbol}${p.price}) · stock ${p.stock ?? '?'}`,
-                                })),
-                              ]}
+                      <td style={{ minWidth: 260 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          <AppSelect
+                            className="app-select--spaced"
+                            value={selectedVal}
+                            placeholder="-- Select Item from Catalog --"
+                            onChange={(next) => handleSelectProduct(index, next)}
+                            options={productOptions}
+                          />
+                          {(!item.product_id || selectedVal === 'custom') && (
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder="Type custom item description..."
+                              value={item.description}
+                              onChange={(e) => handleItemChange(index, 'description', e.target.value)}
+                              onBlur={() => handleCustomItemBlur(index)}
+                              required
                             />
                           )}
-                          <input
-                            type="text"
-                            className="form-input"
-                            placeholder="Item description or service..."
-                            value={item.description}
-                            onChange={(e) => handleItemChange(index, 'description', e.target.value)}
-                            required
-                          />
                         </div>
                       </td>
                       <td>
-                        <input
-                          type="number"
-                          min="1"
-                          className="form-input"
-                          value={item.quantity}
-                          onChange={(e) => handleItemChange(index, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
-                          required
-                        />
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ padding: '0 8px', minWidth: 28, height: 36, fontSize: '1rem', fontWeight: 'bold' }}
+                            onClick={() => handleItemChange(index, 'quantity', Math.max(1, (parseInt(item.quantity) || 1) - 1))}
+                            disabled={parseInt(item.quantity) <= 1}
+                            title="Decrease quantity"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            className="form-input"
+                            style={{ textAlign: 'center', width: 54, padding: '0.4rem 0.2rem' }}
+                            value={item.quantity}
+                            onChange={(e) => handleItemChange(index, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
+                            required
+                          />
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ padding: '0 8px', minWidth: 28, height: 36, fontSize: '1rem', fontWeight: 'bold' }}
+                            onClick={() => handleItemChange(index, 'quantity', (parseInt(item.quantity) || 1) + 1)}
+                            title="Increase quantity"
+                          >
+                            +
+                          </button>
+                        </div>
                       </td>
                       <td>
                         <input
@@ -1456,6 +1689,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                           step="0.01"
                           min="0"
                           className="form-input"
+                          placeholder="0.00"
                           value={item.unit_price}
                           onChange={(e) => handleItemChange(index, 'unit_price', parseFloat(e.target.value) || 0)}
                           required
@@ -1486,6 +1720,7 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
           <div className="mobile-only line-item-cards">
             {items.map((item, index) => {
               const lineTotal = (parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0);
+              const selectedVal = item.product_id ? String(item.product_id) : (item.description ? 'custom' : '');
               return (
                 <div className="line-item-card" key={`m-${index}`}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
@@ -1500,44 +1735,62 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                       <Trash2 size={14} />
                     </button>
                   </div>
-                  {products.length > 0 && (
+                  <div style={{ marginBottom: '0.45rem' }}>
+                    <label className="form-label" style={{ fontSize: '0.75rem' }}>Item from Catalog</label>
                     <AppSelect
-                      style={{ marginBottom: '0.45rem' }}
-                      value=""
-                      placeholder="-- Load Preset Item --"
+                      style={{ marginBottom: '0.35rem' }}
+                      value={selectedVal}
+                      placeholder="-- Select Item from Catalog --"
                       onChange={(next) => handleSelectProduct(index, next)}
-                      options={[
-                        { value: '', label: '-- Load Preset Item --' },
-                        ...products.map((p) => ({
-                          value: String(p.id),
-                          label: `${p.name} (${currencySymbol}${p.price}) · stock ${p.stock ?? '?'}`,
-                        })),
-                      ]}
+                      options={productOptions}
                     />
-                  )}
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="Item description..."
-                    value={item.description}
-                    onChange={(e) => handleItemChange(index, 'description', e.target.value)}
-                    required
-                  />
+                    {(!item.product_id || selectedVal === 'custom') && (
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Type custom item description..."
+                        value={item.description}
+                        onChange={(e) => handleItemChange(index, 'description', e.target.value)}
+                        onBlur={() => handleCustomItemBlur(index)}
+                        required
+                      />
+                    )}
+                  </div>
                   <div className="qty-price-row">
                     <div>
                       <label className="form-label">Qty</label>
-                      <input
-                        type="number"
-                        min="1"
-                        inputMode="numeric"
-                        className="form-input"
-                        value={item.quantity}
-                        onChange={(e) => handleItemChange(index, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
-                        required
-                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ padding: '0 12px', minWidth: 36, height: 38, fontSize: '1.1rem', fontWeight: 'bold' }}
+                          onClick={() => handleItemChange(index, 'quantity', Math.max(1, (parseInt(item.quantity) || 1) - 1))}
+                          disabled={parseInt(item.quantity) <= 1}
+                        >
+                          -
+                        </button>
+                        <input
+                          type="number"
+                          min="1"
+                          inputMode="numeric"
+                          className="form-input"
+                          style={{ textAlign: 'center', flex: 1 }}
+                          value={item.quantity}
+                          onChange={(e) => handleItemChange(index, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
+                          required
+                        />
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ padding: '0 12px', minWidth: 36, height: 38, fontSize: '1.1rem', fontWeight: 'bold' }}
+                          onClick={() => handleItemChange(index, 'quantity', (parseInt(item.quantity) || 1) + 1)}
+                        >
+                          +
+                        </button>
+                      </div>
                     </div>
                     <div>
-                      <label className="form-label">Unit Price</label>
+                      <label className="form-label">Unit Price ({currencySymbol})</label>
                       <input
                         type="number"
                         step="0.01"
@@ -1653,15 +1906,35 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
             </div>
           )}
           {!editingBillId && (
-            <button
-              type="submit"
-              className="btn-secondary"
-              style={{ padding: '0.85rem 1.25rem', fontSize: '0.95rem', width: 'auto' }}
-              disabled={loading}
-              onClick={() => setSaveMode('new')}
-            >
-              <FilePlus2 size={18} /> {loading && saveMode === 'new' ? 'Saving…' : 'Save & New'}
-            </button>
+            <>
+              <button
+                type="submit"
+                className="btn-secondary"
+                style={{ padding: '0.85rem 1.15rem', fontSize: '0.95rem', width: 'auto' }}
+                disabled={loading}
+                onClick={() => setSaveMode('new')}
+              >
+                <FilePlus2 size={18} /> {loading && saveMode === 'new' ? 'Saving…' : 'Save & New'}
+              </button>
+              <button
+                type="submit"
+                className="btn-secondary"
+                style={{ padding: '0.85rem 1.15rem', fontSize: '0.95rem', width: 'auto', color: '#25D366', borderColor: '#25D366' }}
+                disabled={loading}
+                onClick={() => setSaveMode('whatsapp')}
+              >
+                <MessageCircle size={18} /> {loading && saveMode === 'whatsapp' ? 'Saving…' : 'Save & WhatsApp'}
+              </button>
+              <button
+                type="submit"
+                className="btn-secondary"
+                style={{ padding: '0.85rem 1.15rem', fontSize: '0.95rem', width: 'auto' }}
+                disabled={loading}
+                onClick={() => setSaveMode('print')}
+              >
+                <Printer size={18} /> {loading && saveMode === 'print' ? 'Saving…' : 'Save & Print'}
+              </button>
+            </>
           )}
           <button
             type="submit"

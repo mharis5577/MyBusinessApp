@@ -19,6 +19,7 @@ import {
   Crown,
   Compass,
   Heart,
+  Package,
 } from 'lucide-react';
 import DashboardStats from './components/DashboardStats';
 import MoreMenu from './components/MoreMenu';
@@ -46,6 +47,7 @@ const SmartBillForm = lazy(() => import('./components/SmartBillForm'));
 const InvoicePreview = lazy(() => import('./components/InvoicePreview'));
 const BillsDatabase = lazy(() => import('./components/BillsDatabase'));
 const CustomerManager = lazy(() => import('./components/CustomerManager'));
+const ProductCatalog = lazy(() => import('./components/ProductCatalog'));
 const SettingsManager = lazy(() => import('./components/SettingsManager'));
 const CashflowPanel = lazy(() => import('./components/CashflowPanel'));
 const AgingReport = lazy(() => import('./components/AgingReport'));
@@ -61,6 +63,7 @@ const TAB_ORDER = [
   'create',
   'database',
   'customers',
+  'catalog',
   'partners',
   'cashflow',
   'aging',
@@ -477,6 +480,12 @@ export default function App() {
             <Users size={17} /> Clients
           </button>
           <button
+            className={`nav-btn ${currentTab === 'catalog' ? 'active' : ''}`}
+            onClick={() => goToTab('catalog')}
+          >
+            <Package size={17} /> Catalog
+          </button>
+          <button
             className={`nav-btn ${currentTab === 'partners' ? 'active' : ''}`}
             onClick={() => goToTab('partners')}
           >
@@ -635,6 +644,12 @@ export default function App() {
                   onViewBill={handleViewBill}
                   onDuplicateBill={handleDuplicateBill}
                   onNavigate={(tab) => goToTab(tab)}
+                />
+              )}
+
+              {currentTab === 'catalog' && (
+                <ProductCatalog
+                  currencySymbol={settings.currency_symbol || 'Rs.'}
                 />
               )}
 
