@@ -1239,6 +1239,103 @@ body {
   color: var(--danger);
 }
 
+.qty-stepper {
+  display: flex;
+  align-items: stretch;
+  background: var(--input-bg);
+  border: 1px solid var(--gads-outline, var(--border-color));
+  border-radius: var(--radius-sm, 8px);
+  min-height: 48px;
+  height: 48px;
+  overflow: hidden;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.qty-stepper:focus-within {
+  border-color: var(--border-focus, #00b3a6);
+  box-shadow: 0 0 0 3px rgba(0, 179, 166, 0.18);
+}
+
+.qty-stepper-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  min-width: 38px;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-size: 1.25rem;
+  line-height: 1;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.qty-stepper-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-primary, #00b3a6) 18%, var(--surface-muted));
+  color: var(--accent-primary, #00b3a6);
+}
+
+.qty-stepper-btn:active:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-primary, #00b3a6) 30%, var(--surface-muted));
+}
+
+.qty-stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.qty-stepper-input {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  box-shadow: none !important;
+  background: transparent;
+  text-align: center;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  padding: 0 4px;
+  margin: 0;
+  -moz-appearance: textfield;
+}
+
+.qty-stepper-input::-webkit-outer-spin-button,
+.qty-stepper-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Compact version for tables */
+.qty-stepper--compact {
+  width: 110px;
+  min-height: 36px;
+  height: 36px;
+}
+
+.qty-stepper--compact .qty-stepper-btn {
+  width: 32px;
+  min-width: 32px;
+  font-size: 1.05rem;
+}
+
+.qty-stepper--compact .qty-stepper-input {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 .btn-danger {
   display: inline-flex;
   align-items: center;
@@ -7813,6 +7910,55 @@ textarea.input:focus,
 .type-badge.supplier {
   color: var(--accent-purple);
   border-color: color-mix(in srgb, var(--accent-purple) 35%, transparent);
+}
+
+.type-badge-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border-color);
+  background: var(--surface-inset);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  line-height: 1.3;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.type-badge-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.type-badge-btn:active {
+  transform: translateY(0);
+}
+
+.type-badge-btn.customer {
+  color: var(--accent-teal);
+  border-color: color-mix(in srgb, var(--accent-teal) 45%, transparent);
+  background: color-mix(in srgb, var(--accent-teal) 8%, var(--surface-inset));
+}
+
+.type-badge-btn.customer:hover {
+  background: color-mix(in srgb, var(--accent-teal) 18%, var(--surface-inset));
+  border-color: var(--accent-teal);
+}
+
+.type-badge-btn.supplier {
+  color: var(--accent-purple);
+  border-color: color-mix(in srgb, var(--accent-purple) 45%, transparent);
+  background: color-mix(in srgb, var(--accent-purple) 8%, var(--surface-inset));
+}
+
+.type-badge-btn.supplier:hover {
+  background: color-mix(in srgb, var(--accent-purple) 18%, var(--surface-inset));
+  border-color: var(--accent-purple);
 }
 
 .aging-bucket-tabs {

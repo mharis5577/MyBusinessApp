@@ -1763,13 +1763,13 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                         </div>
                       </td>
                       <td>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                        <div className="qty-stepper qty-stepper--compact">
                           <button
                             type="button"
-                            className="btn-secondary"
-                            style={{ padding: '0 8px', minWidth: 28, height: 36, fontSize: '1rem', fontWeight: 'bold' }}
+                            className="qty-stepper-btn"
                             onClick={() => handleItemChange(index, 'quantity', Math.max(1, (parseInt(item.quantity) || 1) - 1))}
                             disabled={parseInt(item.quantity) <= 1}
+                            aria-label="Decrease quantity"
                             title="Decrease quantity"
                           >
                             -
@@ -1777,17 +1777,17 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                           <input
                             type="number"
                             min="1"
-                            className="form-input"
-                            style={{ textAlign: 'center', width: 54, padding: '0.4rem 0.2rem' }}
+                            inputMode="numeric"
+                            className="qty-stepper-input"
                             value={item.quantity}
                             onChange={(e) => handleItemChange(index, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
                             required
                           />
                           <button
                             type="button"
-                            className="btn-secondary"
-                            style={{ padding: '0 8px', minWidth: 28, height: 36, fontSize: '1rem', fontWeight: 'bold' }}
+                            className="qty-stepper-btn"
                             onClick={() => handleItemChange(index, 'quantity', (parseInt(item.quantity) || 1) + 1)}
+                            aria-label="Increase quantity"
                             title="Increase quantity"
                           >
                             +
@@ -1870,13 +1870,14 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                   <div className="qty-price-row">
                     <div>
                       <label className="form-label">Qty</label>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <div className="qty-stepper">
                         <button
                           type="button"
-                          className="btn-secondary"
-                          style={{ padding: '0 12px', minWidth: 36, height: 38, fontSize: '1.1rem', fontWeight: 'bold' }}
+                          className="qty-stepper-btn"
                           onClick={() => handleItemChange(index, 'quantity', Math.max(1, (parseInt(item.quantity) || 1) - 1))}
                           disabled={parseInt(item.quantity) <= 1}
+                          aria-label="Decrease quantity"
+                          title="Decrease quantity"
                         >
                           -
                         </button>
@@ -1884,17 +1885,17 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                           type="number"
                           min="1"
                           inputMode="numeric"
-                          className="form-input"
-                          style={{ textAlign: 'center', flex: 1 }}
+                          className="qty-stepper-input"
                           value={item.quantity}
                           onChange={(e) => handleItemChange(index, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
                           required
                         />
                         <button
                           type="button"
-                          className="btn-secondary"
-                          style={{ padding: '0 12px', minWidth: 36, height: 38, fontSize: '1.1rem', fontWeight: 'bold' }}
+                          className="qty-stepper-btn"
                           onClick={() => handleItemChange(index, 'quantity', (parseInt(item.quantity) || 1) + 1)}
+                          aria-label="Increase quantity"
+                          title="Increase quantity"
                         >
                           +
                         </button>

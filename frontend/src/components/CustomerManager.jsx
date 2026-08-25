@@ -25,7 +25,9 @@ import {
   Building2,
   CheckCircle2,
   AlertCircle,
-  ChevronDown
+  ChevronDown,
+  ArrowLeftRight,
+  Edit3
 } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
@@ -74,6 +76,20 @@ export default function CustomerManager({
   const [payeeAccountTitle, setPayeeAccountTitle] = useState('');
   const [payeeAccountNumber, setPayeeAccountNumber] = useState('');
   const [payeePaymentNotes, setPayeePaymentNotes] = useState('');
+
+  // Form State for editing existing customer
+  const [editCustomer, setEditCustomer] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editTaxId, setEditTaxId] = useState('');
+  const [editPartyType, setEditPartyType] = useState('customer');
+  const [editPayeeBankName, setEditPayeeBankName] = useState('');
+  const [editPayeeAccountTitle, setEditPayeeAccountTitle] = useState('');
+  const [editPayeeAccountNumber, setEditPayeeAccountNumber] = useState('');
+  const [editPayeePaymentNotes, setEditPayeePaymentNotes] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // Merge tool
   const [mergePrimary, setMergePrimary] = useState('');
@@ -283,6 +299,94 @@ export default function CustomerManager({
       toast.error(err.message);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleTogglePartyType = async (customer, e) => {
+    if (e) e.stopPropagation();
+    const currentType = customer.party_type === 'supplier' ? 'supplier' : 'customer';
+    const nextType = currentType === 'supplier' ? 'customer' : 'supplier';
+    playTapSound();
+    try {
+      const res = await apiFetch(`/api/customers/${customer.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ party_type: nextType }),
+      });
+      if (res.ok) {
+        playSuccessChime();
+        toast.success(`Switched ${customer.name} to ${nextType === 'supplier' ? 'Supplier 📦' : 'Customer 👤'}!`);
+        setCustomers((prev) =>
+          prev.map((c) => (c.id === customer.id ? { ...c, party_type: nextType } : c))
+        );
+        if (selectedCustomer?.id === customer.id) {
+          setSelectedCustomer((prev) => (prev ? { ...prev, party_type: nextType } : prev));
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || 'Could not update status');
+      }
+    } catch (err) {
+      toast.error('Error updating status: ' + err.message);
+    }
+  };
+
+  const openEditModal = (customer, e) => {
+    if (e) e.stopPropagation();
+    playTapSound();
+    setEditCustomer(customer);
+    setEditName(customer.name || '');
+    setEditEmail(customer.email || '');
+    setEditPhone(customer.phone || '');
+    setEditAddress(customer.address || '');
+    setEditTaxId(customer.tax_id || '');
+    setEditPartyType(customer.party_type === 'supplier' ? 'supplier' : 'customer');
+    setEditPayeeBankName(customer.payee_bank_name || '');
+    setEditPayeeAccountTitle(customer.payee_account_title || '');
+    setEditPayeeAccountNumber(customer.payee_account_number || '');
+    setEditPayeePaymentNotes(customer.payee_payment_notes || '');
+  };
+
+  const handleUpdateCustomer = async (e) => {
+    e.preventDefault();
+    if (!editCustomer || !editName.trim()) return;
+    setSavingEdit(true);
+    try {
+      const res = await apiFetch(`/api/customers/${editCustomer.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName.trim(),
+          email: editEmail.trim(),
+          phone: editPhone.trim(),
+          address: editAddress.trim(),
+          tax_id: editTaxId.trim(),
+          party_type: editPartyType,
+          payee_bank_name: editPayeeBankName,
+          payee_account_title: editPayeeAccountTitle,
+          payee_account_number: editPayeeAccountNumber,
+          payee_payment_notes: editPayeePaymentNotes,
+        }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        playSuccessChime();
+        toast.success(`Updated ${updated?.name || editName}!`);
+        setCustomers((prev) =>
+          prev.map((c) => (c.id === editCustomer.id ? { ...c, ...updated, party_type: editPartyType } : c))
+        );
+        if (selectedCustomer?.id === editCustomer.id) {
+          setSelectedCustomer((prev) => ({ ...prev, ...updated, party_type: editPartyType }));
+        }
+        setEditCustomer(null);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || 'Could not update profile');
+      }
+    } catch (err) {
+      toast.error('Error updating customer: ' + err.message);
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -675,9 +779,15 @@ export default function CustomerManager({
                                   <Star size={10} fill="#d4af37" /> VIP
                                 </span>
                               )}
-                              <span className={`type-badge ${pt}`}>
-                                {pt === 'supplier' ? 'Supplier' : 'Customer'}
-                              </span>
+                              <button
+                                type="button"
+                                className={`type-badge-btn ${pt}`}
+                                title={`Click to switch to ${pt === 'supplier' ? 'Customer' : 'Supplier'}`}
+                                onClick={(e) => handleTogglePartyType(c, e)}
+                              >
+                                <ArrowLeftRight size={10} />
+                                <span>{pt === 'supplier' ? 'Supplier' : 'Customer'}</span>
+                              </button>
                             </div>
 
                             {/* Contact items with clean ellipsis */}
@@ -766,6 +876,24 @@ export default function CustomerManager({
 
                         <button
                           type="button"
+                          className="client-act-btn"
+                          title={`Switch status to ${pt === 'supplier' ? 'Customer' : 'Supplier'}`}
+                          onClick={(e) => handleTogglePartyType(c, e)}
+                        >
+                          <ArrowLeftRight size={13} /> {pt === 'supplier' ? 'To Customer' : 'To Supplier'}
+                        </button>
+
+                        <button
+                          type="button"
+                          className="client-act-btn"
+                          title="Edit Profile & Status"
+                          onClick={(e) => openEditModal(c, e)}
+                        >
+                          <Edit3 size={13} /> Edit
+                        </button>
+
+                        <button
+                          type="button"
                           className="client-act-btn is-danger"
                           title="Delete Client"
                           onClick={(e) => askDeleteCustomer(c, e)}
@@ -784,13 +912,25 @@ export default function CustomerManager({
 
       {/* 3. Selected Client Inspector Panel (Ledger & Custom Rates) */}
       <div className="glass-panel" style={{ padding: '1.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.85rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.85rem' }}>
           <div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
               <Tag size={20} style={{ color: 'var(--accent-teal)' }} />
               {selectedCustomer
                 ? `Client Profile: ${selectedCustomer.name}`
                 : 'Client Profile & Custom Rates'}
+              {selectedCustomer && (
+                <button
+                  type="button"
+                  className={`type-badge-btn ${selectedCustomer.party_type === 'supplier' ? 'supplier' : 'customer'}`}
+                  style={{ fontSize: '0.78rem', padding: '0.2rem 0.65rem' }}
+                  title={`Click to switch to ${selectedCustomer.party_type === 'supplier' ? 'Customer' : 'Supplier'}`}
+                  onClick={(e) => handleTogglePartyType(selectedCustomer, e)}
+                >
+                  <ArrowLeftRight size={11} />
+                  <span>{selectedCustomer.party_type === 'supplier' ? 'Supplier 📦' : 'Customer 👤'}</span>
+                </button>
+              )}
             </h3>
             <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0' }}>
               {selectedCustomer
@@ -799,11 +939,36 @@ export default function CustomerManager({
             </p>
           </div>
 
-          {(rateMsg || newProdMsg) && (
-            <div style={{ background: 'rgba(16,185,129,0.2)', color: 'var(--success)', padding: '0.35rem 0.75rem', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-              <Check size={14} /> {rateMsg || newProdMsg}
-            </div>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {(rateMsg || newProdMsg) && (
+              <div style={{ background: 'rgba(16,185,129,0.2)', color: 'var(--success)', padding: '0.35rem 0.75rem', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                <Check size={14} /> {rateMsg || newProdMsg}
+              </div>
+            )}
+            {selectedCustomer && (
+              <>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ width: 'auto', padding: '0.4rem 0.85rem', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                  onClick={(e) => handleTogglePartyType(selectedCustomer, e)}
+                  title={`Switch status to ${selectedCustomer.party_type === 'supplier' ? 'Customer' : 'Supplier'}`}
+                >
+                  <ArrowLeftRight size={14} />
+                  {selectedCustomer.party_type === 'supplier' ? 'Switch to Customer' : 'Switch to Supplier'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ width: 'auto', padding: '0.4rem 0.85rem', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                  onClick={(e) => openEditModal(selectedCustomer, e)}
+                  title="Edit Client Profile"
+                >
+                  <Edit3 size={14} /> Edit Profile
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {selectedCustomer ? (
@@ -1252,6 +1417,142 @@ export default function CustomerManager({
                   </button>
                   <button type="submit" className="btn-primary" style={{ width: 'auto' }}>
                     <Plus size={16} /> Save Client Profile
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* 6. Edit Client Profile Modal */}
+      {editCustomer &&
+        createPortal(
+          <div className="client-modal-overlay" onClick={() => !savingEdit && setEditCustomer(null)}>
+            <div className="client-modal-card" onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Edit3 size={20} style={{ color: 'var(--accent-teal)' }} />
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>Edit Profile & Status</h3>
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ width: 'auto', padding: '0.35rem 0.55rem' }}
+                  onClick={() => !savingEdit && setEditCustomer(null)}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <form onSubmit={handleUpdateCustomer} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Client / Company Name *</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Party Status / Type</label>
+                  <AppSelect
+                    value={editPartyType}
+                    onChange={setEditPartyType}
+                    options={[
+                      { value: 'customer', label: 'Online Customer (Retail / Sales)' },
+                      { value: 'supplier', label: 'Supplier (Saudia / Buying)' },
+                    ]}
+                  />
+                </div>
+
+                <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div className="form-group">
+                    <label className="form-label">WhatsApp / Phone</label>
+                    <input
+                      className="form-input"
+                      type="text"
+                      placeholder="+92 300 0000000"
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Email Address</label>
+                    <input
+                      className="form-input"
+                      type="email"
+                      placeholder="client@domain.pk"
+                      value={editEmail}
+                      onChange={(e) => setEditEmail(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Shipping / City Address</label>
+                  <textarea
+                    className="form-textarea"
+                    rows={2}
+                    placeholder="City, delivery address or location"
+                    value={editAddress}
+                    onChange={(e) => setEditAddress(e.target.value)}
+                  />
+                </div>
+
+                {/* Show Bank Details ONLY for Suppliers */}
+                {editPartyType === 'supplier' && (
+                  <div style={{ background: 'var(--surface-muted)', padding: '0.85rem', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                    <p style={{ fontSize: '0.8rem', fontWeight: 800, margin: '0 0 0.65rem', color: 'var(--text-primary)' }}>
+                      Supplier Pay To Bank Details (for Saudia payments)
+                    </p>
+                    <div className="form-group">
+                      <label className="form-label">Payee Bank Name</label>
+                      <PayeeBankSelect
+                        value={editPayeeBankName}
+                        onChange={setEditPayeeBankName}
+                      />
+                    </div>
+                    <div className="grid-2-mobile-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                      <div className="form-group">
+                        <label className="form-label">Account Title</label>
+                        <input
+                          className="form-input"
+                          type="text"
+                          placeholder="Account title"
+                          value={editPayeeAccountTitle}
+                          onChange={(e) => setEditPayeeAccountTitle(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">IBAN / Account #</label>
+                        <input
+                          className="form-input"
+                          type="text"
+                          placeholder="SA…"
+                          value={editPayeeAccountNumber}
+                          onChange={(e) => setEditPayeeAccountNumber(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ width: 'auto' }}
+                    onClick={() => setEditCustomer(null)}
+                    disabled={savingEdit}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-primary" style={{ width: 'auto' }} disabled={savingEdit}>
+                    <Check size={16} /> {savingEdit ? 'Saving…' : 'Save Changes'}
                   </button>
                 </div>
               </form>
