@@ -439,6 +439,42 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     return warnings;
   };
 
+  // Fast One-Tap Quick Add from catalog chips
+  const handleQuickAddItem = (product) => {
+    try {
+      playTapSound();
+    } catch (_) {}
+    setItems((prev) => {
+      if (prev.length === 1 && !prev[0].description && !prev[0].product_id && Number(prev[0].unit_price) === 0) {
+        return [{
+          product_id: product.id,
+          description: product.name,
+          quantity: 1,
+          unit_price: product.price || 0,
+        }];
+      }
+      const existingIdx = prev.findIndex((it) => it.product_id === product.id || it.description === product.name);
+      if (existingIdx >= 0) {
+        const copy = [...prev];
+        copy[existingIdx] = {
+          ...copy[existingIdx],
+          quantity: (parseInt(copy[existingIdx].quantity, 10) || 1) + 1,
+        };
+        return copy;
+      }
+      return [
+        ...prev,
+        {
+          product_id: product.id,
+          description: product.name,
+          quantity: 1,
+          unit_price: product.price || 0,
+        },
+      ];
+    });
+    toast.success(`Added "${product.name}"`);
+  };
+
   // Line Item Handlers
   const handleItemChange = (index, field, value) => {
     const updated = [...items];
@@ -1599,6 +1635,54 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
           </div>
         ) : (
         <div style={{ marginBottom: '1.5rem' }}>
+          {/* Quick-Tap Catalog Items Bar */}
+          {products && products.length > 0 && billType !== 'help' && (
+            <div
+              style={{
+                marginBottom: '1rem',
+                padding: '0.85rem 1rem',
+                background: 'linear-gradient(135deg, color-mix(in srgb, var(--surface-muted) 90%, var(--accent-primary) 10%), var(--surface-muted))',
+                borderRadius: 'var(--radius-md, 12px)',
+                border: '1px solid color-mix(in srgb, var(--accent-primary) 25%, var(--border-color))',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.55rem' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <Zap size={14} style={{ color: 'var(--accent-primary)' }} /> Quick-Tap Item to Add
+                </span>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Tap to add / increment qty</span>
+              </div>
+              <div style={{ display: 'flex', gap: '0.45rem', overflowX: 'auto', paddingBottom: '0.35rem', scrollbarWidth: 'thin' }}>
+                {products.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="btn-secondary"
+                    style={{
+                      padding: '0.35rem 0.75rem',
+                      fontSize: '0.82rem',
+                      whiteSpace: 'nowrap',
+                      borderRadius: 'var(--radius-pill, 999px)',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border-color)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                    }}
+                    onClick={() => handleQuickAddItem(p)}
+                    title={`Click to add ${p.name}`}
+                  >
+                    <span>{p.name}</span>
+                    <Plus size={12} style={{ color: 'var(--accent-primary)' }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', gap: '0.5rem', flexWrap: 'wrap' }}>
             <h4 style={{ fontSize: '1rem', fontWeight: 700 }}>Line Items & Services</h4>
             <button type="button" className="btn-secondary" onClick={addItemRow} style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem', width: 'auto' }}>
@@ -1867,6 +1951,19 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
                   value={discountRate}
                   onChange={(e) => setDiscountRate(e.target.value)}
                 />
+                <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
+                  {[0, 5, 10, 15].map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={`cash-chip ${Number(discountRate) === d ? 'is-active' : ''}`}
+                      style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
+                      onClick={() => setDiscountRate(d)}
+                    >
+                      {d === 0 ? '0%' : `${d}%`}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
