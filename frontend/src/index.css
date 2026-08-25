@@ -9541,3 +9541,160 @@ body,
   overflow-x: clip;
 }
 
+/* ==========================================================================
+   LUXURY & REFINED MODERN STYLING UPGRADE — ELITE CHOCOLATE POS
+   ========================================================================== */
+
+/* Universal Slim Luxury Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--accent-primary) 35%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent-primary) 30%, transparent);
+  border-radius: 999px;
+  transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--accent-primary) 60%, transparent);
+}
+
+/* Glass Panels with Luxury Lift & Edge Highlights */
+.glass-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.22s ease;
+}
+
+.glass-panel:hover {
+  border-color: color-mix(in srgb, var(--accent-primary) 28%, var(--border-color));
+}
+
+.glass-panel-luxury {
+  background: linear-gradient(145deg, color-mix(in srgb, var(--bg-card) 92%, var(--accent-primary) 8%), var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 35%, var(--border-color));
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.4), 0 0 0 1px color-mix(in srgb, var(--accent-primary) 15%, transparent);
+}
+
+/* Tactile Button Micro-Interactions */
+.btn-primary {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.16s ease, filter 0.16s ease;
+}
+
+.btn-primary:active {
+  transform: scale(0.97);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent-primary) 35%, transparent);
+}
+
+.btn-secondary {
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.btn-secondary:active {
+  transform: scale(0.97);
+}
+
+.btn-secondary:hover {
+  border-color: var(--accent-primary);
+}
+
+/* Luxury Metric Cards */
+.stat-card-luxury {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 14px);
+  padding: 1.25rem;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+  overflow: hidden;
+}
+
+.stat-card-luxury::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--accent-gradient, var(--accent-primary));
+  opacity: 0.85;
+}
+
+.stat-card-luxury:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  border-color: color-mix(in srgb, var(--accent-primary) 40%, var(--border-color));
+}
+
+/* Form Input Focus Glow */
+.form-input {
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.form-input:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 22%, transparent);
+  outline: none;
+}
+
+/* Bill Type Selection Cards */
+.bill-type-card {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.bill-type-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border-color));
+}
+
+.bill-type-card.is-active {
+  border-color: var(--accent-primary) !important;
+  box-shadow: 0 6px 20px -4px color-mix(in srgb, var(--accent-primary) 30%, transparent), 0 0 0 1px var(--accent-primary) !important;
+}
+
+/* Floating Bottom Dock on Mobile */
+@media (max-width: 768px) {
+  .mobile-nav-dock {
+    backdrop-filter: blur(20px) saturate(1.4) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(1.4) !important;
+    background: color-mix(in srgb, var(--mobile-nav-bg) 88%, transparent) !important;
+    border-top: 1px solid var(--border-color);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.25);
+  }
+}
+
+/* Subtle Pulsing for Grand Total Highlights */
+@keyframes goldPulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-primary) 40%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent-primary) 0%, transparent);
+  }
+}
+
+.total-summary-highlight {
+  animation: goldPulseGlow 3s infinite ease-in-out;
+}
+
+
