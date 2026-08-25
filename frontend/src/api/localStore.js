@@ -1863,21 +1863,32 @@ async function handleLocalRequestInner(url, options = {}) {
       const formattedBuying = `${currencySymbol} ${totalBuying.toLocaleString('en-PK')}`;
       const formattedProfit = `${currencySymbol} ${netProfit.toLocaleString('en-PK')}`;
       const formattedCollections = `${currencySymbol} ${totalCashCollected.toLocaleString('en-PK')}`;
-      const formattedOverdue = `${currencySymbol} ${totalOverdueAmount.toLocaleString('en-PK')}`;
+      const settingsList = await db.getAll('settings');
+      const companyName = (settingsList[0]?.company_name || 'ELITE CHOCOLATE').toUpperCase();
+      const profitEmoji = netProfit >= 0 ? '🟢' : '🔴';
 
-      const messageText = `📊 *${periodTitle}*
+      const partnerSplitText = `• 👤 *Nomi (50%):* ${currencySymbol} ${(Math.round((netProfit / 2) * 100) / 100).toLocaleString('en-PK')}\n• 👤 *Haris (50%):* ${currencySymbol} ${(Math.round((netProfit / 2) * 100) / 100).toLocaleString('en-PK')}`;
+
+      const messageText = `✨ *${companyName}*
+📊 *${periodTitle}*
+━━━━━━━━━━━━━━━━━━━━
 📅 *Period:* ${dateRangeLabel}
-⏰ *Generated:* ${pakistanNowTime()}
+⏰ *Generated:* ${pakistanNowTime()} · ${pakistanToday()}
+
+💼 *PERFORMANCE SUMMARY*
+• 📈 *Gross Sales:* ${formattedSales} (${salesBills.length} ${salesBills.length === 1 ? 'order' : 'orders'})
+• 📦 *Buying Cost:* ${formattedBuying} (${buyingBills.length} ${buyingBills.length === 1 ? 'purchase' : 'purchases'})
+• ${profitEmoji} *Net Profit:* *${formattedProfit}* (${profitMarginPct}% Margin)
+
+🤝 *50/50 PARTNER EQUITY SHARE*
+${partnerSplitText}
+
+💰 *CASHFLOW & RECOVERY*
+• 💵 *Collections In:* ${formattedCollections}
+• ⏳ *Pending Overdue:* ${formattedOverdue} (${overdueBills.length} ${overdueBills.length === 1 ? 'client' : 'clients'})
 
 ━━━━━━━━━━━━━━━━━━━━
-📈 *Online Sales:* ${formattedSales} (${salesBills.length} orders)
-📦 *Saudia Purchases:* ${formattedBuying} (${buyingBills.length} bills)
-💰 *Net Operating Profit:* ${formattedProfit} (${profitMarginPct}% margin)
-━━━━━━━━━━━━━━━━━━━━
-💵 *Collections Received:* ${formattedCollections}
-⏳ *Overdue Dues Pending:* ${formattedOverdue} (${overdueBills.length} client bills)
-
-✅ *Accounting Status:* Accrual & Online-first reconciled.`;
+✅ *Audited & Reconciled via AutoBill Executive*`;
 
       return jsonOk({
         period,

@@ -183,6 +183,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
   const [generatingReport, setGeneratingReport] = useState(false);
   const [automationOpen, setAutomationOpen] = useState(false);
   const [automationTab, setAutomationTab] = useState('brief');
+  const [heroPeriod, setHeroPeriod] = useState('today');
 
   const fetchStats = async (soft = false) => {
     if (!soft) setLoading(true);
@@ -364,6 +365,12 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
     onNavigate('database');
   };
 
+  const isHeroMonth = heroPeriod === 'month';
+  const heroProfit = isHeroMonth ? profit_month : profit_today;
+  const heroMargin = isHeroMonth ? margin_month : margin_today;
+  const heroSales = isHeroMonth ? sales_month : sales_today;
+  const heroCost = isHeroMonth ? cost_month : cost_today;
+
   const currentSales =
     profitPeriod === 'today'
       ? sales_today
@@ -411,697 +418,402 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
 
   return (
     <div className="dashboard-page">
-      <div className="glass-panel panel-hero dashboard-hero">
-        <div className="dashboard-hero-header">
-          <div className="dashboard-hero-copy">
-            <div className="dashboard-hero-eyebrow-row">
-              <span className="dashboard-hero-eyebrow">{greeting}, Chocolatier</span>
-              <span className="live-status-pill">
-                <span className="live-dot" /> Live
-              </span>
-            </div>
-            <h2 className="dashboard-hero-title">Shop Overview & POS</h2>
-            <p className="dashboard-hero-sub">Create bills, track dues, and monitor live profits.</p>
+      {/* 1. EXECUTIVE COMMAND HERO */}
+      <div className="exec-hero-card">
+        {/* Top Meta Bar (Single Row) */}
+        <div className="exec-hero-top-bar">
+          <div className="exec-top-left">
+            <span className="live-dot" />
+            <span className="exec-shop-title">{settings?.company_name || 'ELITE CHOCOLATE'}</span>
           </div>
 
-          <div className="dashboard-clock-card">
-            <div className="dashboard-clock-time">
-              <Clock size={16} className="clock-icon" />
-              <span>{timeStr}</span>
-            </div>
-            <div className="dashboard-clock-date">
-              <CalendarDays size={13} />
-              <span>{dateStr}</span>
-            </div>
+          <div className="exec-top-right">
+            <Clock size={12} className="clock-icon" />
+            <span className="exec-time">{timeStr}</span>
+            <span className="exec-date-desktop">· {dateStr}</span>
           </div>
         </div>
 
-        <div className="hero-actions">
-          <button type="button" className="btn-primary btn-hero" onClick={() => onNavigate('create')}>
-            <PlusCircle size={18} /> Create bill
-          </button>
-          <div className="hero-actions-secondary">
-            <button
-              type="button"
-              className="btn-secondary"
-              style={{ color: '#25d366', borderColor: 'rgba(37, 211, 102, 0.35)', background: 'rgba(37, 211, 102, 0.08)' }}
-              onClick={() => {
-                playTapSound();
-                setAutomationTab('brief');
-                setAutomationOpen(true);
-              }}
-            >
-              <Zap size={14} /> ⚡ Daily WA Brief
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              style={{ color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.35)', background: 'rgba(239, 68, 68, 0.08)' }}
-              onClick={() => {
-                playTapSound();
-                setAutomationTab('reminders');
-                setAutomationOpen(true);
-              }}
-            >
-              <Bell size={14} /> Overdue Queue
-            </button>
-            <button type="button" className="btn-secondary" onClick={() => onNavigate('database')}>
-              <FileText size={15} /> All Bills
-            </button>
-            <button type="button" className="btn-secondary" onClick={() => onNavigate('aging')}>
-              <CalendarDays size={15} /> Aging Report
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="dashboard-nav-pills" role="tablist" aria-label="Dashboard views">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'overview'}
-          className={`dash-pill-btn${activeTab === 'overview' ? ' is-active' : ''}`}
-          onClick={() => {
-            playTapSound();
-            setActiveTab('overview');
-          }}
-        >
-          <TrendingUp size={15} /> Overview & Profit
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'cashflow'}
-          className={`dash-pill-btn${activeTab === 'cashflow' ? ' is-active' : ''}`}
-          onClick={() => {
-            playTapSound();
-            setActiveTab('cashflow');
-          }}
-        >
-          <ArrowDownUp size={15} /> Cashflow
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'dues'}
-          className={`dash-pill-btn${activeTab === 'dues' ? ' is-active' : ''}`}
-          onClick={() => {
-            playTapSound();
-            setActiveTab('dues');
-          }}
-        >
-          <HeartHandshake size={15} /> Dues & Help
-          {(total_overdue > 0 || help_outstanding > 0) && (
-            <span className={`dash-pill-badge${total_overdue > 0 ? ' is-alert' : ''}`}>
-              {total_overdue > 0 ? money(total_overdue) : help_count}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'recent'}
-          className={`dash-pill-btn${activeTab === 'recent' ? ' is-active' : ''}`}
-          onClick={() => {
-            playTapSound();
-            setActiveTab('recent');
-          }}
-        >
-          <FileText size={15} /> Recent Bills
-          {recent_bills.length > 0 && (
-            <span className="dash-pill-badge">{recent_bills.length}</span>
-          )}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'tools'}
-          className={`dash-pill-btn${activeTab === 'tools' ? ' is-active' : ''}`}
-          onClick={() => {
-            playTapSound();
-            setActiveTab('tools');
-          }}
-        >
-          <SlidersHorizontal size={15} /> Tools & Backup
-        </button>
-      </div>
-
-      {activeTab === 'overview' && (
-        <div className="dashboard-tab-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div className={`profit-hero-card ${currentProfit >= 0 ? 'is-profitable' : 'is-loss'}`}>
-            <div className="profit-hero-header">
-              <div className="profit-hero-title-group">
-                <Wallet size={18} style={{ color: 'var(--accent-teal)' }} />
-                <span className="profit-hero-title">Net Profit Margins</span>
-              </div>
-
-              <div className="profit-period-segmented" role="group" aria-label="Profit Time Period">
+        {/* Hero Spotlight: Profit & Primary POS Action */}
+        <div className="exec-hero-spotlight">
+          <div className="exec-profit-pulse">
+            <div className="exec-pulse-label">
+              <div className="exec-period-pill-toggle">
                 <button
                   type="button"
-                  className={`profit-period-btn${profitPeriod === 'today' ? ' is-active' : ''}`}
-                  onClick={() => {
-                    playTapSound();
-                    setProfitPeriod('today');
-                  }}
+                  className={`exec-period-tab ${heroPeriod === 'today' ? 'is-active' : ''}`}
+                  onClick={() => { playTapSound(); setHeroPeriod('today'); }}
                 >
                   Today
                 </button>
                 <button
                   type="button"
-                  className={`profit-period-btn${profitPeriod === 'week' ? ' is-active' : ''}`}
-                  onClick={() => {
-                    playTapSound();
-                    setProfitPeriod('week');
-                  }}
-                >
-                  7 Days
-                </button>
-                <button
-                  type="button"
-                  className={`profit-period-btn${profitPeriod === 'month' ? ' is-active' : ''}`}
-                  onClick={() => {
-                    playTapSound();
-                    setProfitPeriod('month');
-                  }}
+                  className={`exec-period-tab ${heroPeriod === 'month' ? 'is-active' : ''}`}
+                  onClick={() => { playTapSound(); setHeroPeriod('month'); }}
                 >
                   This Month
                 </button>
-                <button
-                  type="button"
-                  className={`profit-period-btn${profitPeriod === 'total' ? ' is-active' : ''}`}
-                  onClick={() => {
-                    playTapSound();
-                    setProfitPeriod('total');
-                  }}
-                >
-                  All-Time
-                </button>
               </div>
+
+              <span className={`exec-margin-pill ${Number(heroProfit) >= 0 ? 'is-pos' : 'is-neg'}`}>
+                {heroMargin}% Margin
+              </span>
             </div>
 
-            <div className="profit-hero-main">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  {periodTitle}
-                </span>
-                <span
-                  className="profit-hero-margin-badge"
-                  style={{
-                    background: currentProfit >= 0 ? 'rgba(34, 197, 94, 0.14)' : 'rgba(239, 68, 68, 0.14)',
-                    color: currentProfit >= 0 ? '#16a34a' : '#ef4444',
-                  }}
-                >
-                  {currentMargin}% Margin
-                </span>
-              </div>
-
-              <div className="profit-hero-value-row">
-                <span
-                  className="profit-hero-amount"
-                  style={{ color: currentProfit >= 0 ? 'var(--text-primary)' : '#ef4444' }}
-                >
-                  {money(currentProfit)}
-                </span>
-                {profitPeriod === 'month' && sales_mom_pct != null && (
-                  <span
-                    style={{
-                      fontSize: '0.78rem',
-                      fontWeight: 800,
-                      padding: '0.2rem 0.6rem',
-                      borderRadius: 999,
-                      background: Number(profit_mom_pct || sales_mom_pct) >= 0 ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                      color: Number(profit_mom_pct || sales_mom_pct) >= 0 ? '#16a34a' : '#ef4444',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.25rem',
-                    }}
-                  >
-                    {Number(profit_mom_pct ?? sales_mom_pct) >= 0 ? '▲ +' : '▼ '}
-                    {profit_mom_pct ?? sales_mom_pct}% vs Last Month
-                  </span>
-                )}
-              </div>
-
-              <div className="profit-hero-breakdown">
-                <div className="profit-breakdown-item">
-                  <span className="profit-breakdown-label">Gross Selling (Sales)</span>
-                  <span className="profit-breakdown-val" style={{ color: 'var(--text-primary)' }}>
-                    {money(currentSales)}
-                  </span>
-                </div>
-                <div className="profit-breakdown-item">
-                  <span className="profit-breakdown-label">Buying Cost (Saudia)</span>
-                  <span className="profit-breakdown-val" style={{ color: 'var(--text-secondary)' }}>
-                    −{money(currentCost)}
-                  </span>
-                </div>
-              </div>
+            <div className="exec-pulse-amount" style={{ color: Number(heroProfit) >= 0 ? 'var(--text-primary)' : '#ef4444' }}>
+              {money(heroProfit)}
             </div>
-
-            <div className="profit-hero-footer">
-              <button
-                type="button"
-                className="btn-primary"
-                style={{ width: 'auto', fontSize: '0.82rem', padding: '0.45rem 1rem' }}
-                disabled={generatingReport}
-                onClick={handleDownloadDailyReport}
-              >
-                <Download size={15} /> {generatingReport ? 'Generating PDF…' : 'Download Daily Executive PDF'}
-              </button>
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ width: 'auto', fontSize: '0.82rem', padding: '0.45rem 0.9rem' }}
-                onClick={() => setActiveTab('cashflow')}
-              >
-                View Full Cashflow <ChevronRight size={14} />
-              </button>
+            <div className="exec-pulse-sub">
+              <span>Sales: <strong>{money(heroSales)}</strong></span>
+              <span className="exec-dot">·</span>
+              <span>Cost: <strong>−{money(heroCost)}</strong></span>
             </div>
           </div>
 
-          {/* 50/50 Partner Profit Division Widget (Nomi & Haris) */}
-          <div
-            className="glass-panel"
-            style={{
-              padding: '1rem 1.15rem',
-              borderRadius: 'var(--radius-lg)',
-              borderLeft: '4px solid var(--accent-teal)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.75rem',
+          <div className="exec-hero-cta-group">
+            <button type="button" className="btn-exec-pos" onClick={() => onNavigate('create')}>
+              <PlusCircle size={19} />
+              <span>+ Create Bill</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Quick Action Dock */}
+        <div className="exec-quick-dock">
+          <button
+            type="button"
+            className="exec-dock-btn is-wa"
+            onClick={() => {
+              playTapSound();
+              setAutomationTab('brief');
+              setAutomationOpen(true);
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
-                <Users2 size={18} style={{ color: 'var(--accent-teal)' }} />
-                <div>
-                  <span style={{ fontSize: '0.88rem', fontWeight: 800 }}>Partner 50/50 Profit Division</span>
-                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginLeft: '0.4rem' }}>
-                    ({periodTitle})
-                  </span>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => onNavigate('partners')}
-                style={{ padding: '0.3rem 0.65rem', fontSize: '0.74rem', fontWeight: 600, borderColor: 'var(--accent-teal)' }}
+            <Zap size={14} />
+            <span>Daily WA Brief</span>
+          </button>
+
+          <button
+            type="button"
+            className="exec-dock-btn is-alert"
+            onClick={() => {
+              playTapSound();
+              setAutomationTab('reminders');
+              setAutomationOpen(true);
+            }}
+          >
+            <Bell size={14} />
+            <span>Overdue Queue</span>
+            {total_overdue > 0 ? (
+              <span className="exec-badge-count is-alert">{overdue_bills_count || '!'} Due</span>
+            ) : (
+              <span className="exec-badge-count is-clear">✓ Clear</span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            className="exec-dock-btn"
+            onClick={() => onNavigate('database')}
+          >
+            <FileText size={14} />
+            <span>All Invoices</span>
+          </button>
+
+          <button
+            type="button"
+            className="exec-dock-btn"
+            onClick={() => onNavigate('aging')}
+          >
+            <CalendarDays size={14} />
+            <span>Aging Report</span>
+          </button>
+        </div>
+      </div>
+      {/* 2. CORE 4-KPI FINANCIAL PULSE */}
+      <div className="exec-kpi-grid">
+        <div className="exec-kpi-card" onClick={() => { playTapSound(); onNavigate('cashflow'); }}>
+          <div className="exec-kpi-header">
+            <span className="exec-kpi-title">Sales Collected</span>
+            <DollarSign size={15} className="exec-kpi-icon is-green" />
+          </div>
+          <div className="exec-kpi-value">{money(total_revenue)}</div>
+          <div className="exec-kpi-hint">Total cash/bank in</div>
+        </div>
+
+        <div className="exec-kpi-card" onClick={() => { playTapSound(); onNavigate('database'); }}>
+          <div className="exec-kpi-header">
+            <span className="exec-kpi-title">Customer Sales Due</span>
+            <Clock size={15} className="exec-kpi-icon is-amber" />
+          </div>
+          <div className="exec-kpi-value">{money(total_pending)}</div>
+          <div className="exec-kpi-hint">Pending customer khata</div>
+        </div>
+
+        <div className={`exec-kpi-card ${total_overdue > 0 ? 'is-overdue-alert' : ''}`} onClick={() => { playTapSound(); onNavigate('aging'); }}>
+          <div className="exec-kpi-header">
+            <span className="exec-kpi-title">Overdue Receivables</span>
+            <AlertTriangle size={15} className={`exec-kpi-icon ${total_overdue > 0 ? 'is-red' : ''}`} />
+          </div>
+          <div className="exec-kpi-value" style={{ color: total_overdue > 0 ? '#ef4444' : undefined }}>{money(total_overdue)}</div>
+          <div className="exec-kpi-hint">{overdue_bills_count > 0 ? `${overdue_bills_count} bills past due` : 'All accounts clear'}</div>
+        </div>
+
+        <div className="exec-kpi-card" onClick={() => { playTapSound(); goHelpBills(); }}>
+          <div className="exec-kpi-header">
+            <span className="exec-kpi-title">Help Money Lent</span>
+            <HeartHandshake size={15} className="exec-kpi-icon is-purple" />
+          </div>
+          <div className="exec-kpi-value">{money(help_outstanding)}</div>
+          <div className="exec-kpi-hint">{help_count} active borrowers</div>
+        </div>
+      </div>
+
+      {/* 3. NET PROFIT MARGINS & 50/50 PARTNER EQUITY MATRIX */}
+      <div className={`profit-hero-card ${currentProfit >= 0 ? 'is-profitable' : 'is-loss'}`}>
+        <div className="profit-hero-header">
+          <div className="profit-hero-title-group">
+            <Wallet size={18} style={{ color: 'var(--accent-teal)' }} />
+            <span className="profit-hero-title">Net Profit Margins</span>
+          </div>
+
+          <div className="profit-period-segmented" role="group" aria-label="Profit Time Period">
+            <button
+              type="button"
+              className={`profit-period-btn${profitPeriod === 'today' ? ' is-active' : ''}`}
+              onClick={() => {
+                playTapSound();
+                setProfitPeriod('today');
+              }}
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              className={`profit-period-btn${profitPeriod === 'week' ? ' is-active' : ''}`}
+              onClick={() => {
+                playTapSound();
+                setProfitPeriod('week');
+              }}
+            >
+              7 Days
+            </button>
+            <button
+              type="button"
+              className={`profit-period-btn${profitPeriod === 'month' ? ' is-active' : ''}`}
+              onClick={() => {
+                playTapSound();
+                setProfitPeriod('month');
+              }}
+            >
+              This Month
+            </button>
+            <button
+              type="button"
+              className={`profit-period-btn${profitPeriod === 'total' ? ' is-active' : ''}`}
+              onClick={() => {
+                playTapSound();
+                setProfitPeriod('total');
+              }}
+            >
+              All-Time
+            </button>
+          </div>
+        </div>
+
+        <div className="profit-hero-main">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              {periodTitle}
+            </span>
+            <span
+              className="profit-hero-margin-badge"
+              style={{
+                background: currentProfit >= 0 ? 'rgba(34, 197, 94, 0.14)' : 'rgba(239, 68, 68, 0.14)',
+                color: currentProfit >= 0 ? '#16a34a' : '#ef4444',
+              }}
+            >
+              {currentMargin}% Margin
+            </span>
+          </div>
+
+          <div className="profit-hero-value-row">
+            <span
+              className="profit-hero-amount"
+              style={{ color: currentProfit >= 0 ? 'var(--text-primary)' : '#ef4444' }}
+            >
+              {money(currentProfit)}
+            </span>
+            {profitPeriod === 'month' && sales_mom_pct != null && (
+              <span
+                className={`profit-hero-mom ${sales_mom_pct >= 0 ? 'is-up' : 'is-down'}`}
+                title={`Last month: ${money(sales_last_month)}`}
               >
-                Open Partners Tab <ChevronRight size={12} />
-              </button>
+                {sales_mom_pct >= 0 ? '+' : ''}{sales_mom_pct}% MoM
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="profit-hero-breakdown">
+          <div className="profit-breakdown-item">
+            <span className="profit-breakdown-label">Gross Sales</span>
+            <span className="profit-breakdown-val profit-val-sales">{money(currentSales)}</span>
+          </div>
+          <div className="profit-breakdown-divider" />
+          <div className="profit-breakdown-item">
+            <span className="profit-breakdown-label">Buying Cost</span>
+            <span className="profit-breakdown-val profit-val-cost">−{money(currentCost)}</span>
+          </div>
+          <div className="profit-breakdown-divider" />
+          <div className="profit-breakdown-item">
+            <span className="profit-breakdown-label">Net Profit</span>
+            <span
+              className="profit-breakdown-val"
+              style={{ color: currentProfit >= 0 ? '#10b981' : '#ef4444' }}
+            >
+              {money(currentProfit)}
+            </span>
+          </div>
+        </div>
+
+        {/* 50/50 Partner Profit Division Matrix */}
+        <div style={{ marginTop: '0.9rem', paddingTop: '0.85rem', borderTop: '1px dashed var(--border-color)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.55rem' }}>
+            <span style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              50/50 Partner Share
+            </span>
+            <button
+              type="button"
+              className="dashboard-recent-all"
+              onClick={() => onNavigate('partners')}
+              style={{ fontSize: '0.74rem' }}
+            >
+              Partner Equity <ChevronRight size={13} />
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem' }}>
+            <div
+              style={{
+                padding: '0.7rem 0.85rem',
+                borderRadius: 'var(--radius-md)',
+                background: 'rgba(59, 130, 246, 0.05)',
+                border: '1px solid rgba(59, 130, 246, 0.15)',
+                cursor: 'pointer',
+              }}
+              onClick={() => onNavigate('partners')}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#3b82f6' }}>Nomi (50%)</span>
+                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Share</span>
+              </div>
+              <div style={{ fontSize: '1.15rem', fontWeight: 800, color: currentProfit >= 0 ? '#3b82f6' : '#ef4444' }}>
+                {money(Math.round((currentProfit / 2) * 100) / 100)}
+              </div>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                Dividend for {periodTitle}
+              </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
-              <div
-                style={{
-                  padding: '0.7rem 0.85rem',
-                  borderRadius: 'var(--radius-md)',
-                  background: 'rgba(59, 130, 246, 0.05)',
-                  border: '1px solid rgba(59, 130, 246, 0.15)',
-                  cursor: 'pointer',
-                }}
-                onClick={() => onNavigate('partners')}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#3b82f6' }}>Nomi (50%)</span>
-                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Share</span>
-                </div>
-                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: currentProfit >= 0 ? '#3b82f6' : '#ef4444' }}>
-                  {money(Math.round((currentProfit / 2) * 100) / 100)}
-                </div>
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                  Dividend for {periodTitle}
-                </div>
+            <div
+              style={{
+                padding: '0.7rem 0.85rem',
+                borderRadius: 'var(--radius-md)',
+                background: 'rgba(20, 184, 166, 0.05)',
+                border: '1px solid rgba(20, 184, 166, 0.15)',
+                cursor: 'pointer',
+              }}
+              onClick={() => onNavigate('partners')}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-teal)' }}>Haris (50%)</span>
+                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Share</span>
               </div>
-
-              <div
-                style={{
-                  padding: '0.7rem 0.85rem',
-                  borderRadius: 'var(--radius-md)',
-                  background: 'rgba(20, 184, 166, 0.05)',
-                  border: '1px solid rgba(20, 184, 166, 0.15)',
-                  cursor: 'pointer',
-                }}
-                onClick={() => onNavigate('partners')}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-teal)' }}>Haris (50%)</span>
-                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Share</span>
-                </div>
-                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: currentProfit >= 0 ? 'var(--accent-teal)' : '#ef4444' }}>
-                  {money(Math.round((currentProfit / 2) * 100) / 100)}
-                </div>
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                  Dividend for {periodTitle}
-                </div>
+              <div style={{ fontSize: '1.15rem', fontWeight: 800, color: currentProfit >= 0 ? 'var(--accent-teal)' : '#ef4444' }}>
+                {money(Math.round((currentProfit / 2) * 100) / 100)}
+              </div>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                Dividend for {periodTitle}
               </div>
             </div>
           </div>
+        </div>
+      </div>
 
-          <div className="stats-grid stats-grid-quiet">
-            <StatCard
-              label="Sales Collected"
-              value={money(total_revenue)}
-              hint="Customer payments in"
-              icon={DollarSign}
-            />
-            <StatCard
-              label="Sales Due"
-              value={money(total_pending)}
-              hint="Pending payment"
-              icon={Clock}
-              onClick={() => setActiveTab('dues')}
-              actionLabel="View Dues"
-              onAction={() => setActiveTab('dues')}
-            />
-            <StatCard
-              label="Overdue Sales"
-              value={money(total_overdue)}
-              hint={overdue_bills_count > 0 ? `${overdue_bills_count} bill(s) overdue` : 'All clear'}
-              highlight={total_overdue > 0}
-              icon={AlertTriangle}
-              onClick={() => setActiveTab('dues')}
-              actionLabel={total_overdue > 0 ? '⚡ 1-Tap WA' : undefined}
-              actionType="danger"
-              onAction={() => onNavigate('aging')}
-            />
-            <StatCard
-              label="Help Outstanding"
-              value={money(help_outstanding)}
-              hint={`${help_count} person(s) lent`}
-              icon={HeartHandshake}
-              onClick={() => setActiveTab('dues')}
-              actionLabel={help_outstanding > 0 ? '🤝 Remind' : undefined}
-              onAction={() => setActiveTab('dues')}
-            />
-            <StatCard
-              label="Active Customer Bills"
-              value={String(total_bills)}
-              hint="Excl. cancelled"
-              icon={FileText}
-              onClick={() => onNavigate('database')}
-              actionLabel="🔍 Database"
-              onAction={() => onNavigate('database')}
-            />
+      {/* 4. LATEST BILLS STREAM */}
+      <div className="surface-block" style={{ padding: '1.2rem', borderRadius: 'var(--radius-md, 14px)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+            <Receipt size={18} style={{ color: 'var(--accent-teal, #14b8a6)' }} />
+            <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary)', fontWeight: 800 }}>Latest Bills</strong>
           </div>
+          <button
+            type="button"
+            className="dashboard-recent-all"
+            onClick={() => onNavigate('database')}
+          >
+            View all ({recent_bills.length})
+            <ChevronRight size={14} />
+          </button>
+        </div>
 
-          <div className="surface-block" style={{ padding: '1.2rem', borderRadius: 'var(--radius-md, 14px)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                <Receipt size={18} style={{ color: 'var(--accent-teal, #14b8a6)' }} />
-                <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary)', fontWeight: 800 }}>Latest Bills</strong>
-              </div>
+        {recent_bills.length === 0 ? (
+          <EmptyState
+            title="No bills yet"
+            body="Your first sale starts here."
+            actionLabel="Create first bill"
+            onAction={() => onNavigate('create')}
+            icon={PlusCircle}
+          />
+        ) : (
+          recent_bills.slice(0, 4).map((bill) => {
+            const typeClass = bill.bill_type === 'supplier' ? 'type-supplier' : bill.bill_type === 'help' ? 'type-help' : 'type-customer';
+            const typeColor = bill.bill_type === 'supplier' ? '#6366f1' : bill.bill_type === 'help' ? '#a855f7' : '#10b981';
+
+            return (
               <button
-                type="button"
-                className="dashboard-recent-all"
-                onClick={() => onNavigate ? onNavigate('database') : setActiveTab('recent')}
+                key={bill.id}
+                className={`dashboard-recent-item ${typeClass}`}
+                onClick={() => (onViewBill ? onViewBill(bill) : onNavigate('database'))}
+                title="Click to view bill"
               >
-                View all ({recent_bills.length})
-                <ChevronRight size={14} />
-              </button>
-            </div>
-
-            {recent_bills.slice(0, 4).map((bill) => {
-              const typeClass = bill.bill_type === 'supplier' ? 'type-supplier' : bill.bill_type === 'help' ? 'type-help' : 'type-customer';
-              const typeColor = bill.bill_type === 'supplier' ? '#6366f1' : bill.bill_type === 'help' ? '#a855f7' : '#10b981';
-
-              return (
-                <button
-                  key={bill.id}
-                  className={`dashboard-recent-item ${typeClass}`}
-                  onClick={() => (onViewBill ? onViewBill(bill) : onNavigate('database'))}
-                  title="Click to view bill"
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', width: '100%' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                      <span style={{ fontSize: '0.92rem', fontWeight: 750, color: 'var(--text-primary)' }}>
-                        {bill.customer_name}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', width: '100%' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                    <span style={{ fontSize: '0.92rem', fontWeight: 750, color: 'var(--text-primary)' }}>
+                      {bill.customer_name}
+                    </span>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      <span className="invoice-mono" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{bill.invoice_number}</span>
+                      <span>·</span>
+                      <span style={{ color: typeColor, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: typeColor, display: 'inline-block' }} />
+                        {billTypeShortLabel(bill)}
                       </span>
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        <span className="invoice-mono" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{bill.invoice_number}</span>
-                        <span>·</span>
-                        <span style={{ color: typeColor, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: typeColor, display: 'inline-block' }} />
-                          {billTypeShortLabel(bill)}
-                        </span>
-                        {bill.bill_date && (
-                          <>
-                            <span>·</span>
-                            <span>{bill.bill_date}</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem', flexShrink: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
-                          {money(bill.total_amount)}
-                        </span>
-                        <ChevronRight size={14} style={{ color: 'var(--text-muted)' }} />
-                      </div>
-                      <StatusBadge status={bill.status} />
+                      {bill.bill_date && (
+                        <>
+                          <span>·</span>
+                          <span>{bill.bill_date}</span>
+                        </>
+                      )}
                     </div>
                   </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
-      {activeTab === 'cashflow' && (
-        <div className="dashboard-tab-panel">
-          <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading Cashflow…</div>}>
-            <CashflowPanel
-              currencySymbol={currencySymbol}
-              compact={false}
-              onNavigate={onNavigate}
-              onViewBill={onViewBill}
-              helpGiven={help_given}
-              helpOutstanding={help_outstanding}
-            />
-          </Suspense>
-        </div>
-      )}
-
-      {activeTab === 'dues' && (
-        <div className="dashboard-tab-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 14px)' }}>
-            <div className="dash-dropdown-toolbar" style={{ marginBottom: '0.85rem' }}>
-              <div>
-                <strong style={{ fontSize: '0.95rem', color: total_overdue > 0 ? 'var(--status-overdue)' : 'var(--text-primary)' }}>
-                  Customer Overdue Invoices
-                </strong>
-                <p style={{ margin: '0.15rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  Total Overdue: {money(total_overdue)}
-                </p>
-              </div>
-              <button type="button" className="btn-secondary" style={{ fontSize: '0.76rem', padding: '0.35rem 0.75rem' }} onClick={() => onNavigate('aging')}>
-                Full Aging Report <ChevronRight size={14} />
-              </button>
-            </div>
-            <Suspense fallback={<p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading Overdue Bills…</p>}>
-              <OverduePanel
-                embedded
-                excludeHelp
-                currencySymbol={currencySymbol}
-                settings={settings}
-                onPaid={() => fetchStats(true)}
-                onViewBill={async (row) => {
-                  try {
-                    const res = await apiFetch(`/api/bills/${row.id}`);
-                    const bill = await res.json();
-                    if (res.ok && onViewBill) onViewBill(bill);
-                    else if (onNavigate) onNavigate('database');
-                  } catch {
-                    if (onNavigate) onNavigate('database');
-                  }
-                }}
-              />
-            </Suspense>
-          </div>
-
-          <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 14px)' }}>
-            <div className="dash-dropdown-toolbar" style={{ marginBottom: '0.85rem' }}>
-              <div>
-                <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary)' }}>
-                  Help / Personal Money Lent
-                </strong>
-                <p style={{ margin: '0.15rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  Given {money(help_given)} · Returned {money(help_repaid)} · Still Out: <strong>{money(help_outstanding)}</strong>
-                </p>
-              </div>
-              <div style={{ display: 'flex', gap: '0.4rem' }}>
-                <button type="button" className="btn-primary" style={{ fontSize: '0.76rem', padding: '0.35rem 0.75rem' }} onClick={goGiveHelp}>
-                  + Give Help
-                </button>
-                <button type="button" className="btn-secondary" style={{ fontSize: '0.76rem', padding: '0.35rem 0.75rem' }} onClick={goHelpBills}>
-                  Help Bills
-                </button>
-              </div>
-            </div>
-
-            {help_rows.length === 0 ? (
-              <EmptyState
-                title="No help given yet"
-                body="Record money you give someone for a period. It won’t affect sales or profits."
-                actionLabel="Give help"
-                onAction={goGiveHelp}
-                icon={HeartHandshake}
-              />
-            ) : (
-              <div className="dashboard-help-list">
-                {help_rows.map((bill) => {
-                  const statusKey = String(bill.status || 'pending').toLowerCase();
-                  const stillOut = Math.max(0, Number(bill.balance_due ?? (Number(bill.total_amount) || 0) - (Number(bill.amount_paid) || 0)));
-                  const dueLabel = formatHelpReturn(bill.due_date);
-                  return (
-                    <div className={`dashboard-help-card is-${statusKey}${stillOut <= 0 ? ' is-clear' : ''}`} key={bill.id}>
-                      <button
-                        type="button"
-                        className="dashboard-help-main"
-                        onClick={() => openHelpBill(bill)}
-                      >
-                        <span className="dashboard-help-top">
-                          <span className="dashboard-help-name">{bill.customer_name}</span>
-                          <StatusBadge status={bill.status} />
-                        </span>
-                        <span className="dashboard-help-out">
-                          <small>{stillOut > 0 ? 'Still out' : 'Returned'}</small>
-                          <strong>
-                            {formatCurrency(currencySymbol, stillOut > 0 ? stillOut : bill.total_amount, { maximumFractionDigits: 0 })}
-                          </strong>
-                        </span>
-                        <span className="dashboard-help-foot">
-                          <span className="dashboard-help-inv">{bill.invoice_number}</span>
-                          <span>Return {dueLabel}</span>
-                          {stillOut > 0 ? <span>Given {money(bill.total_amount)}</span> : null}
-                        </span>
-                      </button>
-                      {stillOut > 0 ? (
-                        <div className="dashboard-help-actions">
-                          <button
-                            type="button"
-                            className="dashboard-help-pay"
-                            onClick={() => payHelp(bill)}
-                          >
-                            <Banknote size={16} />
-                            Pay
-                          </button>
-                          <button
-                            type="button"
-                            className="dashboard-help-wa"
-                            onClick={() => remindHelp(bill)}
-                            title={bill.customer_phone ? 'WhatsApp return reminder' : 'No phone'}
-                          >
-                            <MessageCircle size={16} />
-                            WA
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'recent' && (
-        <div className="dashboard-tab-panel">
-          <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 14px)' }}>
-            <div className="dash-dropdown-toolbar" style={{ marginBottom: '0.85rem' }}>
-              <div>
-                <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary)' }}>
-                  Recent Invoices
-                </strong>
-                <p style={{ margin: '0.15rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  Showing latest transactions
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ fontSize: '0.76rem', padding: '0.35rem 0.75rem' }}
-                onClick={() => onNavigate('database')}
-              >
-                Open Full Bills Database <ChevronRight size={14} />
-              </button>
-            </div>
-
-            {recent_bills.length === 0 ? (
-              <EmptyState
-                title="No bills yet"
-                body="Your first sale starts here."
-                actionLabel="Create first bill"
-                onAction={() => onNavigate('create')}
-                icon={PlusCircle}
-              />
-            ) : (
-              <div className="dashboard-recent-list">
-                {recent_bills.map((bill) => {
-                  const statusKey = String(bill.status || 'pending').toLowerCase();
-                  return (
-                    <button
-                      type="button"
-                      className={`dashboard-recent-item is-${statusKey}`}
-                      key={bill.id}
-                      onClick={() => (onViewBill ? onViewBill(bill) : onNavigate('database'))}
-                    >
-                      <span className="dashboard-recent-accent" aria-hidden />
-                      <span className="dashboard-recent-body">
-                        <span className="dashboard-recent-row">
-                          <span className="dashboard-recent-name">{bill.customer_name}</span>
-                          <span className="dashboard-recent-amount">
-                            {formatCurrency(currencySymbol, bill.total_amount, { maximumFractionDigits: 0 })}
-                          </span>
-                        </span>
-                        <span className="dashboard-recent-row is-meta">
-                          <span className="dashboard-recent-meta">
-                            <span className="dashboard-recent-inv">{bill.invoice_number}</span>
-                            <span className="dashboard-recent-dot" aria-hidden />
-                            <span>{formatBillDateTime(bill)}</span>
-                            <span className="dashboard-recent-dot" aria-hidden />
-                            <span>{billTypeShortLabel(bill)}</span>
-                          </span>
-                          <StatusBadge status={bill.status} />
-                        </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem', flexShrink: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                        {money(bill.total_amount)}
                       </span>
-                      <ChevronRight className="dashboard-recent-chevron" size={16} aria-hidden />
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'tools' && (
-        <div className="dashboard-tab-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div className="surface-block" style={{ padding: '1.25rem', borderRadius: 'var(--radius-md, 14px)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.5rem' }}>
-              <Shield size={18} style={{ color: 'var(--accent-teal)' }} />
-              <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary)' }}>Data Protection & Backup</strong>
-            </div>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0 0 0.85rem' }}>
-              {lastBackup
-                ? `Last automatic backup: ${new Date(lastBackup).toLocaleString()}`
-                : 'Back up your bills regularly to prevent data loss.'}
-            </p>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <button type="button" className="btn-primary" style={{ fontSize: '0.8rem', padding: '0.45rem 1rem' }} onClick={() => onNavigate('backup')}>
-                Manage Backups & Cloud Sync
+                      <ChevronRight size={14} style={{ color: 'var(--text-muted)' }} />
+                    </div>
+                    <StatusBadge status={bill.status} />
+                  </div>
+                </div>
               </button>
-              <button type="button" className="btn-secondary" style={{ fontSize: '0.8rem', padding: '0.45rem 1rem' }} onClick={() => onNavigate('settings')}>
-                App Settings
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            );
+          })
+        )}
+      </div>
 
       <QuickPaySheet
         open={Boolean(payBill)}

@@ -42,6 +42,8 @@ import {
   pinEnabled,
 } from './utils/appSecurity';
 import { APP_THEMES, getNextQuickTheme, getQuickThemes } from './utils/themeConfig';
+import ThemeStudioModal from './components/ThemeStudioModal';
+import BackupRestoreModal from './components/BackupRestoreModal';
 
 const SmartBillForm = lazy(() => import('./components/SmartBillForm'));
 const InvoicePreview = lazy(() => import('./components/InvoicePreview'));
@@ -122,7 +124,8 @@ export default function App() {
   const [bioBusy, setBioBusy] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const [showDataSafety, setShowDataSafety] = useState(false);
-  const [focusBackup, setFocusBackup] = useState(false);
+  const [backupModalOpen, setBackupModalOpen] = useState(false);
+  const [themeModalOpen, setThemeModalOpen] = useState(false);
   const [aliveTabs, setAliveTabs] = useState({ dashboard: true });
   const hideAtRef = React.useRef(null);
 
@@ -150,10 +153,9 @@ export default function App() {
   }, [currentTab]);
 
   const openBackupSettings = useCallback(() => {
-    goToTab('settings');
-    setFocusBackup(true);
+    setBackupModalOpen(true);
     setMoreOpen(false);
-  }, [goToTab]);
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -361,12 +363,23 @@ export default function App() {
     }
   };
 
+  const lastThemeTapRef = React.useRef(0);
+
   const toggleTheme = () => {
     playTapSound();
-    setTheme((prev) => {
-      const next = getNextQuickTheme(prev);
-      return next;
-    });
+    setTheme((prev) => getNextQuickTheme(prev));
+  };
+
+  const handleThemeClick = () => {
+    const now = Date.now();
+    if (now - lastThemeTapRef.current < 350) {
+      // Double tap detected!
+      lastThemeTapRef.current = 0;
+      setThemeModalOpen(true);
+      return;
+    }
+    lastThemeTapRef.current = now;
+    toggleTheme();
   };
 
   const handleInstallApp = async () => {
@@ -534,8 +547,9 @@ export default function App() {
           <button
             type="button"
             className="nav-btn icon-only"
-            onClick={toggleTheme}
-            title={`Active: ${APP_THEMES.find((t) => t.id === theme)?.name || theme} (Tap to quick toggle)`}
+            onClick={handleThemeClick}
+            onDoubleClick={() => setThemeModalOpen(true)}
+            title={`Active: ${APP_THEMES.find((t) => t.id === theme)?.name || theme} (Click to toggle · Double-click for Theme Studio)`}
             aria-label="Toggle App Theme"
           >
             {theme === 'dark' ? (
@@ -614,6 +628,7 @@ export default function App() {
                   currencySymbol={settings.currency_symbol || 'Rs.'}
                   urduLabels={Boolean(settings.urdu_labels)}
                   settings={settings}
+                  onSettingsUpdated={fetchSettings}
                 />
               </Suspense>
             </ErrorBoundary>
@@ -695,8 +710,6 @@ export default function App() {
                 <SettingsManager
                   appSettings={settings}
                   onSettingsUpdated={fetchSettings}
-                  focusBackup={focusBackup}
-                  onFocusHandled={() => setFocusBackup(false)}
                   currentTheme={theme}
                   onThemeChange={(nextTheme) => setTheme(nextTheme)}
                 />
@@ -720,6 +733,20 @@ export default function App() {
         onDismiss={() => setShowDataSafety(false)}
         onBackup={openBackupSettings}
         onRestore={openBackupSettings}
+      />
+
+      <ThemeStudioModal
+        open={themeModalOpen}
+        onClose={() => setThemeModalOpen(false)}
+        currentTheme={theme}
+        onThemeChange={(next) => setTheme(next)}
+      />
+
+      <BackupRestoreModal
+        open={backupModalOpen}
+        onClose={() => setBackupModalOpen(false)}
+        settings={settings}
+        onSettingsUpdated={fetchSettings}
       />
 
       <nav className="mobile-bottom-nav no-print" aria-label="Main">

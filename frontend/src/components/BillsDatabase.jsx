@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle, FileText, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Bookmark, CheckCircle2 } from 'lucide-react';
+import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle, FileText, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Bookmark, CheckCircle2, Settings, Palette } from 'lucide-react';
 import BillAdjustSheet from './BillAdjustSheet';
 import StatusBadge, { StatusSelect } from './StatusBadge';
 import TypeSelect from './TypeSelect';
@@ -22,6 +22,7 @@ import {
 } from '../utils/paymentReminder';
 import { paymentSummaryText, billBalance } from '../utils/billPayments';
 import { loadFullBill } from '../utils/loadBill';
+import { INVOICE_TEMPLATES, saveInvoiceTemplate } from '../utils/invoiceTemplates';
 import {
   billTypeBadgeClass,
   billTypeBadgeLabel,
@@ -117,16 +118,42 @@ export default function BillsDatabase({
   currencySymbol = 'Rs.',
   urduLabels = false,
   settings: settingsProp = {},
+  onSettingsUpdated,
   active = true,
 }) {
   const toast = useToast();
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [localSettings, setLocalSettings] = useState(() => settingsProp || {});
+
+  useEffect(() => {
+    setLocalSettings(settingsProp || {});
+  }, [settingsProp]);
+
+  const handleUpdateSetting = async (key, val) => {
+    const next = { ...localSettings, [key]: val };
+    setLocalSettings(next);
+    if (key === 'default_invoice_template') {
+      saveInvoiceTemplate(val);
+    }
+    try {
+      await apiFetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: val }),
+      });
+      toast.success('Bill settings updated');
+      onSettingsUpdated?.();
+    } catch {
+      toast.error('Failed to update setting');
+    }
+  };
+
   const [billTypeFilter, setBillTypeFilter] = useState(() => {
     try {
       const pref = sessionStorage.getItem(BILLS_TYPE_FILTER_KEY);
-      if (pref === 'help' || pref === 'supplier' || pref === 'customer') {
+      if (pref === 'help' || pref === 'supplier' || pref === 'customer' || pref === 'settings') {
         sessionStorage.removeItem(BILLS_TYPE_FILTER_KEY);
         return pref;
       }
@@ -655,45 +682,72 @@ export default function BillsDatabase({
   const visibleBills = filteredBills.slice(startIndex, startIndex + BILLS_PAGE_SIZE);
 
   return (
-    <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      {/* Header Banner */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h2 style={{ fontSize: '1.4rem', fontWeight: 900 }}>Master Invoices & Bills Database</h2>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            Edit party names, rates, quantities, and totals directly in the database
+    <div className="glass-panel bills-database-container" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      {/* 1. Sleek Compact Header */}
+      <div className="bills-db-header">
+        <div className="bills-db-left">
+          <div className="bills-db-title-row">
+            <h2 className="bills-db-title">Invoices & Ledger</h2>
+            <span className="bills-db-count-pill">{bills.length}</span>
+          </div>
+          <p className="bills-db-sub">
+            Retail sales · Saudia buying · Credit khata
           </p>
         </div>
 
-        <div className="bills-header-actions" style={{ justifyContent: 'center' }}>
-          <button className="btn-secondary bills-header-btn" onClick={handleExportCSV} disabled={!bills.length}>
-            <Download size={15} /> Export CSV
-          </button>
-          <button className="btn-secondary bills-header-btn" onClick={handleExportPDF} disabled={!bills.length}>
-            <FileText size={15} /> Export PDF
+        <div className="bills-header-actions">
+          <button
+            type="button"
+            className="bills-mini-action-btn"
+            onClick={handleExportCSV}
+            disabled={!bills.length}
+            title="Export CSV spreadsheet"
+            aria-label="Export CSV"
+          >
+            <Download size={14} />
           </button>
           <button
-            className="btn-secondary bills-header-btn is-icon-only"
-            onClick={() => apiFetchBills({ soft: true })}
-            title="Refresh Database"
-            disabled={refreshing || loading}
-            aria-busy={refreshing}
+            type="button"
+            className="bills-mini-action-btn"
+            onClick={handleExportPDF}
+            disabled={!bills.length}
+            title="Export PDF report"
+            aria-label="Export PDF"
           >
-            <RefreshCw size={15} className={refreshing ? 'spin' : undefined} />
+            <FileText size={14} />
+          </button>
+          <button
+            type="button"
+            className="bills-mini-action-btn"
+            onClick={() => apiFetchBills({ soft: true })}
+            title="Refresh database"
+            aria-label="Refresh database"
+            disabled={refreshing || loading}
+          >
+            <RefreshCw size={14} className={refreshing ? 'spin' : undefined} />
+          </button>
+          <button
+            type="button"
+            className={`bills-mini-action-btn ${billTypeFilter === 'settings' ? 'is-active' : ''}`}
+            onClick={() => setBillTypeFilter(billTypeFilter === 'settings' ? 'all' : 'settings')}
+            title="Bill Style & Template Settings"
+            aria-label="Bill Settings"
+          >
+            <Settings size={14} />
           </button>
         </div>
       </div>
 
-      {/* Clean Modern Filter Panel */}
+      {/* 2. Clean Modern Filter Panel */}
       <div className="bills-filter-panel">
         {/* Row 1: Search Input + Starred Filter Toggle */}
         <div className="bills-search-row">
           <div className="bills-search-input-wrap">
-            <Search size={16} className="bills-search-icon" aria-hidden />
+            <Search size={15} className="bills-search-icon" aria-hidden />
             <input
               type="text"
               className="bills-search-input"
-              placeholder="Search by party, city, notes or bill #…"
+              placeholder="Search by customer, invoice #, city or note…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -715,7 +769,7 @@ export default function BillsDatabase({
             onClick={() => setShowBookmarkedOnly(!showBookmarkedOnly)}
             title={showBookmarkedOnly ? 'Show all bills' : 'Show only bookmarked bills'}
           >
-            <Bookmark size={15} fill={showBookmarkedOnly ? '#d4af37' : 'none'} />
+            <Bookmark size={14} fill={showBookmarkedOnly ? '#d4af37' : 'none'} />
             <span>Starred</span>
             <span className="bills-bookmark-count">{bookmarkedCount}</span>
           </button>
@@ -760,6 +814,16 @@ export default function BillsDatabase({
             >
               Help
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={billTypeFilter === 'settings'}
+              className={`bills-type-tab${billTypeFilter === 'settings' ? ' is-active' : ''}`}
+              onClick={() => setBillTypeFilter('settings')}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+            >
+              <Settings size={13} /> Settings
+            </button>
           </div>
 
           <div className="bills-status-segmented">
@@ -773,14 +837,193 @@ export default function BillsDatabase({
                 { value: 'overdue', label: 'Overdue' },
                 { value: 'cancelled', label: 'Cancelled' },
               ]}
-              style={{ minWidth: 155 }}
+              style={{ minWidth: 140 }}
             />
           </div>
         </div>
       </div>
 
-      {/* Master Table */}
-      {loading ? (
+      {/* Bill Settings View OR Master Table */}
+      {billTypeFilter === 'settings' ? (
+        <div className="glass-panel" style={{ padding: '1.25rem', borderRadius: 'var(--radius-lg, 16px)' }}>
+          {/* Default Bill Template Picker */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+              <Palette size={18} style={{ color: 'var(--primary, #00b3a6)' }} />
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>Default Bill Style & Template</h3>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+              Choose the company-wide default look for invoices, bills, and payment advices. You can also switch styles on any bill anytime.
+            </p>
+            <div className="template-picker-grid">
+              {INVOICE_TEMPLATES.map((tmpl) => {
+                const active = (localSettings.default_invoice_template || 'classic') === tmpl.id;
+                return (
+                  <button
+                    key={tmpl.id}
+                    type="button"
+                    className={`template-card ${active ? 'is-active' : ''}`}
+                    onClick={() => handleUpdateSetting('default_invoice_template', tmpl.id)}
+                  >
+                    <div className="template-card-header">
+                      <div className="template-swatch-badge">
+                        <span
+                          className="template-swatch-dot"
+                          style={{
+                            backgroundColor: tmpl.primaryColor,
+                            border: tmpl.id === 'minimal' ? '1px solid #71717a' : 'none',
+                          }}
+                        />
+                        <span>{tmpl.name}</span>
+                      </div>
+                      {active ? <Check size={16} style={{ color: 'var(--primary, #00b3a6)' }} /> : null}
+                    </div>
+                    <div className="template-card-tagline">{tmpl.tagline}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Header Layout Style */}
+          <div style={{ marginTop: '1.5rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border-color)' }}>
+            <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 0.25rem' }}>Header Layout Style</h4>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 0.85rem' }}>
+              Choose how the logo, brand name, and invoice title are arranged on invoices.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.65rem' }}>
+              {[
+                { id: 'split', label: 'Modern Split', desc: 'Logo left · Invoice title right' },
+                { id: 'banner', label: 'Full Banner', desc: 'Prominent colored bar top' },
+                { id: 'centered', label: 'Centered Letterhead', desc: 'Classic prestige centered logo' },
+              ].map((layout) => {
+                const isSelected = (localSettings.header_layout || 'split') === layout.id;
+                return (
+                  <button
+                    key={layout.id}
+                    type="button"
+                    className={`template-card ${isSelected ? 'is-active' : ''}`}
+                    style={{ padding: '0.75rem', textAlign: 'left' }}
+                    onClick={() => handleUpdateSetting('header_layout', layout.id)}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                      <strong style={{ fontSize: '0.85rem', color: isSelected ? 'var(--accent-teal)' : 'var(--text-primary)' }}>{layout.label}</strong>
+                      {isSelected && <Check size={14} style={{ color: 'var(--accent-teal)' }} />}
+                    </div>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{layout.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Custom Brand Accent Color */}
+          <div style={{ marginTop: '1.5rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>
+                <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>Custom Brand Accent Color</h4>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0.2rem 0 0' }}>Override bill accent highlights with your exact brand palette.</p>
+              </div>
+              {localSettings.custom_brand_color && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem', width: 'auto' }}
+                  onClick={() => handleUpdateSetting('custom_brand_color', '')}
+                >
+                  Reset to template color
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+              {['#00b3a6', '#2a1810', '#0f172a', '#064e3b', '#881337', '#c2410c', '#0369a1', '#9d174d', '#b45309'].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => handleUpdateSetting('custom_brand_color', c)}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '50%',
+                    background: c,
+                    border: localSettings.custom_brand_color === c ? '3px solid #ffffff' : '2px solid rgba(0,0,0,0.15)',
+                    boxShadow: localSettings.custom_brand_color === c ? '0 0 0 2px var(--accent-teal)' : 'none',
+                    cursor: 'pointer',
+                    transition: 'transform 0.15s ease',
+                  }}
+                  title={c}
+                />
+              ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginLeft: '0.5rem' }}>
+                <input
+                  type="color"
+                  value={localSettings.custom_brand_color || '#00b3a6'}
+                  onChange={(e) => handleUpdateSetting('custom_brand_color', e.target.value)}
+                  style={{ width: 32, height: 32, padding: 0, border: 'none', borderRadius: 6, cursor: 'pointer', background: 'transparent' }}
+                  title="Pick custom hex color"
+                />
+                <span style={{ fontSize: '0.78rem', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                  {localSettings.custom_brand_color || 'Default'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Custom Text / Font Color */}
+          <div style={{ marginTop: '1.5rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>
+                <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>Custom Text & Font Color</h4>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0.2rem 0 0' }}>Customize the font color for invoice titles, line items, and totals.</p>
+              </div>
+              {localSettings.custom_text_color && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem', width: 'auto' }}
+                  onClick={() => handleUpdateSetting('custom_text_color', '')}
+                >
+                  Reset to default text
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+              {['#000000', '#0f172a', '#1e293b', '#1e3a8a', '#3b2219', '#064e3b', '#581c87', '#334155'].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => handleUpdateSetting('custom_text_color', c)}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '50%',
+                    background: c,
+                    border: localSettings.custom_text_color === c ? '3px solid #ffffff' : '2px solid rgba(0,0,0,0.15)',
+                    boxShadow: localSettings.custom_text_color === c ? '0 0 0 2px var(--accent-teal)' : 'none',
+                    cursor: 'pointer',
+                    transition: 'transform 0.15s ease',
+                  }}
+                  title={c}
+                />
+              ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginLeft: '0.5rem' }}>
+                <input
+                  type="color"
+                  value={localSettings.custom_text_color || '#111111'}
+                  onChange={(e) => handleUpdateSetting('custom_text_color', e.target.value)}
+                  style={{ width: 32, height: 32, padding: 0, border: 'none', borderRadius: 6, cursor: 'pointer', background: 'transparent' }}
+                  title="Pick custom text hex color"
+                />
+                <span style={{ fontSize: '0.78rem', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                  {localSettings.custom_text_color || 'Default'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : loading ? (
         <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
           <RefreshCw className="spin" size={28} />
           <p style={{ marginTop: '0.5rem' }}>Loading bills database...</p>
@@ -960,92 +1203,108 @@ export default function BillsDatabase({
               const paidAmt = Number(bill.amount_paid) || 0;
               const canPay = canTakePayment(bill);
               const canRemind = canPay && bill.bill_type !== 'supplier';
+              const isBookmarked = Number(bill.is_bookmarked) === 1;
+
               return (
-              <div className="mobile-card bills-bill-card" key={`m-${bill.id}`}>
-                <div className="bills-card-head">
-                  <div className="bills-card-who">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <div className="mobile-card-title">{bill.customer_name}</div>
-                      <button
-                        type="button"
-                        className="btn-bookmark-icon"
-                        onClick={(e) => handleToggleBookmark(bill, e)}
-                        title={Number(bill.is_bookmarked) === 1 ? 'Remove bookmark' : 'Bookmark bill'}
+                <div className="bills-bill-card" key={`m-${bill.id}`}>
+                  {/* Top Row: Client & Amount */}
+                  <div className="bills-card-top-row">
+                    <div className="bills-card-party-box">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                        <span className="bills-card-client-name" title={bill.customer_name}>
+                          {bill.customer_name || 'Walk-in Customer'}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-bookmark-icon"
+                          onClick={(e) => handleToggleBookmark(bill, e)}
+                          title={isBookmarked ? 'Remove bookmark' : 'Bookmark bill'}
+                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex' }}
+                        >
+                          <Bookmark size={15} fill={isBookmarked ? '#d4af37' : 'none'} color={isBookmarked ? '#d4af37' : 'var(--text-muted)'} />
+                        </button>
+                      </div>
+
+                      <div className="bills-card-meta-line">
+                        <span className="invoice-mono" style={{ fontWeight: 700 }}>{bill.invoice_number}</span>
+                        <span>·</span>
+                        <span>{formatBillDateTime(bill)}</span>
+                      </div>
+                    </div>
+
+                    <div className="bills-card-amount-box">
+                      <span className="bills-card-total-val">
+                        {formatCurrency(currencySymbol, bill.total_amount)}
+                      </span>
+                      {(paidAmt > 0 || due > 0) && (
+                        <span
+                          style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 800,
+                            color: due > 0 ? '#f59e0b' : '#10b981',
+                          }}
+                        >
+                          {due > 0 ? `Due ${formatCurrency(currencySymbol, due)}` : 'Cleared'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Middle Row: Quick Status & Type Selectors */}
+                  <div className="bills-card-dropdowns-row">
+                    {isCancelled(bill) ? (
+                      <StatusBadge status="cancelled" />
+                    ) : (
+                      <StatusSelect
+                        block
+                        value={bill.status}
+                        onChange={(next) => handleUpdateStatus(bill.id, next)}
+                      />
+                    )}
+                    {Boolean(bill.is_partner_settled) && (
+                      <span
+                        className="badge badge-paid"
                         style={{
-                          background: 'transparent',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: 2,
+                          fontSize: '0.68rem',
                           display: 'inline-flex',
                           alignItems: 'center',
-                          color: Number(bill.is_bookmarked) === 1 ? '#d4af37' : 'var(--text-muted)',
+                          gap: '0.25rem',
+                          fontWeight: 750,
+                          padding: '0.25rem 0.6rem',
+                          borderRadius: '999px',
+                          background: 'rgba(52, 168, 83, 0.15)',
+                          border: '1px solid var(--status-paid)',
+                          color: 'var(--status-paid)',
+                          whiteSpace: 'nowrap',
                         }}
+                        title="50/50 Partner Profit Settled"
                       >
-                        <Bookmark size={16} fill={Number(bill.is_bookmarked) === 1 ? '#d4af37' : 'none'} />
-                      </button>
-                    </div>
-                    <div className="bills-card-inv invoice-mono">{bill.invoice_number}</div>
-                    <div className="mobile-card-meta">{formatBillDateTime(bill)}</div>
-                  </div>
-                  <div className="bills-card-money">
-                    <div className="mobile-card-amount">{formatCurrency(currencySymbol, bill.total_amount)}</div>
-                    {(paidAmt > 0 || due > 0) && (
-                      <div className="bills-card-balance">
-                        {due > 0
-                          ? `Due ${formatCurrency(currencySymbol, due)}`
-                          : 'Cleared'}
-                      </div>
+                        <CheckCircle2 size={11} /> 50/50 Settled
+                      </span>
+                    )}
+                    {!isCancelled(bill) && (
+                      <TypeSelect
+                        block
+                        value={bill.bill_type}
+                        onChange={(next) => handleUpdateType(bill, next)}
+                      />
                     )}
                   </div>
-                </div>
-                <div className="bills-card-chips">
-                  {isCancelled(bill) ? (
-                    <StatusBadge status="cancelled" />
-                  ) : (
-                    <StatusSelect
-                      block
-                      value={bill.status}
-                      onChange={(next) => handleUpdateStatus(bill.id, next)}
-                    />
-                  )}
-                  {Boolean(bill.is_partner_settled) && (
-                    <span
-                      className="badge badge-paid"
-                      style={{
-                        fontSize: '0.68rem',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.25rem',
-                        fontWeight: 750,
-                        padding: '0.25rem 0.6rem',
-                        borderRadius: '999px',
-                        background: 'rgba(52, 168, 83, 0.15)',
-                        border: '1px solid var(--status-paid)',
-                        color: 'var(--status-paid)',
-                        whiteSpace: 'nowrap',
-                      }}
-                      title="50/50 Partner Profit Settled"
+
+                  {/* Bottom Action Button Bar */}
+                  <div className="bills-card-btn-bar">
+                    <button
+                      type="button"
+                      className="bills-action-btn is-primary"
+                      onClick={() => onViewBill(bill)}
                     >
-                      <CheckCircle2 size={11} /> 50/50 Settled
-                    </span>
-                  )}
-                  {!isCancelled(bill) && (
-                    <TypeSelect
-                      block
-                      value={bill.bill_type}
-                      onChange={(next) => handleUpdateType(bill, next)}
-                    />
-                  )}
-                </div>
-                <div className="bills-card-actions">
-                  <div className="bills-card-primary">
-                    <button type="button" className="btn-secondary" onClick={() => onViewBill(bill)}>
                       <Eye size={14} /> View
                     </button>
+
                     {!isCancelled(bill) && (
                       <button
                         type="button"
-                        className="btn-secondary"
+                        className={`bills-action-btn${canPay ? ' is-pay' : ''}`}
                         onClick={() => openPayModal(bill)}
                         disabled={!canPay}
                         title={
@@ -1054,37 +1313,22 @@ export default function BillsDatabase({
                             : 'Fully paid — Pay locked'
                         }
                       >
-                        <Banknote size={14} /> Pay
+                        <Banknote size={14} /> {canPay ? 'Pay' : 'Paid'}
                       </button>
                     )}
-                  </div>
-                  <div className="bills-card-menus">
+
                     {canRemind && (
-                      <BillsCardMenu
-                        id={`${bill.id}:share`}
-                        openId={cardMenu}
-                        setOpenId={setCardMenu}
-                        label="Share"
-                        icon={MessageSquare}
+                      <button
+                        type="button"
+                        className="bills-action-btn is-manage"
+                        style={{ color: '#25d366', borderColor: 'rgba(37, 211, 102, 0.3)' }}
+                        title="Share on WhatsApp"
+                        onClick={() => handleRemind(bill, 'whatsapp')}
                       >
-                        <BillsCardMenuItem
-                          icon={MessageSquare}
-                          label="WhatsApp"
-                          onClick={() => {
-                            setCardMenu(null);
-                            handleRemind(bill, 'whatsapp');
-                          }}
-                        />
-                        <BillsCardMenuItem
-                          icon={Smartphone}
-                          label="SMS"
-                          onClick={() => {
-                            setCardMenu(null);
-                            handleRemind(bill, 'sms');
-                          }}
-                        />
-                      </BillsCardMenu>
+                        <MessageSquare size={14} />
+                      </button>
                     )}
+
                     <BillsCardMenu
                       id={`${bill.id}:manage`}
                       openId={cardMenu}
@@ -1135,7 +1379,6 @@ export default function BillsDatabase({
                     </BillsCardMenu>
                   </div>
                 </div>
-              </div>
               );
             })}
           </div>

@@ -556,46 +556,64 @@ export default function CashflowPanel({
       )}
 
       {/* KPI Cards */}
-      <div className="stats-grid stats-grid-quiet cashflow-stats">
-        <div className="stat-card">
-          <div className="stat-card-label">Sales (in)</div>
-          <div className="stat-card-value" style={{ color: 'var(--status-paid)' }}>{formatCurrency(currencySymbol, total_sales)}</div>
+      <div className="cashflow-stats-grid">
+        <div className="cashflow-stat-box">
+          <div className="cashflow-stat-title">
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--status-paid)' }} />
+            Sales (in)
+          </div>
+          <div className="cashflow-stat-num" style={{ color: 'var(--status-paid)' }}>
+            {formatCurrency(currencySymbol, total_sales)}
+          </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-card-label">Saudia buying</div>
-          <div className="stat-card-value">{formatCurrency(currencySymbol, buying_cost)}</div>
+
+        <div className="cashflow-stat-box">
+          <div className="cashflow-stat-title">
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f43f5e' }} />
+            Saudia buying
+          </div>
+          <div className="cashflow-stat-num" style={{ color: '#f43f5e' }}>
+            {formatCurrency(currencySymbol, buying_cost)}
+          </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-card-label">Est. profit</div>
-          <div className="stat-card-value" style={{ color: net_profit >= 0 ? '#10b981' : '#ef4444' }}>
+
+        <div className="cashflow-stat-box">
+          <div className="cashflow-stat-title">
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: net_profit >= 0 ? '#10b981' : '#ef4444' }} />
+            Est. profit
+          </div>
+          <div className="cashflow-stat-num" style={{ color: net_profit >= 0 ? '#10b981' : '#ef4444' }}>
             {formatCurrency(currencySymbol, net_profit)}
           </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-card-label">Paid / due</div>
-          <div className="stat-card-value" style={{ fontSize: '0.95rem' }}>
-            {formatCurrency(currencySymbol, paid_sales)} / {formatCurrency(currencySymbol, pending_sales)}
+
+        <div className="cashflow-stat-box">
+          <div className="cashflow-stat-title">Paid / due</div>
+          <div className="cashflow-stat-num" style={{ fontSize: '0.92rem', color: 'var(--text-primary)' }}>
+            {formatCurrency(currencySymbol, paid_sales)} <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>/</span> <span style={{ color: pending_sales > 0 ? 'var(--warning)' : 'inherit' }}>{formatCurrency(currencySymbol, pending_sales)}</span>
           </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-card-label">Help given</div>
-          <div className="stat-card-value" style={{ fontSize: '0.95rem' }}>
+
+        <div className="cashflow-stat-box">
+          <div className="cashflow-stat-title">Help given</div>
+          <div className="cashflow-stat-num" style={{ fontSize: '0.92rem', color: 'var(--accent-teal)' }}>
             {formatCurrency(currencySymbol, helpGivenShow)}
           </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-card-label">Help outstanding</div>
-          <div className="stat-card-value" style={{ fontSize: '0.95rem', color: helpOutShow > 0 ? 'var(--warning)' : undefined }}>
+
+        <div className="cashflow-stat-box">
+          <div className="cashflow-stat-title">Help outstanding</div>
+          <div className="cashflow-stat-num" style={{ fontSize: '0.92rem', color: helpOutShow > 0 ? '#f59e0b' : 'var(--text-secondary)' }}>
             {formatCurrency(currencySymbol, helpOutShow)}
           </div>
         </div>
       </div>
 
       {/* Visual Cashflow Distribution Bar */}
-      <div style={{ margin: '1rem 0 0.5rem', padding: '0.85rem 1rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
+      <div className="cashflow-distribution-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.82rem', fontWeight: 800 }}>
-          <span>Cash Flow Distribution</span>
-          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+          <span style={{ color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>Cash Flow Distribution</span>
+          <span style={{ color: 'var(--accent-teal)', fontSize: '0.75rem', fontWeight: 750 }}>
             {total_sales > 0 ? `Profit Margin: ${((net_profit / total_sales) * 100).toFixed(1)}%` : '0%'}
           </span>
         </div>
@@ -605,12 +623,12 @@ export default function CashflowPanel({
           <div className="cashflow-alloc-segment" style={{ width: `${profitPct}%`, background: '#10b981' }} title={`Net Profit: ${profitPct}%`} />
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.4rem', fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem', fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
             <span style={{ width: 8, height: 8, borderRadius: 2, background: '#f43f5e' }} />
             Saudia Buying: {formatCurrency(currencySymbol, buying_cost)} ({buyingPct}%)
           </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
             <span style={{ width: 8, height: 8, borderRadius: 2, background: '#10b981' }} />
             Net Profit: {formatCurrency(currencySymbol, net_profit)} ({profitPct}%)
           </span>

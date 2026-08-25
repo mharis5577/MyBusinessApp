@@ -200,8 +200,19 @@ export async function generateBusinessBrief(dbAll, options = {}) {
     };
   });
 
+  // Query settings for company name if available
+  let companyName = 'ELITE CHOCOLATE';
+  try {
+    const settingsRow = await dbAll(`SELECT company_name, currency_symbol FROM settings LIMIT 1`);
+    if (settingsRow && settingsRow[0]?.company_name) {
+      companyName = settingsRow[0].company_name.toUpperCase();
+    }
+  } catch (_) {
+    // fallback
+  }
+
   const partnerSplitText = partnerSplits
-    .map((p) => `  • ${p.name} (${p.sharePct}%): ${p.formattedShare}`)
+    .map((p) => `• 👤 *${p.name} (${p.sharePct}%):* ${p.formattedShare}`)
     .join('\n');
 
   const formattedSales = `${currencySymbol} ${totalSales.toLocaleString('en-PK')}`;
@@ -209,23 +220,28 @@ export async function generateBusinessBrief(dbAll, options = {}) {
   const formattedProfit = `${currencySymbol} ${netProfit.toLocaleString('en-PK')}`;
   const formattedCollections = `${currencySymbol} ${totalCashCollected.toLocaleString('en-PK')}`;
   const formattedOverdue = `${currencySymbol} ${totalOverdueAmount.toLocaleString('en-PK')}`;
+  const profitEmoji = netProfit >= 0 ? '🟢' : '🔴';
 
-  const messageText = `📊 *${periodTitle}*
+  const messageText = `✨ *${companyName}*
+📊 *${periodTitle}*
+━━━━━━━━━━━━━━━━━━━━
 📅 *Period:* ${dateRangeLabel}
-⏰ *Generated:* ${pakistanNowTime()}
+⏰ *Generated:* ${pakistanNowTime()} · ${pakistanToday()}
 
-━━━━━━━━━━━━━━━━━━━━
-📈 *Online Sales:* ${formattedSales} (${salesBills.length} orders)
-📦 *Saudia Purchases:* ${formattedBuying} (${buyingBills.length} bills)
-💰 *Net Operating Profit:* ${formattedProfit} (${profitMarginPct}% margin)
-━━━━━━━━━━━━━━━━━━━━
-👥 *Partner Split:*
+💼 *PERFORMANCE SUMMARY*
+• 📈 *Gross Sales:* ${formattedSales} (${salesBills.length} ${salesBills.length === 1 ? 'order' : 'orders'})
+• 📦 *Buying Cost:* ${formattedBuying} (${buyingBills.length} ${buyingBills.length === 1 ? 'purchase' : 'purchases'})
+• ${profitEmoji} *Net Profit:* *${formattedProfit}* (${profitMarginPct}% Margin)
+
+🤝 *50/50 PARTNER EQUITY SHARE*
 ${partnerSplitText}
-━━━━━━━━━━━━━━━━━━━━
-💵 *Collections Received:* ${formattedCollections}
-⏳ *Overdue Dues Pending:* ${formattedOverdue} (${overdueBills.length} client bills)
 
-✅ *Accounting Status:* Accrual & Online-first reconciled.`;
+💰 *CASHFLOW & RECOVERY*
+• 💵 *Collections In:* ${formattedCollections}
+• ⏳ *Pending Overdue:* ${formattedOverdue} (${overdueBills.length} ${overdueBills.length === 1 ? 'client' : 'clients'})
+
+━━━━━━━━━━━━━━━━━━━━
+✅ *Audited & Reconciled via AutoBill Executive*`;
 
   return {
     period,

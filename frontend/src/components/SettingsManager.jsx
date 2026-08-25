@@ -22,9 +22,15 @@ import {
   Repeat,
   Cloud,
   Database,
+  ChevronDown,
+  Building2,
+  CreditCard,
+  ShieldCheck,
+  Wrench,
+  Sliders,
+  CheckCircle2,
 } from 'lucide-react';
 import { populateMockDatabase } from '../utils/mockDataGenerator';
-import FirebaseCloudSyncPanel from './FirebaseCloudSyncPanel';
 import { playSuccessChime, setSoundEnabled } from '../utils/audioEffects';
 import { compressImageToDataUrl } from '../utils/imageCompress';
 import { checkBiometricAvailable } from '../utils/appSecurity';
@@ -32,30 +38,12 @@ import { cancelDueReminders, requestDueReminderPermission, syncDueReminders, sen
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
-import {
-  exportBackupFile,
-  restoreFromPayload,
-  restoreFromLocalVersion,
-  shareLocalSnapshot,
-  listLocalSnapshots,
-  saveLocalSnapshot,
-  deleteLocalSnapshot,
-  deleteLocalSnapshots,
-  getLastAutoBackupAt,
-  getLastPhoneBackupPath,
-  parseBackupPayload,
-  summarizeBackupPayload,
-  getLocalSnapshot,
-  MAX_VERSIONS,
-  PHONE_FOLDER,
-} from '../utils/backupManager';
-import { readPickedFileText } from '../utils/downloadFile';
+import BackupRestoreModal from './BackupRestoreModal';
 import { DeveloperCredit } from './BrandMark';
 import AppSelect from './AppSelect';
 import { emptyPaymentMethod, getPaymentMethods, withPaymentMethods } from '../utils/paymentMethods';
 import { INVOICE_TEMPLATES } from '../utils/invoiceTemplates';
 import { getDefaultLogoDataUrl, getDefaultStampDataUrl } from '../utils/defaultBranding';
-import { APP_THEMES, getQuickThemes, saveQuickThemes } from '../utils/themeConfig';
 
 export default function SettingsManager({
   onSettingsUpdated,
@@ -91,6 +79,7 @@ export default function SettingsManager({
     show_developer_credit: 1,
     default_invoice_template: 'classic',
     custom_brand_color: '',
+    custom_text_color: '',
     header_layout: 'split',
     signature_url: '',
     show_paid_stamp: 1,
@@ -102,113 +91,15 @@ export default function SettingsManager({
   const [resetMsg, setResetMsg] = useState('');
   const [wipeConfirm, setWipeConfirm] = useState('');
   const [purgeConfirm, setPurgeConfirm] = useState('');
-  const [quickPair, setQuickPair] = useState(getQuickThemes);
-  const [showCloudSync, setShowCloudSync] = useState(false);
-
-  const handleSetQuickSlot = (index, themeId) => {
-    const updated = [...quickPair];
-    updated[index] = themeId;
-    setQuickPair(updated);
-    saveQuickThemes(updated);
-    toast.success(`Header quick-toggle slot ${index + 1} updated to "${APP_THEMES.find((t) => t.id === themeId)?.name}"`);
-  };
-  const [restoreConfirm, setRestoreConfirm] = useState('');
-  const [pendingRestore, setPendingRestore] = useState(null);
-  const [snapshots, setSnapshots] = useState([]);
-  const [selectedVersions, setSelectedVersions] = useState([]);
-  const [pendingDelete, setPendingDelete] = useState(null);
+  const [backupModalOpen, setBackupModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState(null);
   const [reportMonth, setReportMonth] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
-  const fileRef = useRef(null);
-
-  const refreshSnapshots = async () => {
-    try {
-      const list = await listLocalSnapshots();
-      setSnapshots(list);
-      setSelectedVersions((prev) => prev.filter((id) => list.some((s) => s.id === id)));
-    } catch (err) {
-      console.warn(err);
-    }
-  };
-
-  const toggleVersionSelect = (id) => {
-    setSelectedVersions((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  };
-
-  const toggleSelectAllVersions = () => {
-    if (selectedVersions.length === snapshots.length) setSelectedVersions([]);
-    else setSelectedVersions(snapshots.map((s) => s.id));
-  };
-
-  const askDeleteVersion = (id, label) => {
-    setPendingDelete({
-      mode: 'one',
-      ids: [id],
-      title: 'Delete saved version?',
-      message: `Remove "${label || `version #${id}`}" from App versions. Phone/Drive copies are not deleted.`,
-    });
-  };
-
-  const askDeleteSelectedVersions = () => {
-    if (!selectedVersions.length) {
-      toast.info('Select one or more versions first');
-      return;
-    }
-    const n = selectedVersions.length;
-    setPendingDelete({
-      mode: 'many',
-      ids: [...selectedVersions],
-      title: `Delete ${n} selected version${n === 1 ? '' : 's'}?`,
-      message: 'Remove them from App versions. Phone/Drive copies are not deleted.',
-    });
-  };
 
   useEffect(() => {
-    if (!pendingDelete) return undefined;
-    const t = setTimeout(() => {
-      deleteConfirmRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }, 40);
-    return () => clearTimeout(t);
-  }, [pendingDelete]);
-
-  const cancelPendingDelete = () => setPendingDelete(null);
-
-  const confirmPendingDelete = async () => {
-    if (!pendingDelete?.ids?.length) return;
-    const ids = pendingDelete.ids;
-    setBusy(true);
-    try {
-      if (ids.length === 1) {
-        await deleteLocalSnapshot(ids[0]);
-        if (pendingRestore?.kind === 'version' && pendingRestore.id === ids[0]) {
-          setPendingRestore(null);
-          setRestoreConfirm('');
-        }
-        toast.success('Saved version deleted');
-      } else {
-        const n = await deleteLocalSnapshots(ids);
-        if (pendingRestore?.kind === 'version' && ids.includes(pendingRestore.id)) {
-          setPendingRestore(null);
-          setRestoreConfirm('');
-        }
-        setSelectedVersions([]);
-        toast.success(`Deleted ${n} saved version${n === 1 ? '' : 's'}`);
-      }
-      setPendingDelete(null);
-      await refreshSnapshots();
-    } catch (err) {
-      toast.error('Delete failed: ' + err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  useEffect(() => {
-    refreshSnapshots();
     checkBiometricAvailable().then((r) => setBioAvailable(Boolean(r.available)));
   }, []);
 
@@ -241,16 +132,8 @@ export default function SettingsManager({
 
   useEffect(() => {
     if (!focusBackup) return undefined;
-    const t = setTimeout(() => {
-      backupPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setBackupHighlight(true);
-      onFocusHandled?.();
-    }, 80);
-    const clear = setTimeout(() => setBackupHighlight(false), 2800);
-    return () => {
-      clearTimeout(t);
-      clearTimeout(clear);
-    };
+    setBackupModalOpen(true);
+    onFocusHandled?.();
   }, [focusBackup, onFocusHandled]);
 
   const handleChange = (field, value) => {
@@ -402,125 +285,7 @@ export default function SettingsManager({
     }
   };
 
-  const handleBackup = async () => {
-    setBusy(true);
-    try {
-      const result = await exportBackupFile({ offerShare: false });
-      const parts = [];
-      if (result.inApp) parts.push('App');
-      if (result.phoneSaved) parts.push('Phone storage');
-      if (!parts.length) {
-        toast.error('Backup did not save anywhere. Free storage and try again.');
-        return;
-      }
-      toast.success(`Backup saved (${parts.join(' + ')}): ${result.filename}`);
-      await refreshSnapshots();
-    } catch (err) {
-      toast.error('Backup failed: ' + err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
 
-  const handleShareBackup = async () => {
-    setBusy(true);
-    try {
-      const result = await exportBackupFile({ offerShare: true });
-      const base = [];
-      if (result.inApp) base.push('App');
-      if (result.phoneSaved) base.push('Phone');
-      if (!result.inApp && !result.phoneSaved && result.driveResult !== 'shared' && result.driveResult !== 'downloaded') {
-        toast.error('Backup did not save. Free storage, then try Backup to Drive again.');
-        return;
-      }
-      if (result.driveResult === 'shared') {
-        toast.success(
-          `${base.join(' + ') || 'Backup'} saved. Pick Google Drive in the share sheet.`
-        );
-      } else if (result.driveResult === 'cancelled') {
-        toast.info(
-          `${base.join(' + ') || 'Backup'} still saved in App${result.phoneSaved ? ' and Phone storage' : ''}. Drive share was cancelled.`
-        );
-      } else if (result.driveResult === 'downloaded') {
-        toast.success(`Backup file ready: ${result.filename}`);
-      } else {
-        toast.success(
-          `${base.join(' + ') || 'Backup'} saved${result.phonePath ? ` → ${result.phonePath}` : ''}.`
-        );
-      }
-      await refreshSnapshots();
-    } catch (err) {
-      if (err?.name === 'AbortError') {
-        toast.info('Share cancelled. Backup is still in App + Phone storage.');
-        await refreshSnapshots();
-      } else {
-        toast.error('Share failed: ' + err.message);
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const startFileRestore = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await readPickedFileText(file);
-      const payload = parseBackupPayload(text);
-      const summary = summarizeBackupPayload(payload);
-      setPendingRestore({
-        kind: 'file',
-        payload,
-        label: file.name || 'backup.json',
-        summary,
-      });
-      setRestoreConfirm('');
-      toast.success('Backup file loaded. Type CONFIRM below to restore.');
-    } catch (err) {
-      toast.error('Invalid backup file: ' + err.message);
-    } finally {
-      e.target.value = '';
-    }
-  };
-
-  const startVersionRestore = async (id) => {
-    const snap = snapshots.find((s) => s.id === id);
-    let summary = null;
-    try {
-      const full = await getLocalSnapshot(id);
-      if (full?.payload) summary = summarizeBackupPayload(full.payload);
-    } catch {
-      /* ignore */
-    }
-    setPendingRestore({ kind: 'version', id, label: snap?.filename || `version #${id}`, summary });
-    setRestoreConfirm('');
-  };
-
-  const executeRestore = async () => {
-    if (restoreConfirm.trim() !== 'CONFIRM') {
-      toast.error('Type CONFIRM to restore');
-      return;
-    }
-    if (!pendingRestore) return;
-    setBusy(true);
-    try {
-      if (pendingRestore.kind === 'version') {
-        await restoreFromLocalVersion(pendingRestore.id);
-      } else {
-        await restoreFromPayload(pendingRestore.payload);
-      }
-      toast.success('Backup restored. Reloading…');
-      setPendingRestore(null);
-      setRestoreConfirm('');
-      await refreshSnapshots();
-      if (onSettingsUpdated) onSettingsUpdated();
-      setTimeout(() => window.location.reload(), 400);
-    } catch (err) {
-      toast.error('Restore failed: ' + err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const loadMonthlyReport = async () => {
     const [y, m] = reportMonth.split('-').map(Number);
@@ -613,1016 +378,903 @@ export default function SettingsManager({
     }
   };
 
-  const lastAuto = getLastAutoBackupAt();
-  const lastPhonePath = getLastPhoneBackupPath();
+  const [activeCategory, setActiveCategory] = useState('all');
+  const [openSections, setOpenSections] = useState({
+    profile: true,
+    payments: false,
+    branding: false,
+    security: false,
+    reports: false,
+    devtools: false,
+  });
+
+  const toggleSection = (key) => {
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const handleSelectCategory = (cat) => {
+    setActiveCategory(cat);
+    if (cat !== 'all') {
+      setOpenSections((prev) => ({ ...prev, [cat]: true }));
+    }
+  };
+
+  const expandAllSections = () => {
+    setOpenSections({
+      profile: true,
+      payments: true,
+      branding: true,
+      security: true,
+      reports: true,
+      devtools: true,
+    });
+  };
+
+  const collapseAllSections = () => {
+    setOpenSections({
+      profile: false,
+      payments: false,
+      branding: false,
+      security: false,
+      reports: false,
+      devtools: false,
+    });
+  };
+
+  const shouldShow = (key) => activeCategory === 'all' || activeCategory === key;
 
   return (
-    <div style={{ maxWidth: '820px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div
-        id="settings-backup"
-        ref={backupPanelRef}
-        className={`glass-panel settings-backup-panel${backupHighlight ? ' is-focused' : ''}`}
-        style={{ padding: '1.5rem' }}
-      >
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <Download size={18} /> Backup & Restore
-        </h3>
+    <div className="settings-page-container">
+      {/* Hero Header Card */}
+      <div className="settings-hero-header">
+        <div className="settings-hero-main">
+          <div className="settings-brand-identity">
+            <div className="settings-brand-icon-halo">
+              <Sliders size={22} />
+            </div>
+            <div>
+              <h2 className="settings-hero-title">
+                Settings & Preferences
+              </h2>
+              <p className="settings-hero-subtitle">
+                Store identity, multi-bank accounts, billing templates, audio & security
+              </p>
+            </div>
+          </div>
 
-        {/* Embedded Firebase Cloud Sync Vault Panel (Featured at Top) */}
-        <FirebaseCloudSyncPanel
-          companyPhone={settings.company_phone}
-          appPin={settings.app_pin}
-          onRestoreComplete={refreshSnapshots}
-        />
-
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.65rem' }}>
-          Your shop data lives on this phone. Backups go to <b>3 places</b>: inside the app, phone folder <b>{PHONE_FOLDER}</b>, and (with Share) <b>Google Drive</b>.
-        </p>
-        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-          Last weekly auto-backup: {lastAuto ? new Date(lastAuto).toLocaleString() : 'never'} (App + phone folder every 7 days).
-        </p>
-        {lastPhonePath ? (
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
-            Last phone file: {lastPhonePath}
-          </p>
-        ) : (
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
-            Tip: tap <b>Backup to Drive</b>, then choose Google Drive → your folder.
-          </p>
-        )}
-        <div className="action-row" style={{ marginBottom: '1rem' }}>
-          <button type="button" className="btn-primary" disabled={busy} onClick={handleShareBackup}>
-            <Share2 size={16} /> Backup to Drive
-          </button>
-          <button type="button" className="btn-secondary" disabled={busy} onClick={handleBackup}>
-            <Download size={16} /> App + Phone only
-          </button>
-          <button type="button" className="btn-secondary" disabled={busy} onClick={() => fileRef.current?.click()}>
-            <Upload size={16} /> Restore from file
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/json,.json,text/plain,*/*"
-            style={{ display: 'none' }}
-            onChange={startFileRestore}
-          />
-        </div>
-
-        <h4 style={{ fontSize: '0.9rem', fontWeight: 800, marginBottom: '0.55rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-          <History size={16} /> Saved versions
-        </h4>
-        {snapshots.length === 0 ? (
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No local versions yet — run a backup first.</p>
-        ) : (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={selectedVersions.length === snapshots.length && snapshots.length > 0}
-                  onChange={toggleSelectAllVersions}
-                />
-                Select all ({snapshots.length})
-              </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+            <div className="settings-pills-bar">
               <button
                 type="button"
-                className="btn-danger"
-                style={{ width: 'auto', fontSize: '0.75rem', minHeight: 34 }}
-                disabled={busy || selectedVersions.length === 0}
-                onClick={askDeleteSelectedVersions}
+                className="settings-pill-btn"
+                onClick={expandAllSections}
               >
-                <Trash2 size={14} /> Delete selected{selectedVersions.length ? ` (${selectedVersions.length})` : ''}
+                Expand All
+              </button>
+              <span style={{ width: 1, height: 12, background: 'var(--border-color)', display: 'inline-block' }} />
+              <button
+                type="button"
+                className="settings-pill-btn"
+                onClick={collapseAllSections}
+              >
+                Collapse All
               </button>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: 260, overflowY: 'auto' }}>
-              {snapshots.map((s) => (
-                <div key={s.id} className="surface-block" style={{ padding: '0.55rem 0.7rem', display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', minWidth: 0, flex: 1, cursor: 'pointer' }}>
+
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleSubmit}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                padding: '0.45rem 1.15rem',
+                fontSize: '0.82rem',
+                borderRadius: 999,
+                width: 'auto',
+              }}
+            >
+              <Save size={15} /> Save All
+            </button>
+          </div>
+        </div>
+
+        {/* Quick Category Filter Pills */}
+        <div className="settings-category-bar">
+          {[
+            { id: 'all', label: 'All Settings', icon: Sliders },
+            { id: 'profile', label: 'Store Profile', icon: Building2 },
+            { id: 'payments', label: 'Banks & Accounts', icon: CreditCard, count: (settings.payment_methods || []).length },
+            { id: 'branding', label: 'Logo & Bill Design', icon: ImagePlus },
+            { id: 'security', label: 'Security & Audio', icon: ShieldCheck },
+            { id: 'reports', label: 'Sales Reports', icon: FileBarChart2 },
+            { id: 'devtools', label: 'System Tools', icon: Wrench },
+          ].map((cat) => {
+            const Icon = cat.icon;
+            const isActive = activeCategory === cat.id;
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                className={`settings-cat-chip ${isActive ? 'is-active' : ''}`}
+                onClick={() => handleSelectCategory(cat.id)}
+              >
+                <Icon size={14} />
+                <span>{cat.label}</span>
+                {cat.count !== undefined && (
+                  <span style={{ fontSize: '0.68rem', padding: '0.05rem 0.35rem', borderRadius: 999, background: isActive ? 'rgba(255,255,255,0.25)' : 'var(--surface-muted)' }}>
+                    {cat.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        {/* SECTION 1: Store Profile & Details */}
+        {shouldShow('profile') && (
+          <div className={`settings-card ${openSections.profile ? 'is-open' : ''}`}>
+            <button
+              type="button"
+              className="settings-card-header"
+              onClick={() => toggleSection('profile')}
+            >
+              <div className="settings-icon-avatar avatar-emerald">
+                <Building2 size={22} />
+              </div>
+              <div className="settings-header-meta">
+                <div className="settings-header-line">
+                  <h3 className="settings-header-name">Store Profile & Business Details</h3>
+                </div>
+                <p className="settings-header-desc">
+                  Company name, phone, email, currency, NTN tax ID, and address
+                </p>
+              </div>
+              <div className="settings-card-chevron">
+                <ChevronDown size={16} />
+              </div>
+            </button>
+
+            {openSections.profile && (
+              <div className="settings-card-body">
+                <div className="settings-form-grid responsive-grid" style={{ display: 'grid', gap: '1rem' }}>
+                  <div className="form-group">
+                    <label className="form-label">Store / Company Name</label>
+                    <input className="form-input" type="text" value={settings.company_name || ''} onChange={(e) => handleChange('company_name', e.target.value)} required />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Currency Symbol</label>
+                    <AppSelect
+                      value={settings.currency_symbol || 'Rs.'}
+                      onChange={(next) => handleChange('currency_symbol', next)}
+                      aria-label="Currency"
+                      options={[
+                        { value: 'Rs.', label: 'Rs. (PKR)' },
+                        { value: 'PKR', label: 'PKR' },
+                        { value: '$', label: '$' },
+                        { value: 'AED', label: 'AED' },
+                      ]}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Contact Phone</label>
+                    <input className="form-input" type="text" value={settings.company_phone || ''} onChange={(e) => handleChange('company_phone', e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Contact Email</label>
+                    <input className="form-input" type="email" value={settings.company_email || ''} onChange={(e) => handleChange('company_email', e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">NTN / Tax Registration #</label>
+                    <input className="form-input" type="text" value={settings.company_tax_id || ''} onChange={(e) => handleChange('company_tax_id', e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Default Tax Rate (%)</label>
+                    <input className="form-input" type="number" step="0.1" value={settings.default_tax_rate ?? 0} onChange={(e) => handleChange('default_tax_rate', parseFloat(e.target.value) || 0)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Low stock threshold</label>
+                    <input className="form-input" type="number" min="0" value={settings.low_stock_threshold ?? 5} onChange={(e) => handleChange('low_stock_threshold', e.target.value)} />
+                  </div>
+                </div>
+                <div className="form-group" style={{ marginTop: '0.85rem' }}>
+                  <label className="form-label">Store Address</label>
+                  <textarea className="form-textarea" rows={2} value={settings.company_address || ''} onChange={(e) => handleChange('company_address', e.target.value)} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SECTION 2: Bank & Payment Options */}
+        {shouldShow('payments') && (
+          <div className={`settings-card ${openSections.payments ? 'is-open' : ''}`}>
+            <button
+              type="button"
+              className="settings-card-header"
+              onClick={() => toggleSection('payments')}
+            >
+              <div className="settings-icon-avatar avatar-cyan">
+                <CreditCard size={22} />
+              </div>
+              <div className="settings-header-meta">
+                <div className="settings-header-line">
+                  <h3 className="settings-header-name">Bank & Payment Accounts</h3>
+                  <span className="settings-badge-pill">
+                    {(settings.payment_methods || []).length} Accounts
+                  </span>
+                </div>
+                <p className="settings-header-desc">
+                  Meezan, HBL, EasyPaisa, JazzCash, Raast, and payment instructions
+                </p>
+              </div>
+              <div className="settings-card-chevron">
+                <ChevronDown size={16} />
+              </div>
+            </button>
+
+            {openSections.payments && (
+              <div className="settings-card-body">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+                    Add every bank / wallet customers can pay into. Selectable per bill in the preview toolbar.
+                  </p>
+                  <button type="button" className="btn-secondary" style={{ width: 'auto', fontSize: '0.75rem', padding: '0.35rem 0.65rem' }} onClick={handleAddPaymentMethod}>
+                    <Plus size={13} /> Add Bank Option
+                  </button>
+                </div>
+
+                {(settings.payment_methods || []).map((method, index) => (
+                  <div
+                    key={method.id}
+                    className="surface-block"
+                    style={{ padding: '0.85rem', marginBottom: '0.75rem', border: '1px solid var(--border-color)', borderRadius: 14 }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.65rem' }}>
+                      <strong style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Account #{index + 1}</strong>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ width: 'auto', padding: '0.3rem 0.5rem', fontSize: '0.72rem', color: 'var(--danger)' }}
+                        onClick={() => handleRemovePaymentMethod(method.id)}
+                        title="Remove this option"
+                      >
+                        <Trash2 size={13} /> Remove
+                      </button>
+                    </div>
+                    <div className="settings-form-grid responsive-grid" style={{ display: 'grid', gap: '0.75rem' }}>
+                      <div className="form-group">
+                        <label className="form-label">Label</label>
+                        <input
+                          className="form-input"
+                          type="text"
+                          placeholder="e.g. Meezan, HBL, JazzCash"
+                          value={method.label || ''}
+                          onChange={(e) => handleMethodChange(method.id, 'label', e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Bank Name</label>
+                        <input
+                          className="form-input"
+                          type="text"
+                          value={method.bank_name || ''}
+                          onChange={(e) => handleMethodChange(method.id, 'bank_name', e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Account Title</label>
+                        <input
+                          className="form-input"
+                          type="text"
+                          value={method.account_title || ''}
+                          onChange={(e) => handleMethodChange(method.id, 'account_title', e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Account Number / IBAN</label>
+                        <input
+                          className="form-input"
+                          type="text"
+                          value={method.account_number || ''}
+                          onChange={(e) => handleMethodChange(method.id, 'account_number', e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Raast / Mobile Wallet #</label>
+                        <input
+                          className="form-input"
+                          type="text"
+                          value={method.mobile_wallet || ''}
+                          onChange={(e) => handleMethodChange(method.id, 'mobile_wallet', e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Notes (optional)</label>
+                        <input
+                          className="form-input"
+                          type="text"
+                          placeholder="Branch, special remarks, etc."
+                          value={method.notes || ''}
+                          onChange={(e) => handleMethodChange(method.id, 'notes', e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                <div className="form-group" style={{ marginTop: '0.75rem' }}>
+                  <label className="form-label">Payment Instructions (shared note on bills)</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    placeholder="e.g. Please share payment receipt on WhatsApp"
+                    value={settings.payment_instructions || ''}
+                    onChange={(e) => handleChange('payment_instructions', e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SECTION 3: Branding, Logo & Stamp */}
+        {shouldShow('branding') && (
+          <div className={`settings-card ${openSections.branding ? 'is-open' : ''}`}>
+            <button
+              type="button"
+              className="settings-card-header"
+              onClick={() => toggleSection('branding')}
+            >
+              <div className="settings-icon-avatar avatar-purple">
+                <ImagePlus size={22} />
+              </div>
+              <div className="settings-header-meta">
+                <div className="settings-header-line">
+                  <h3 className="settings-header-name">Logo, Stamp & Bill Styling</h3>
+                </div>
+                <p className="settings-header-desc">
+                  Official brand logo, seal stamp, Urdu Nastaliq typography, and PAID watermark
+                </p>
+              </div>
+              <div className="settings-card-chevron">
+                <ChevronDown size={16} />
+              </div>
+            </button>
+
+            {openSections.branding && (
+              <div className="settings-card-body">
+                <div className="responsive-grid" style={{ display: 'grid', gap: '1rem', marginBottom: '1rem' }}>
+                  {/* Logo Card */}
+                  <div className="surface-block" style={{ padding: '0.85rem 1rem', border: '1px solid var(--border-color)', borderRadius: 14 }}>
+                    <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: '0.45rem' }}>Company Logo</strong>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+                      {settings.logo_url ? (
+                        <img
+                          src={settings.logo_url}
+                          alt="Logo preview"
+                          style={{ width: 52, height: 52, objectFit: 'contain', borderRadius: 10, background: '#ffffff', border: '1px solid var(--border-color)' }}
+                        />
+                      ) : (
+                        <div style={{ width: 52, height: 52, borderRadius: 10, background: 'var(--surface-secondary)', display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.7rem' }}>
+                          Default logo
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                        <label className="btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}>
+                          <ImagePlus size={13} />
+                          {settings.logo_url ? 'Upload Custom' : 'Upload Logo'}
+                          <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoPick} />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+                          onClick={() => {
+                            handleChange('logo_url', getDefaultLogoDataUrl(settings.company_name));
+                            toast.success('Default brand logo applied');
+                          }}
+                        >
+                          Default Logo
+                        </button>
+                        {settings.logo_url && (
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem', color: 'var(--danger)' }}
+                            onClick={() => handleChange('logo_url', '')}
+                          >
+                            <Trash2 size={12} /> Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Stamp Card */}
+                  <div className="surface-block" style={{ padding: '0.85rem 1rem', border: '1px solid var(--border-color)', borderRadius: 14 }}>
+                    <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: '0.45rem' }}>Digital Signature / Seal Stamp</strong>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+                      {settings.signature_url ? (
+                        <img
+                          src={settings.signature_url}
+                          alt="Signature preview"
+                          style={{ width: 52, height: 52, objectFit: 'contain', borderRadius: 10, background: '#ffffff', border: '1px solid var(--border-color)' }}
+                        />
+                      ) : (
+                        <div style={{ width: 52, height: 52, borderRadius: 10, background: 'var(--surface-secondary)', display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.7rem', textAlign: 'center' }}>
+                          No stamp
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                        <label className="btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}>
+                          <ImagePlus size={13} />
+                          {settings.signature_url ? 'Upload Custom' : 'Upload Stamp'}
+                          <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleSignaturePick} />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+                          onClick={() => {
+                            handleChange('signature_url', getDefaultStampDataUrl(settings.company_name));
+                            toast.success('Default official seal applied');
+                          }}
+                        >
+                          Default Seal
+                        </button>
+                        {settings.signature_url && (
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem', color: 'var(--danger)' }}
+                            onClick={() => handleChange('signature_url', '')}
+                          >
+                            <Trash2 size={12} /> Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Toggles */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                  <label className="settings-toggle-row">
+                    <div className="settings-toggle-info">
+                      <span className="settings-toggle-label">
+                        Bilingual English + Urdu labels (Nastaliq)
+                      </span>
+                      <span className="settings-toggle-hint">
+                        Render Nastaliq font labels on PDF invoices, thermal slips and receipts
+                      </span>
+                    </div>
                     <input
                       type="checkbox"
-                      checked={selectedVersions.includes(s.id)}
-                      onChange={() => toggleVersionSelect(s.id)}
-                      style={{ marginTop: 3 }}
+                      style={{ width: 18, height: 18 }}
+                      checked={Boolean(Number(settings.urdu_labels))}
+                      onChange={(e) => handleChange('urdu_labels', e.target.checked ? 1 : 0)}
                     />
-                    <span style={{ fontSize: '0.78rem', minWidth: 0 }}>
-                      <span style={{ fontWeight: 700, display: 'block', overflowWrap: 'anywhere' }}>{s.filename}</span>
-                      <span style={{ color: 'var(--text-muted)' }}>{s.reason} · {new Date(s.created_at).toLocaleString()}</span>
-                    </span>
                   </label>
-                  <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+
+                  <label className="settings-toggle-row">
+                    <div className="settings-toggle-info">
+                      <span className="settings-toggle-label">
+                        Digital "PAID / وصول شدہ" stamp watermark
+                      </span>
+                      <span className="settings-toggle-hint">
+                        Display official luxury watermark when total balance is fully paid
+                      </span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      style={{ width: 18, height: 18 }}
+                      checked={settings.show_paid_stamp !== 0 && settings.show_paid_stamp !== false}
+                      onChange={(e) => handleChange('show_paid_stamp', e.target.checked ? 1 : 0)}
+                    />
+                  </label>
+
+                  <label className="settings-toggle-row">
+                    <div className="settings-toggle-info">
+                      <span className="settings-toggle-label">
+                        Show developer credit badge on bills
+                      </span>
+                      <span className="settings-toggle-hint">
+                        Display discreet footer badge acknowledging app author
+                      </span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      style={{ width: 18, height: 18 }}
+                      checked={settings.show_developer_credit !== 0 && settings.show_developer_credit !== false}
+                      onChange={(e) => handleChange('show_developer_credit', e.target.checked ? 1 : 0)}
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SECTION 4: Security, Notifications & Audio */}
+        {shouldShow('security') && (
+          <div className={`settings-card ${openSections.security ? 'is-open' : ''}`}>
+            <button
+              type="button"
+              className="settings-card-header"
+              onClick={() => toggleSection('security')}
+            >
+              <div className="settings-icon-avatar avatar-amber">
+                <ShieldCheck size={22} />
+              </div>
+              <div className="settings-header-meta">
+                <div className="settings-header-line">
+                  <h3 className="settings-header-name">Security, Alerts & Sound</h3>
+                </div>
+                <p className="settings-header-desc">
+                  Staff PIN lock, biometric fingerprint, due reminders, and luxury audio chimes
+                </p>
+              </div>
+              <div className="settings-card-chevron">
+                <ChevronDown size={16} />
+              </div>
+            </button>
+
+            {openSections.security && (
+              <div className="settings-card-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Staff PIN Lock (leave blank for no lock)</label>
+                  <input className="form-input" type="password" inputMode="numeric" placeholder="e.g. 1234" value={settings.app_pin || ''} onChange={(e) => handleChange('app_pin', e.target.value)} />
+                </div>
+
+                {/* Fingerprint Toggle */}
+                <div className="settings-toggle-row">
+                  <div className="settings-toggle-info">
+                    <span className="settings-toggle-label">
+                      <Fingerprint size={16} /> Unlock with fingerprint
+                    </span>
+                    <span className="settings-toggle-hint">
+                      Off by default. {bioAvailable ? 'Device biometric sensor is ready.' : '(Sensor not detected on this browser/device.)'}
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    style={{ width: 18, height: 18 }}
+                    checked={Boolean(Number(settings.biometric_lock))}
+                    onChange={(e) => {
+                      if (e.target.checked && !bioAvailable) {
+                        toast.info('Fingerprint is not available on this device yet. Rebuild the APK after installing the biometric plugin.');
+                      }
+                      if (e.target.checked && !(settings.app_pin && String(settings.app_pin).trim())) {
+                        toast.info('Tip: also set a Staff PIN as a backup unlock method.');
+                      }
+                      handleChange('biometric_lock', e.target.checked ? 1 : 0);
+                    }}
+                  />
+                </div>
+
+                {/* Due Date Notifications Toggle */}
+                <div className="settings-toggle-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div className="settings-toggle-info">
+                      <span className="settings-toggle-label">
+                        <Bell size={16} /> Due-date notifications
+                      </span>
+                      <span className="settings-toggle-hint">
+                        Daily at 10:00 AM on Android APK to notify you about overdue client bills.
+                      </span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      style={{ width: 18, height: 18 }}
+                      checked={Boolean(Number(settings.due_reminders))}
+                      onChange={async (e) => {
+                        const on = e.target.checked;
+                        handleChange('due_reminders', on ? 1 : 0);
+                        if (on) {
+                          const perm = await requestDueReminderPermission();
+                          if (!perm.granted && perm.reason !== 'web') {
+                            toast.info('Allow notifications when Android asks, then save settings.');
+                          } else if (perm.reason === 'web') {
+                            toast.info('Due reminders work on the phone APK (Android notifications).');
+                          } else {
+                            toast.success('Due reminders will alert you about overdue bills.');
+                          }
+                        } else {
+                          cancelDueReminders().catch(() => {});
+                        }
+                      }}
+                    />
+                  </div>
+                  {Boolean(Number(settings.due_reminders)) && (
                     <button
                       type="button"
                       className="btn-secondary"
-                      style={{ width: 'auto', fontSize: '0.75rem' }}
+                      style={{ width: 'auto', marginTop: '0.65rem', fontSize: '0.75rem', padding: '0.3rem 0.65rem', alignSelf: 'flex-start' }}
                       disabled={busy}
                       onClick={async () => {
                         try {
-                          await shareLocalSnapshot(s.id);
+                          const result = await sendTestDueNotification(settings);
+                          if (!result.ok && result.reason === 'web') {
+                            toast.info('Test notification only works on the Android APK.');
+                          } else if (!result.ok) {
+                            toast.error('Allow notifications in Android settings, then try again.');
+                          } else {
+                            toast.success('Test notification sent — check the shade in ~1s.');
+                          }
                         } catch (err) {
-                          if (err?.name !== 'AbortError') toast.error(err.message);
+                          toast.error('Notification test failed: ' + (err.message || err));
                         }
                       }}
                     >
-                      Share
+                      <Bell size={13} /> Send test notification
                     </button>
-                    <button type="button" className="btn-secondary" style={{ width: 'auto', fontSize: '0.75rem' }} onClick={() => startVersionRestore(s.id)}>
-                      Restore
+                  )}
+                </div>
+
+                {/* Sound Effects Toggle */}
+                <div className="settings-toggle-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div className="settings-toggle-info">
+                      <span className="settings-toggle-label">
+                        <Volume2 size={16} /> Luxury Audio & Sound Effects
+                      </span>
+                      <span className="settings-toggle-hint">
+                        Subtle luxury clicks on button taps and melodic chimes on payment & bill saving.
+                      </span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      style={{ width: 18, height: 18 }}
+                      checked={settings.sound_effects !== 0 && settings.sound_effects !== false}
+                      onChange={(e) => {
+                        const on = e.target.checked;
+                        handleChange('sound_effects', on ? 1 : 0);
+                        setSoundEnabled(on);
+                        if (on) {
+                          playSuccessChime();
+                          toast.success('Audio sound effects enabled');
+                        } else {
+                          toast.info('Audio sound effects disabled');
+                        }
+                      }}
+                    />
+                  </div>
+                  {(settings.sound_effects !== 0 && settings.sound_effects !== false) && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ width: 'auto', marginTop: '0.65rem', fontSize: '0.75rem', padding: '0.3rem 0.65rem', alignSelf: 'flex-start' }}
+                      onClick={() => {
+                        playSuccessChime();
+                        toast.success('Playing audio chime preview 🔔');
+                      }}
+                    >
+                      <Volume2 size={13} /> Test sound effect
                     </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SECTION 5: Monthly Sales Report */}
+        {shouldShow('reports') && (
+          <div className={`settings-card ${openSections.reports ? 'is-open' : ''}`}>
+            <button
+              type="button"
+              className="settings-card-header"
+              onClick={() => toggleSection('reports')}
+            >
+              <div className="settings-icon-avatar avatar-indigo">
+                <FileBarChart2 size={22} />
+              </div>
+              <div className="settings-header-meta">
+                <div className="settings-header-line">
+                  <h3 className="settings-header-name">Monthly Financial Reports</h3>
+                </div>
+                <p className="settings-header-desc">
+                  View period totals, buying costs, estimated profit, and export PDF/CSV
+                </p>
+              </div>
+              <div className="settings-card-chevron">
+                <ChevronDown size={16} />
+              </div>
+            </button>
+
+            {openSections.reports && (
+              <div className="settings-card-body">
+                <div className="action-row" style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <input className="form-input" type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} style={{ width: 'auto', minWidth: 160 }} />
+                  <button type="button" className="btn-secondary" onClick={loadMonthlyReport} style={{ width: 'auto' }}>Load Report</button>
+                  {report && (
+                    <>
+                      <button type="button" className="btn-secondary" onClick={exportReportCsv} style={{ width: 'auto' }}>Export CSV</button>
+                      <button type="button" className="btn-secondary" onClick={exportReportPdf} style={{ width: 'auto' }}>Export PDF</button>
+                    </>
+                  )}
+                </div>
+                {report && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
+                    <div className="surface-block" style={{ padding: '0.75rem', borderRadius: 12 }}>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Sales total</div>
+                      <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', fontSize: '0.95rem' }}>{formatCurrency(settings.currency_symbol || 'Rs.', report.sales_total)}</div>
+                    </div>
+                    <div className="surface-block" style={{ padding: '0.75rem', borderRadius: 12 }}>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Collected</div>
+                      <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', fontSize: '0.95rem' }}>{formatCurrency(settings.currency_symbol || 'Rs.', report.sales_paid)}</div>
+                    </div>
+                    <div className="surface-block" style={{ padding: '0.75rem', borderRadius: 12 }}>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Buying cost</div>
+                      <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', fontSize: '0.95rem' }}>{formatCurrency(settings.currency_symbol || 'Rs.', report.buying_total)}</div>
+                    </div>
+                    <div className="surface-block" style={{ padding: '0.75rem', borderRadius: 12 }}>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Est. profit</div>
+                      <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', fontSize: '0.95rem', color: 'var(--success)' }}>{formatCurrency(settings.currency_symbol || 'Rs.', report.estimated_profit)}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SECTION 6: Developer Tools & Database Maintenance */}
+        {shouldShow('devtools') && (
+          <div className={`settings-card ${openSections.devtools ? 'is-open' : ''}`}>
+            <button
+              type="button"
+              className="settings-card-header"
+              onClick={() => toggleSection('devtools')}
+            >
+              <div className="settings-icon-avatar avatar-rose">
+                <Wrench size={22} />
+              </div>
+              <div className="settings-header-meta">
+                <div className="settings-header-line">
+                  <h3 className="settings-header-name">System Maintenance & Database</h3>
+                </div>
+                <p className="settings-header-desc">
+                  Generate mock products & sample bills, remove test records, and nuclear database wipe
+                </p>
+              </div>
+              <div className="settings-card-chevron">
+                <ChevronDown size={16} />
+              </div>
+            </button>
+
+            {openSections.devtools && (
+              <div className="settings-card-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {/* Seed Realistic Mock Data */}
+                <div className="surface-block" style={{ padding: '1rem', border: '1px solid rgba(56, 189, 248, 0.3)', background: 'rgba(56, 189, 248, 0.05)', borderRadius: 14 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    <div>
+                      <h4 style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--info, #38bdf8)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Database size={15} /> Populate Mock Data for Testing
+                      </h4>
+                      <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                        Instantly generates realistic chocolate products (truffles, pralines, bars), customer accounts, and sample sales invoices with receipts.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      disabled={busy}
+                      style={{
+                        background: 'linear-gradient(135deg, #38bdf8, #0284c7)',
+                        color: '#ffffff',
+                        fontWeight: 800,
+                        padding: '0.45rem 1rem',
+                        fontSize: '0.78rem',
+                        width: 'auto',
+                        alignSelf: 'flex-start',
+                      }}
+                      onClick={async () => {
+                        setBusy(true);
+                        try {
+                          toast.info('Generating mock products, customers, and bills...');
+                          const res = await populateMockDatabase();
+                          toast.success(`🎉 Mock Data Created! Generated ${res.products} products, ${res.customers} clients, and ${res.bills} sample bills.`);
+                          if (onSettingsUpdated) onSettingsUpdated();
+                        } catch (err) {
+                          toast.error('Mock data generation failed: ' + err.message);
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      <Database size={14} /> Generate Mock Test Data
+                    </button>
+                  </div>
+                </div>
+
+                {/* Remove test records */}
+                <div className="surface-block" style={{ padding: '1rem', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)', borderRadius: 14 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    <div>
+                      <h4 style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--danger)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <AlertTriangle size={15} /> Remove test records
+                      </h4>
+                      <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                        Deletes dummy clients and bills (names with Test, dummy, @example.com). Real clients are left alone.
+                      </p>
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Type PURGE to enable</label>
+                      <input
+                        className="form-input"
+                        value={purgeConfirm}
+                        onChange={(e) => setPurgeConfirm(e.target.value)}
+                        placeholder="PURGE"
+                        autoComplete="off"
+                      />
+                    </div>
                     <button
                       type="button"
                       className="btn-danger"
-                      style={{ width: 'auto', fontSize: '0.75rem', padding: '0.35rem 0.55rem' }}
-                      disabled={busy}
-                      title="Delete this saved version"
-                      onClick={() => askDeleteVersion(s.id, s.filename)}
+                      onClick={handlePurgeDemo}
+                      disabled={busy || purgeConfirm.trim() !== 'PURGE'}
+                      style={{ padding: '0.45rem 1rem', fontSize: '0.78rem', width: 'auto', alignSelf: 'flex-start' }}
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={14} /> Remove test records
                     </button>
                   </div>
                 </div>
-              ))}
-            </div>
-          </>
-        )}
 
-        {pendingDelete && (
-          <div
-            ref={deleteConfirmRef}
-            className="backup-delete-confirm"
-            role="dialog"
-            aria-labelledby="backup-delete-title"
-          >
-            <div className="backup-delete-confirm-icon" aria-hidden>
-              <AlertTriangle size={18} />
-            </div>
-            <div className="backup-delete-confirm-copy">
-              <h4 id="backup-delete-title">{pendingDelete.title}</h4>
-              <p>{pendingDelete.message}</p>
-            </div>
-            <div className="backup-delete-confirm-actions">
-              <button type="button" className="btn-secondary" disabled={busy} onClick={cancelPendingDelete}>
-                Cancel
-              </button>
-              <button type="button" className="btn-danger confirm-dialog-delete" disabled={busy} onClick={confirmPendingDelete}>
-                <Trash2 size={14} /> Delete
-              </button>
-            </div>
-          </div>
-        )}
-
-        {pendingRestore && (
-          <div style={{ marginTop: '1rem', padding: '0.9rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(180,83,9,0.35)', background: 'rgba(180,83,9,0.08)' }}>
-            <p style={{ fontSize: '0.85rem', marginBottom: '0.55rem' }}>
-              Restore <strong>{pendingRestore.label}</strong> will replace current shop data. A pre-restore safety copy is required first.
-              {pendingRestore.summary ? (
-                <>
-                  {' '}
-                  This file has {pendingRestore.summary.bills} bills, {pendingRestore.summary.customers} customers,{' '}
-                  {pendingRestore.summary.products} products.
-                </>
-              ) : null}{' '}
-              Type <strong>CONFIRM</strong>:
-            </p>
-            <input
-              className="form-input"
-              value={restoreConfirm}
-              onChange={(e) => setRestoreConfirm(e.target.value)}
-              placeholder="CONFIRM"
-              autoComplete="off"
-            />
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem', flexWrap: 'wrap' }}>
-              <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={busy} onClick={executeRestore}>
-                Restore now
-              </button>
-              <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={() => { setPendingRestore(null); setRestoreConfirm(''); }}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <form onSubmit={handleSubmit} className="glass-panel" style={{ padding: '1.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.85rem' }}>
-          <div>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Settings size={20} style={{ color: 'var(--accent-teal)' }} /> Store Profile & Currency Settings
-            </h2>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Configure business details, PIN lock, and invoice language</p>
-          </div>
-          {savedMsg && (
-            <div style={{ background: 'rgba(16,185,129,0.2)', color: 'var(--success)', padding: '0.4rem 0.8rem', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-              <Check size={14} /> Saved!
-            </div>
-          )}
-        </div>
-
-        <div className="settings-form-grid responsive-grid" style={{ display: 'grid', gap: '1rem' }}>
-          <div className="form-group">
-            <label className="form-label">Store / Company Name</label>
-            <input className="form-input" type="text" value={settings.company_name || ''} onChange={(e) => handleChange('company_name', e.target.value)} required />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Currency Symbol</label>
-            <AppSelect
-              value={settings.currency_symbol || 'Rs.'}
-              onChange={(next) => handleChange('currency_symbol', next)}
-              aria-label="Currency"
-              options={[
-                { value: 'Rs.', label: 'Rs. (PKR)' },
-                { value: 'PKR', label: 'PKR' },
-                { value: '$', label: '$' },
-                { value: 'AED', label: 'AED' },
-              ]}
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Contact Phone</label>
-            <input className="form-input" type="text" value={settings.company_phone || ''} onChange={(e) => handleChange('company_phone', e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Contact Email</label>
-            <input className="form-input" type="email" value={settings.company_email || ''} onChange={(e) => handleChange('company_email', e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">NTN / Tax Registration #</label>
-            <input className="form-input" type="text" value={settings.company_tax_id || ''} onChange={(e) => handleChange('company_tax_id', e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Default Tax Rate (%)</label>
-            <input className="form-input" type="number" step="0.1" value={settings.default_tax_rate ?? 0} onChange={(e) => handleChange('default_tax_rate', parseFloat(e.target.value) || 0)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Staff PIN (blank = no PIN lock)</label>
-            <input className="form-input" type="password" inputMode="numeric" placeholder="e.g. 1234" value={settings.app_pin || ''} onChange={(e) => handleChange('app_pin', e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Low stock threshold</label>
-            <input className="form-input" type="number" min="0" value={settings.low_stock_threshold ?? 5} onChange={(e) => handleChange('low_stock_threshold', e.target.value)} />
-          </div>
-        </div>
-
-        <div className="surface-block" style={{ marginTop: '1rem', padding: '0.9rem 1rem' }}>
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', fontSize: '0.9rem', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              style={{ marginTop: 3 }}
-              checked={Boolean(Number(settings.biometric_lock))}
-              onChange={(e) => {
-                if (e.target.checked && !bioAvailable) {
-                  toast.info('Fingerprint is not available on this device yet. Rebuild the APK after installing the biometric plugin.');
-                }
-                if (e.target.checked && !(settings.app_pin && String(settings.app_pin).trim())) {
-                  toast.info('Tip: also set a Staff PIN as a backup unlock method.');
-                }
-                handleChange('biometric_lock', e.target.checked ? 1 : 0);
-              }}
-            />
-            <span>
-              <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <Fingerprint size={16} /> Unlock with fingerprint
-              </strong>
-              <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                Off by default — the app will never ask for fingerprint until you turn this on yourself.
-                {bioAvailable ? ' Device fingerprint is ready.' : ' (Sensor not detected on this device.)'}
-              </span>
-            </span>
-          </label>
-        </div>
-
-        <div className="surface-block" style={{ marginTop: '0.75rem', padding: '0.9rem 1rem' }}>
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', fontSize: '0.9rem', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              style={{ marginTop: 3 }}
-              checked={Boolean(Number(settings.due_reminders))}
-              onChange={async (e) => {
-                const on = e.target.checked;
-                handleChange('due_reminders', on ? 1 : 0);
-                if (on) {
-                  const perm = await requestDueReminderPermission();
-                  if (!perm.granted && perm.reason !== 'web') {
-                    toast.info('Allow notifications when Android asks, then save settings.');
-                  } else if (perm.reason === 'web') {
-                    toast.info('Due reminders work on the phone APK (Android notifications).');
-                  } else {
-                    toast.success('Due reminders will alert you about overdue bills.');
-                  }
-                } else {
-                  cancelDueReminders().catch(() => {});
-                }
-              }}
-            />
-            <span>
-              <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <Bell size={16} /> Due-date notifications
-              </strong>
-              <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                Off by default. When on, the phone reminds you of overdue / due-today bills (daily at 10:00). Save settings after turning on.
-              </span>
-            </span>
-          </label>
-          {Boolean(Number(settings.due_reminders)) && (
-            <button
-              type="button"
-              className="btn-secondary"
-              style={{ width: 'auto', marginTop: '0.75rem', fontSize: '0.78rem' }}
-              disabled={busy}
-              onClick={async () => {
-                try {
-                  const result = await sendTestDueNotification(settings);
-                  if (!result.ok && result.reason === 'web') {
-                    toast.info('Test notification only works on the Android APK.');
-                  } else if (!result.ok) {
-                    toast.error('Allow notifications in Android settings, then try again.');
-                  } else {
-                    toast.success('Test notification sent — check the shade in ~1s.');
-                  }
-                } catch (err) {
-                  toast.error('Notification test failed: ' + (err.message || err));
-                }
-              }}
-            >
-              <Bell size={14} /> Send test notification
-            </button>
-          )}
-        </div>
-
-        <div className="surface-block" style={{ marginTop: '0.75rem', padding: '0.9rem 1rem' }}>
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', fontSize: '0.9rem', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              style={{ marginTop: 3 }}
-              checked={settings.sound_effects !== 0 && settings.sound_effects !== false}
-              onChange={(e) => {
-                const on = e.target.checked;
-                handleChange('sound_effects', on ? 1 : 0);
-                setSoundEnabled(on);
-                if (on) {
-                  playSuccessChime();
-                  toast.success('Audio sound effects enabled');
-                } else {
-                  toast.info('Audio sound effects disabled');
-                }
-              }}
-            />
-            <span>
-              <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <Volume2 size={16} /> Luxury Audio & Sound Effects
-              </strong>
-              <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                Subtle luxury clicks on button taps and melodic chimes on payment, saving bills, and starring. Can be turned off anytime.
-              </span>
-            </span>
-          </label>
-          {(settings.sound_effects !== 0 && settings.sound_effects !== false) && (
-            <button
-              type="button"
-              className="btn-secondary"
-              style={{ width: 'auto', marginTop: '0.75rem', fontSize: '0.78rem' }}
-              onClick={() => {
-                playSuccessChime();
-                toast.success('Playing audio chime preview 🔔');
-              }}
-            >
-              <Volume2 size={14} /> Test sound effect
-            </button>
-          )}
-        </div>
-
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginTop: '0.75rem', fontSize: '0.9rem', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={Boolean(Number(settings.urdu_labels))}
-            onChange={(e) => handleChange('urdu_labels', e.target.checked ? 1 : 0)}
-          />
-          Show bilingual English + Urdu labels on invoices / receipts (Noto Nastaliq)
-        </label>
-
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginTop: '0.75rem', fontSize: '0.9rem', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={settings.show_developer_credit !== 0 && settings.show_developer_credit !== false}
-            onChange={(e) => handleChange('show_developer_credit', e.target.checked ? 1 : 0)}
-          />
-          Show developer name on invoices / bills
-        </label>
-
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginTop: '0.75rem', fontSize: '0.9rem', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={settings.show_paid_stamp !== 0 && settings.show_paid_stamp !== false}
-            onChange={(e) => handleChange('show_paid_stamp', e.target.checked ? 1 : 0)}
-          />
-          Show digital "PAID / وصول شدہ" stamp watermark on fully paid bills
-        </label>
-
-        {/* Business Logo & Signature / Stamp Upload */}
-        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
-            <ImagePlus size={16} style={{ color: 'var(--primary, #00b3a6)' }} />
-            <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>Company Logo & Signature / Stamp</h4>
-          </div>
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
-            Upload your shop or company logo to replace the default icon, and an optional digital signature or official stamp.
-          </p>
-          <div className="responsive-grid" style={{ display: 'grid', gap: '1rem' }}>
-            {/* Logo Upload Card */}
-            <div className="surface-block" style={{ padding: '0.85rem 1rem', border: '1px solid var(--border-color)', borderRadius: 10 }}>
-              <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: '0.45rem' }}>Company Logo</strong>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
-                {settings.logo_url ? (
-                  <img
-                    src={settings.logo_url}
-                    alt="Logo preview"
-                    style={{ width: 52, height: 52, objectFit: 'contain', borderRadius: 8, background: '#ffffff', border: '1px solid var(--border-color)' }}
-                  />
-                ) : (
-                  <div style={{ width: 52, height: 52, borderRadius: 8, background: 'var(--surface-secondary)', display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.7rem' }}>
-                    Default logo
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <label className="btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', padding: '0.35rem 0.65rem' }}>
-                    <ImagePlus size={14} />
-                    {settings.logo_url ? 'Upload Custom' : 'Upload Logo'}
-                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoPick} />
-                  </label>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem' }}
-                    onClick={() => {
-                      handleChange('logo_url', getDefaultLogoDataUrl(settings.company_name));
-                      toast.success('Default brand logo applied');
-                    }}
-                  >
-                    Use Default Logo
-                  </button>
-                  {settings.logo_url && (
+                {/* Nuclear wipe */}
+                <div className="surface-block" style={{ padding: '1rem', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)', borderRadius: 14 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    <div>
+                      <h4 style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--danger)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <AlertTriangle size={15} /> Clean / Reset Database
+                      </h4>
+                      <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                        Nuclear wipe of bills, catalog, and clients. An automatic pre-wipe backup snapshot is created first.
+                      </p>
+                      {resetMsg && <p style={{ color: 'var(--success)', fontWeight: 700, fontSize: '0.85rem', marginTop: '0.5rem' }}>{resetMsg}</p>}
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Type DELETE to enable wipe</label>
+                      <input
+                        className="form-input"
+                        value={wipeConfirm}
+                        onChange={(e) => setWipeConfirm(e.target.value)}
+                        placeholder="DELETE"
+                        autoComplete="off"
+                      />
+                    </div>
                     <button
                       type="button"
-                      className="btn-secondary"
-                      style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem', color: 'var(--danger)' }}
-                      onClick={() => handleChange('logo_url', '')}
+                      className="btn-danger"
+                      onClick={handleResetDb}
+                      disabled={busy || wipeConfirm.trim() !== 'DELETE'}
+                      style={{ padding: '0.45rem 1rem', fontSize: '0.78rem', width: 'auto', alignSelf: 'flex-start' }}
                     >
-                      <Trash2 size={13} /> Clear
+                      <Trash2 size={14} /> Wipe All Data
                     </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Signature / Stamp Upload Card */}
-            <div className="surface-block" style={{ padding: '0.85rem 1rem', border: '1px solid var(--border-color)', borderRadius: 10 }}>
-              <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: '0.45rem' }}>Digital Signature / Official Stamp</strong>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
-                {settings.signature_url ? (
-                  <img
-                    src={settings.signature_url}
-                    alt="Signature preview"
-                    style={{ width: 52, height: 52, objectFit: 'contain', borderRadius: 8, background: '#ffffff', border: '1px solid var(--border-color)' }}
-                  />
-                ) : (
-                  <div style={{ width: 52, height: 52, borderRadius: 8, background: 'var(--surface-secondary)', display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.7rem', textAlign: 'center' }}>
-                    No stamp
                   </div>
-                )}
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <label className="btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', padding: '0.35rem 0.65rem' }}>
-                    <ImagePlus size={14} />
-                    {settings.signature_url ? 'Upload Custom' : 'Upload Image'}
-                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleSignaturePick} />
-                  </label>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem' }}
-                    onClick={() => {
-                      handleChange('signature_url', getDefaultStampDataUrl(settings.company_name));
-                      toast.success('Default official seal stamp applied');
-                    }}
-                  >
-                    Use Default Stamp
-                  </button>
-                  {settings.signature_url && (
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem', color: 'var(--danger)' }}
-                      onClick={() => handleChange('signature_url', '')}
-                    >
-                      <Trash2 size={13} /> Clear
-                    </button>
-                  )}
                 </div>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Floating / Sticky Save Action Bar */}
+        <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+          {savedMsg ? (
+            <div style={{ background: 'rgba(16,185,129,0.2)', color: 'var(--success)', padding: '0.45rem 0.9rem', borderRadius: 8, fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <Check size={15} /> Settings Saved Successfully!
             </div>
-          </div>
-        </div>
-
-        {/* Custom Brand Accent Color Picker */}
-        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
-            <Palette size={16} style={{ color: 'var(--primary, #00b3a6)' }} />
-            <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>Custom Brand Color</h4>
-          </div>
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
-            Override the bill accent color with your business's exact color palette.
-          </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
-            {[
-              { label: 'Default', hex: '' },
-              { label: 'Teal', hex: '#00b3a6' },
-              { label: 'Sapphire', hex: '#2563eb' },
-              { label: 'Emerald', hex: '#059669' },
-              { label: 'Ruby', hex: '#dc2626' },
-              { label: 'Amber', hex: '#ea580c' },
-              { label: 'Purple', hex: '#7c3aed' },
-              { label: 'Slate', hex: '#0f172a' },
-            ].map((swatch) => {
-              const active = (settings.custom_brand_color || '') === swatch.hex;
-              return (
-                <button
-                  key={swatch.label}
-                  type="button"
-                  onClick={() => handleChange('custom_brand_color', swatch.hex)}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 7,
-                    padding: '0.4rem 0.8rem',
-                    borderRadius: 999,
-                    border: active ? '2px solid var(--accent-teal)' : '1px solid var(--border-color)',
-                    background: active ? 'color-mix(in srgb, var(--accent-teal) 18%, transparent)' : 'var(--surface-muted)',
-                    color: 'var(--text-primary)',
-                    cursor: 'pointer',
-                    fontSize: '0.82rem',
-                    fontWeight: active ? 800 : 600,
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 12,
-                      height: 12,
-                      borderRadius: '50%',
-                      backgroundColor: swatch.hex || '#00b3a6',
-                      border: swatch.hex ? 'none' : '1px dashed #888',
-                      display: 'inline-block',
-                      flexShrink: 0,
-                    }}
-                  />
-                  <span style={{ color: 'var(--text-primary)' }}>{swatch.label}</span>
-                </button>
-              );
-            })}
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 6 }}>
-              <input
-                type="color"
-                value={settings.custom_brand_color || '#00b3a6'}
-                onChange={(e) => handleChange('custom_brand_color', e.target.value)}
-                style={{ width: 34, height: 34, padding: 2, border: '1px solid var(--border-color)', borderRadius: 8, cursor: 'pointer', background: 'var(--surface-muted)' }}
-                title="Pick exact hex color"
-              />
-              <span style={{ fontSize: '0.80rem', color: 'var(--text-primary)', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-                {settings.custom_brand_color || 'Template Default'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Header Layout Selector */}
-        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
-            <Layout size={16} style={{ color: 'var(--primary, #00b3a6)' }} />
-            <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>Header Layout Style</h4>
-          </div>
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
-            Choose how your logo, business details, and invoice meta are organized at the top of the bill.
-          </p>
-          <div className="template-picker-grid">
-            {[
-              { id: 'split', name: 'Modern Split (Default)', desc: 'Logo and company details on the left, invoice summary on the right.' },
-              { id: 'banner', name: 'Full Banner', desc: 'Prominent header banner with glassmorphism invoice card.' },
-              { id: 'centered', name: 'Centered Letterhead', desc: 'Elegant boutique style with centered logo and business title.' },
-            ].map((layout) => {
-              const active = (settings.header_layout || 'split') === layout.id;
-              return (
-                <button
-                  key={layout.id}
-                  type="button"
-                  className={`template-card ${active ? 'is-active' : ''}`}
-                  onClick={() => handleChange('header_layout', layout.id)}
-                >
-                  <div className="template-card-header">
-                    <strong style={{ fontSize: '0.86rem' }}>{layout.name}</strong>
-                    {active ? <Check size={16} style={{ color: 'var(--primary, #00b3a6)' }} /> : null}
-                  </div>
-                  <div className="template-card-tagline">{layout.desc}</div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* App UI Theme Studio & Quick-Toggle Configuration */}
-        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.4rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Sparkles size={17} style={{ color: 'var(--accent-teal)' }} />
-              <h4 style={{ fontSize: '0.98rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>
-                App UI Theme & Quick-Toggle
-              </h4>
-            </div>
-            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-              Active Theme: <strong style={{ color: 'var(--text-primary)' }}>{APP_THEMES.find((t) => t.id === currentTheme)?.name || currentTheme}</strong>
-            </span>
-          </div>
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.85rem' }}>
-            Tap any theme below to activate it across the app. Choose which 2 themes the top header button switches between.
-          </p>
-
-          {/* Quick-Toggle 2-Slot Selector */}
-          <div
-            style={{
-              background: 'var(--surface-muted)',
-              border: '1px solid var(--border-color)',
-              borderRadius: 12,
-              padding: '0.85rem 1rem',
-              marginBottom: '1rem',
-            }}
-          >
-            <div style={{ fontSize: '0.82rem', fontWeight: 750, color: 'var(--text-primary)', marginBottom: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Repeat size={14} style={{ color: 'var(--accent-teal)' }} />
-              Header Button Quick-Toggle Pair (Swaps between Slot 1 & 2):
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem' }}>
-              <div>
-                <label className="form-label" style={{ fontSize: '0.75rem', marginBottom: '0.3rem' }}>
-                  Slot 1 (Primary Theme)
-                </label>
-                <AppSelect
-                  value={quickPair[0]}
-                  onChange={(val) => handleSetQuickSlot(0, val)}
-                  options={APP_THEMES.map((t) => ({ value: t.id, label: t.name }))}
-                />
-              </div>
-              <div>
-                <label className="form-label" style={{ fontSize: '0.75rem', marginBottom: '0.3rem' }}>
-                  Slot 2 (Secondary Theme)
-                </label>
-                <AppSelect
-                  value={quickPair[1]}
-                  onChange={(val) => handleSetQuickSlot(1, val)}
-                  options={APP_THEMES.map((t) => ({ value: t.id, label: t.name }))}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Theme Gallery Cards */}
-          <div className="template-picker-grid">
-            {APP_THEMES.map((th) => {
-              const active = currentTheme === th.id;
-              const isSlot1 = quickPair[0] === th.id;
-              const isSlot2 = quickPair[1] === th.id;
-              return (
-                <button
-                  key={th.id}
-                  type="button"
-                  className={`template-card ${active ? 'is-active' : ''}`}
-                  onClick={() => onThemeChange?.(th.id)}
-                  style={{
-                    border: active ? '2px solid var(--accent-teal)' : undefined,
-                    boxShadow: active ? '0 0 14px rgba(0, 179, 166, 0.25)' : undefined,
-                  }}
-                >
-                  <div className="template-card-header">
-                    <div className="template-swatch-badge">
-                      <span
-                        className="template-swatch-dot"
-                        style={{
-                          backgroundColor: th.accent,
-                          boxShadow: `0 0 8px ${th.accent}`,
-                        }}
-                      />
-                      <span style={{ fontWeight: active ? 800 : 600 }}>{th.name}</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      {isSlot1 && (
-                        <span style={{ fontSize: '0.66rem', background: 'rgba(255,255,255,0.1)', padding: '0.1rem 0.35rem', borderRadius: 4, fontWeight: 700 }}>
-                          Slot 1
-                        </span>
-                      )}
-                      {isSlot2 && (
-                        <span style={{ fontSize: '0.66rem', background: 'rgba(255,255,255,0.1)', padding: '0.1rem 0.35rem', borderRadius: 4, fontWeight: 700 }}>
-                          Slot 2
-                        </span>
-                      )}
-                      {active ? <Check size={16} style={{ color: 'var(--accent-teal)' }} /> : null}
-                    </div>
-                  </div>
-                  <div className="template-card-tagline">{th.tagline}</div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Default Bill Template Picker */}
-        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
-            <Palette size={16} style={{ color: 'var(--primary, #00b3a6)' }} />
-            <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>Default Bill Style & Template</h4>
-          </div>
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
-            Choose the company-wide default look for invoices, bills, and payment advices. You can also switch styles on any bill anytime.
-          </p>
-          <div className="template-picker-grid">
-            {INVOICE_TEMPLATES.map((tmpl) => {
-              const active = (settings.default_invoice_template || 'classic') === tmpl.id;
-              return (
-                <button
-                  key={tmpl.id}
-                  type="button"
-                  className={`template-card ${active ? 'is-active' : ''}`}
-                  onClick={() => handleChange('default_invoice_template', tmpl.id)}
-                >
-                  <div className="template-card-header">
-                    <div className="template-swatch-badge">
-                      <span
-                        className="template-swatch-dot"
-                        style={{
-                          backgroundColor: tmpl.primaryColor,
-                          border: tmpl.id === 'minimal' ? '1px solid #71717a' : 'none',
-                        }}
-                      />
-                      <span>{tmpl.name}</span>
-                    </div>
-                    {active ? <Check size={16} style={{ color: 'var(--primary, #00b3a6)' }} /> : null}
-                  </div>
-                  <div className="template-card-tagline">{tmpl.tagline}</div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-            <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>Bank & Payment Options</h4>
-            <button type="button" className="btn-secondary" style={{ width: 'auto', fontSize: '0.78rem' }} onClick={handleAddPaymentMethod}>
-              <Plus size={14} /> Add option
-            </button>
-          </div>
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
-            Add every bank / wallet customers can pay into. All options appear on invoices and payment reminders.
-          </p>
-          {(settings.payment_methods || []).map((method, index) => (
-            <div
-              key={method.id}
-              className="surface-block"
-              style={{ padding: '0.85rem', marginBottom: '0.75rem', border: '1px solid var(--border-color)' }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.65rem' }}>
-                <strong style={{ fontSize: '0.85rem' }}>Option {index + 1}</strong>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  style={{ width: 'auto', padding: '0.35rem 0.55rem', fontSize: '0.72rem' }}
-                  onClick={() => handleRemovePaymentMethod(method.id)}
-                  title="Remove this option"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-              <div className="settings-form-grid responsive-grid" style={{ display: 'grid', gap: '0.75rem' }}>
-                <div className="form-group">
-                  <label className="form-label">Label</label>
-                  <input
-                    className="form-input"
-                    type="text"
-                    placeholder="e.g. Meezan, HBL, JazzCash"
-                    value={method.label || ''}
-                    onChange={(e) => handleMethodChange(method.id, 'label', e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Bank Name</label>
-                  <input
-                    className="form-input"
-                    type="text"
-                    value={method.bank_name || ''}
-                    onChange={(e) => handleMethodChange(method.id, 'bank_name', e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Account Title</label>
-                  <input
-                    className="form-input"
-                    type="text"
-                    value={method.account_title || ''}
-                    onChange={(e) => handleMethodChange(method.id, 'account_title', e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Account Number / IBAN</label>
-                  <input
-                    className="form-input"
-                    type="text"
-                    value={method.account_number || ''}
-                    onChange={(e) => handleMethodChange(method.id, 'account_number', e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Raast / JazzCash / EasyPaisa</label>
-                  <input
-                    className="form-input"
-                    type="text"
-                    value={method.mobile_wallet || ''}
-                    onChange={(e) => handleMethodChange(method.id, 'mobile_wallet', e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Notes (optional)</label>
-                  <input
-                    className="form-input"
-                    type="text"
-                    placeholder="Branch, preferred method, etc."
-                    value={method.notes || ''}
-                    onChange={(e) => handleMethodChange(method.id, 'notes', e.target.value)}
-                  />
-                </div>
-              </div>
-            </div>
-          ))}
-          <div className="form-group" style={{ marginTop: '0.5rem' }}>
-            <label className="form-label">Payment Instructions (shared)</label>
-            <input
-              className="form-input"
-              type="text"
-              value={settings.payment_instructions || ''}
-              onChange={(e) => handleChange('payment_instructions', e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="form-group" style={{ marginTop: '0.75rem' }}>
-          <label className="form-label">Store Address</label>
-          <textarea className="form-textarea" rows={2} value={settings.company_address || ''} onChange={(e) => handleChange('company_address', e.target.value)} />
-        </div>
-
-        <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end' }}>
-          <button type="submit" className="btn-primary" style={{ padding: '0.75rem 1.75rem' }}>
+          ) : <div />}
+          <button type="submit" className="btn-primary" style={{ padding: '0.75rem 2rem', fontSize: '0.92rem', borderRadius: 12, width: 'auto' }}>
             <Save size={18} /> Save Settings
           </button>
         </div>
       </form>
-
-      <div className="glass-panel" style={{ padding: '1.5rem' }}>
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <FileBarChart2 size={18} /> Monthly sales report
-        </h3>
-        <div className="action-row" style={{ marginBottom: '1rem' }}>
-          <input className="form-input" type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} />
-          <button type="button" className="btn-secondary" onClick={loadMonthlyReport}>Load</button>
-          {report && (
-            <>
-              <button type="button" className="btn-secondary" onClick={exportReportCsv}>Export CSV</button>
-              <button type="button" className="btn-secondary" onClick={exportReportPdf}>Export PDF</button>
-            </>
-          )}
-        </div>
-        {report && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem' }}>
-            <div className="surface-block" style={{ padding: '0.75rem' }}>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Sales total</div>
-              <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)' }}>{formatCurrency(settings.currency_symbol || 'Rs.', report.sales_total)}</div>
-            </div>
-            <div className="surface-block" style={{ padding: '0.75rem' }}>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Collected</div>
-              <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)' }}>{formatCurrency(settings.currency_symbol || 'Rs.', report.sales_paid)}</div>
-            </div>
-            <div className="surface-block" style={{ padding: '0.75rem' }}>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Buying cost</div>
-              <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)' }}>{formatCurrency(settings.currency_symbol || 'Rs.', report.buying_total)}</div>
-            </div>
-            <div className="surface-block" style={{ padding: '0.75rem' }}>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Est. profit</div>
-              <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--success)' }}>{formatCurrency(settings.currency_symbol || 'Rs.', report.estimated_profit)}</div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Seed Realistic Mock Data Panel */}
-      <div className="glass-panel" style={{ padding: '1.5rem', border: '1px solid rgba(56, 189, 248, 0.3)', background: 'rgba(56, 189, 248, 0.05)' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-          <div>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--info, #38bdf8)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Database size={18} /> Populate Mock Data for Testing
-            </h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
-              Instantly generates realistic chocolate products (truffles, pralines, bars), customer accounts (Attock Sweets, Sweet Tooth Cafe), and sample sales invoices with payment receipts.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={busy}
-            style={{
-              background: 'linear-gradient(135deg, #38bdf8, #0284c7)',
-              color: '#ffffff',
-              fontWeight: 800,
-              padding: '0.65rem 1.2rem',
-              width: 'auto',
-              alignSelf: 'flex-start',
-            }}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                toast.info('Generating mock products, customers, and bills...');
-                const res = await populateMockDatabase();
-                toast.success(`🎉 Mock Data Created! Generated ${res.products} products, ${res.customers} clients, and ${res.bills} sample bills.`);
-                if (onSettingsUpdated) onSettingsUpdated();
-              } catch (err) {
-                toast.error('Mock data generation failed: ' + err.message);
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            <Database size={16} /> Generate Mock Test Data
-          </button>
-        </div>
-      </div>
-
-      <div className="glass-panel" style={{ padding: '1.5rem', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-          <div>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <AlertTriangle size={18} /> Remove test records
-            </h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
-              Deletes dummy clients and bills from the old Fill test data helper (names with Test, dummy, @example.com). Real clients like Imran Ali are left alone.
-            </p>
-          </div>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Type PURGE to enable</label>
-            <input
-              className="form-input"
-              value={purgeConfirm}
-              onChange={(e) => setPurgeConfirm(e.target.value)}
-              placeholder="PURGE"
-              autoComplete="off"
-            />
-          </div>
-          <button
-            type="button"
-            className="btn-danger"
-            onClick={handlePurgeDemo}
-            disabled={busy || purgeConfirm.trim() !== 'PURGE'}
-            style={{ padding: '0.65rem 1.2rem', width: 'auto', alignSelf: 'flex-start' }}
-          >
-            <Trash2 size={16} /> Remove test records
-          </button>
-        </div>
-      </div>
-
-      <div className="glass-panel" style={{ padding: '1.5rem', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-          <div>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <AlertTriangle size={18} /> Clean / Reset Database
-            </h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
-              Nuclear wipe of bills, catalog, and clients. This cannot be undone except by restoring the automatic pre-wipe backup (saved below and offered via share/download).
-            </p>
-            {resetMsg && <p style={{ color: 'var(--success)', fontWeight: 700, fontSize: '0.85rem', marginTop: '0.5rem' }}>{resetMsg}</p>}
-          </div>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Type DELETE to enable wipe</label>
-            <input
-              className="form-input"
-              value={wipeConfirm}
-              onChange={(e) => setWipeConfirm(e.target.value)}
-              placeholder="DELETE"
-              autoComplete="off"
-            />
-          </div>
-          <button
-            type="button"
-            className="btn-danger"
-            onClick={handleResetDb}
-            disabled={busy || wipeConfirm.trim() !== 'DELETE'}
-            style={{ padding: '0.65rem 1.2rem', width: 'auto', alignSelf: 'flex-start' }}
-          >
-            <Trash2 size={16} /> Wipe All Data
-          </button>
-        </div>
-      </div>
 
       <div className="settings-developer-credit">
         <DeveloperCredit compact />

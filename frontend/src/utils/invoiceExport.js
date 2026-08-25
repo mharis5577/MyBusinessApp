@@ -6,49 +6,57 @@ const colorCache = new Map();
  * Chrome/Edge often return getComputedStyle colors as color(srgb …),
  * which html2canvas 1.4.x cannot parse. Normalize to rgb/rgba/hex.
  */
+function parseColorNum(raw) {
+  const s = String(raw || '').trim();
+  if (s.endsWith('%')) return clamp01(parseFloat(s) / 100);
+  return clamp01(parseFloat(s));
+}
+
 function normalizeCssColor(value) {
   if (!value || typeof value !== 'string') return value;
   const v = value.trim();
   if (!v || v === 'transparent' || v === 'none' || v === 'currentcolor') return v;
-  if (!/(?:color|oklch|oklab|lab|lch|color-mix)\(/i.test(v)) return v;
+  if (!/(?:color|oklch|oklab|lab|lch|color-mix|light-dark)\(/i.test(v)) return v;
 
   const cached = colorCache.get(v);
   if (cached !== undefined) return cached;
 
-  const srgb = v.match(
-    /color\(\s*srgb\s+([0-9.eE+-]+)\s+([0-9.eE+-]+)\s+([0-9.eE+-]+)(?:\s*\/\s*([0-9.eE+%]+))?\)/i
-  );
-  if (srgb) {
-    const r = Math.round(clamp01(parseFloat(srgb[1])) * 255);
-    const g = Math.round(clamp01(parseFloat(srgb[2])) * 255);
-    const b = Math.round(clamp01(parseFloat(srgb[3])) * 255);
-    const a = srgb[4] != null ? parseAlpha(srgb[4]) : 1;
-    const res = a < 1 ? `rgba(${r}, ${g}, ${b}, ${a})` : `rgb(${r}, ${g}, ${b})`;
-    colorCache.set(v, res);
-    return res;
-  }
+  let result = v
+    .replace(/color\([^)]+\)/gi, (match) => {
+      const m = match.match(
+        /color\(\s*(?:srgb|display-p3|a98-rgb|prophoto-rgb|rec2020|srgb-linear)?\s+([-\+0-9.eE%]+)\s+([-\+0-9.eE%]+)\s+([-\+0-9.eE%]+)(?:\s*\/\s*([-\+0-9.eE%]+))?\)/i
+      );
+      if (m) {
+        const r = Math.round(parseColorNum(m[1]) * 255);
+        const g = Math.round(parseColorNum(m[2]) * 255);
+        const b = Math.round(parseColorNum(m[3]) * 255);
+        const a = m[4] != null ? parseAlpha(m[4]) : 1;
+        return a < 1 ? `rgba(${r}, ${g}, ${b}, ${a})` : `rgb(${r}, ${g}, ${b})`;
+      }
+      try {
+        const ctx =
+          normalizeCssColor._ctx ||
+          (normalizeCssColor._ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true }));
+        ctx.fillStyle = '#000000';
+        ctx.fillStyle = match;
+        if (ctx.fillStyle && !/color\(/i.test(ctx.fillStyle)) return ctx.fillStyle;
+      } catch {}
+      return 'rgba(0, 0, 0, 0.85)';
+    })
+    .replace(/(?:oklch|oklab|lab|lch|color-mix|light-dark)\([^)]+\)/gi, (match) => {
+      try {
+        const ctx =
+          normalizeCssColor._ctx ||
+          (normalizeCssColor._ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true }));
+        ctx.fillStyle = '#000000';
+        ctx.fillStyle = match;
+        if (ctx.fillStyle && !/(?:oklch|oklab|lab|lch|color-mix)\(/i.test(ctx.fillStyle)) return ctx.fillStyle;
+      } catch {}
+      return 'rgba(0, 0, 0, 0.85)';
+    });
 
-  try {
-    const ctx =
-      normalizeCssColor._ctx ||
-      (normalizeCssColor._ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true }));
-    ctx.fillStyle = '#000000';
-    ctx.fillStyle = v;
-    const out = ctx.fillStyle;
-    if (out && out !== '#000000') {
-      colorCache.set(v, out);
-      return out;
-    }
-    if (/^(?:#000|#000000|black|rgb\(\s*0\s*,\s*0\s*,\s*0\s*\)|rgba\(\s*0\s*,\s*0\s*,\s*0)/i.test(v)) {
-      colorCache.set(v, out);
-      return out;
-    }
-  } catch {
-    /* fall through */
-  }
-
-  colorCache.set(v, '#111111');
-  return '#111111';
+  colorCache.set(v, result);
+  return result;
 }
 
 function clamp01(n) {
@@ -82,16 +90,7 @@ function wrapComputedStyle(style) {
         if (typeof val === 'function') {
           return val.bind(target);
         }
-        if (
-          typeof val === 'string' &&
-          typeof prop === 'string' &&
-          (prop.includes('Color') ||
-            prop.includes('color') ||
-            prop.includes('border') ||
-            prop.includes('background') ||
-            prop.includes('fill') ||
-            prop.includes('stroke'))
-        ) {
+        if (typeof val === 'string') {
           return normalizeCssColor(val);
         }
         return val;
@@ -105,16 +104,32 @@ function wrapComputedStyle(style) {
 function patchComputedStyleColors(targetWindow) {
   const win = targetWindow || window;
   if (!win || win.__html2canvasColorPatched) return () => {};
-  const original = win.getComputedStyle.bind(win);
+
+  const originalGetComputed = win.getComputedStyle?.bind(win);
+  const proto = win.CSSStyleDeclaration?.prototype;
+  const originalGetPropVal = proto?.getPropertyValue;
+
   win.__html2canvasColorPatched = true;
-  win.getComputedStyle = (elt, pseudoElt) => wrapComputedStyle(original(elt, pseudoElt));
+
+  if (originalGetComputed) {
+    win.getComputedStyle = (elt, pseudoElt) => wrapComputedStyle(originalGetComputed(elt, pseudoElt));
+  }
+
+  if (proto && originalGetPropVal) {
+    proto.getPropertyValue = function (prop) {
+      const v = originalGetPropVal.call(this, prop);
+      return typeof v === 'string' ? normalizeCssColor(v) : v;
+    };
+  }
+
   return () => {
-    win.getComputedStyle = original;
+    if (originalGetComputed) win.getComputedStyle = originalGetComputed;
+    if (proto && originalGetPropVal) proto.getPropertyValue = originalGetPropVal;
     delete win.__html2canvasColorPatched;
   };
 }
 
-function prepareClone(cloned, element, { maxWidth, layoutWidth } = {}) {
+function prepareClone(cloned, element, { maxWidth, layoutWidth, clonedDoc } = {}) {
   cloned.style.boxShadow = 'none';
   cloned.style.borderRadius = '0';
   cloned.style.maxWidth = 'none';
@@ -126,8 +141,59 @@ function prepareClone(cloned, element, { maxWidth, layoutWidth } = {}) {
     cloned.style.maxWidth = `${layoutWidth}px`;
     cloned.style.margin = '0 auto';
   }
-  cloned.style.background = '#ffffff';
-  cloned.style.color = '#111111';
+
+  const isStory = cloned.classList.contains('story-card-sheet');
+  const isMobilePass = cloned.classList.contains('mc-pass');
+
+  if (!isStory && !isMobilePass) {
+    cloned.style.background = '#ffffff';
+    cloned.style.color = '#111111';
+    // Ensure all standard invoice text is crisp, deep black & dark slate
+    cloned.querySelectorAll('.inv-company-name, .inv-num, .inv-client-name, .inv-table th, .inv-table td, .inv-total-row, .inv-bank-box').forEach((el) => {
+      el.style.color = '#111111';
+    });
+    cloned.querySelectorAll('.inv-meta-label, .inv-client-sub, .inv-notes-text, .inv-footer-center, .inv-item-note').forEach((el) => {
+      el.style.color = '#4b5563';
+    });
+  } else if (isMobilePass) {
+    cloned.style.background = '#ffffff';
+    cloned.style.color = '#111111';
+    // Ensure all mobile pass texts are crisp and high contrast
+    cloned.querySelectorAll('.mc-meta-txt, .mc-client-name, .mc-item-name, .mc-item-sum, .mc-pay-line').forEach((el) => {
+      el.style.color = '#111111';
+      el.style.fontWeight = '750';
+    });
+    cloned.querySelectorAll('.mc-meta-lbl, .mc-client-phone, .mc-item-rate, .mc-ledger-row, .mc-ledger-total-lbl, .mc-footer-note, .mc-footer-contact, .mc-items-heading, .mc-pay-title').forEach((el) => {
+      el.style.color = '#374151';
+      el.style.fontWeight = '600';
+    });
+    cloned.querySelectorAll('.mc-meta-item, .mc-item-row, .mc-ledger, .mc-pay-strip').forEach((el) => {
+      el.style.background = '#f7f6f2';
+      el.style.borderColor = '#dcd8cf';
+    });
+  }
+
+  // Sanitize all inline styles in cloned subtree to prevent html2canvas color() parse failures
+  try {
+    const all = [cloned, ...cloned.querySelectorAll('*')];
+    for (const node of all) {
+      if (node.style) {
+        const bg = node.style.backgroundImage || node.style.background;
+        if (bg && /color\(/i.test(bg)) {
+          node.style.backgroundImage = normalizeCssColor(bg);
+        }
+        const col = node.style.color;
+        if (col && /color\(/i.test(col)) {
+          node.style.color = normalizeCssColor(col);
+        }
+        const bcol = node.style.borderColor;
+        if (bcol && /color\(/i.test(bcol)) {
+          node.style.borderColor = normalizeCssColor(bcol);
+        }
+      }
+    }
+  } catch {}
+
   void maxWidth;
   cloned.querySelectorAll('img').forEach((img) => {
     if (!img.complete || img.naturalWidth === 0) {
@@ -237,8 +303,14 @@ async function captureElement(element, options = {}) {
       scale: scale ?? Math.min(2, window.devicePixelRatio || 2),
       ...rest,
       onclone: (clonedDoc, cloned) => {
+        if (clonedDoc?.documentElement) {
+          clonedDoc.documentElement.setAttribute('data-theme', 'light');
+        }
+        if (clonedDoc?.body) {
+          clonedDoc.body.setAttribute('data-theme', 'light');
+        }
         patchComputedStyleColors(clonedDoc.defaultView || window);
-        prepareClone(cloned, element, { maxWidth, layoutWidth });
+        prepareClone(cloned, element, { maxWidth, layoutWidth, clonedDoc });
         userOnclone?.(clonedDoc, cloned);
       },
     });

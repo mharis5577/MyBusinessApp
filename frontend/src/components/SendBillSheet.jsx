@@ -38,13 +38,12 @@ export default function SendBillSheet({
       loaded = prefsForTarget(preferredTarget, loaded);
     }
     setPrefs(loaded);
-    onTargetPreview?.(loaded.target || 'mobile');
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = prev;
     };
-  }, [open, preferredTarget, onTargetPreview]);
+  }, [open, preferredTarget]);
 
   if (!open || typeof document === 'undefined') return null;
 
@@ -57,11 +56,10 @@ export default function SendBillSheet({
   };
 
   const setTarget = (targetId) => {
-    setPrefs((prev) => {
-      const next = prefsForTarget(targetId, prev);
-      onTargetPreview?.(next.target);
-      return next;
-    });
+    const next = prefsForTarget(targetId, prefs);
+    saveBillSendPrefs(next);
+    setPrefs(next);
+    onTargetPreview?.(next.target);
   };
 
   return createPortal(

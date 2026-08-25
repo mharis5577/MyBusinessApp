@@ -161,10 +161,13 @@ export default function CustomerManager({
 
   const openWhatsApp = (c, e) => {
     if (e) e.stopPropagation();
-    if (!normalizeWhatsAppPhone(c.phone)) {
-      toast.error('No valid phone number on this client');
+    if (!c.phone || !normalizeWhatsAppPhone(c.phone)) {
+      playTapSound();
+      toast.info(`Please add a phone number for ${c.name} to chat on WhatsApp`);
+      openEditModal(c, e);
       return;
     }
+    playTapSound();
     openWhatsAppReminder(c.phone, `Assalam o Alaikum ${c.name},`);
   };
 
@@ -590,44 +593,46 @@ export default function CustomerManager({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '3.5rem' }}>
+    <div className="client-manager-container">
       {/* 1. Header Toolbar & Search & Action Bar */}
-      <div className="glass-panel" style={{ padding: '1.25rem 1.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Users size={22} style={{ color: 'var(--accent-teal)' }} />
-              <h2 style={{ fontSize: '1.35rem', fontWeight: 800, margin: 0, letterSpacing: '-0.02em' }}>
-                Client Directory
-              </h2>
-              <span className="dash-pill-badge" style={{ background: 'rgba(45, 212, 191, 0.15)', color: 'var(--accent-teal)' }}>
-                {customers.length} Profiles
-              </span>
+      <div className="client-dir-hero">
+        <div className="client-dir-hero-top">
+          <div className="client-dir-hero-identity">
+            <div className="client-dir-icon-halo">
+              <Users size={22} />
             </div>
-            <p style={{ margin: '0.2rem 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-              Manage online clients, track outstanding balances, WhatsApp statements, and custom rates.
-            </p>
+            <div>
+              <h2 className="client-dir-hero-title">
+                Client Directory
+                <span className="settings-badge-pill">
+                  {customers.length} Profiles
+                </span>
+              </h2>
+              <p className="client-dir-hero-sub">
+                Track customer ledgers, due balances, WhatsApp reminders, and custom negotiated rates
+              </p>
+            </div>
           </div>
 
           <button
             type="button"
             className="btn-primary"
-            style={{ width: 'auto', padding: '0.55rem 1.2rem', fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+            style={{ width: 'auto', padding: '0.45rem 1.15rem', fontSize: '0.82rem', borderRadius: 999, display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
             onClick={() => setShowAddModal(true)}
           >
-            <UserPlus size={16} /> + Add Client Profile
+            <UserPlus size={15} /> Add Client Profile
           </button>
         </div>
 
-        {/* Search & Filter Chips Row */}
-        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: '1 1 260px' }}>
+        {/* Search & Filter Row */}
+        <div className="client-filter-bar">
+          <div style={{ position: 'relative', flex: '1 1 240px' }}>
             <Search size={16} style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input
               type="text"
               className="form-input"
               style={{ paddingLeft: '2.4rem', height: '2.4rem', fontSize: '0.84rem' }}
-              placeholder="Search by client name, phone or email…"
+              placeholder="Search by name, phone, or email…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -642,28 +647,46 @@ export default function CustomerManager({
             )}
           </div>
 
-          <div style={{ minWidth: '185px', flex: '0 0 auto' }}>
+          {/* Category Filter Pills */}
+          <div className="settings-category-bar" style={{ flex: '1 1 auto', margin: 0 }}>
+            {[
+              { id: 'all', label: `All (${customers.length})` },
+              { id: 'customer', label: 'Customers' },
+              { id: 'dues', label: 'Has Dues' },
+              { id: 'vip', label: 'VIPs ⭐' },
+              { id: 'supplier', label: 'Suppliers 📦' },
+            ].map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                className={`settings-cat-chip ${partyFilter === f.id ? 'is-active' : ''}`}
+                onClick={() => {
+                  playTapSound();
+                  setPartyFilter(f.id);
+                }}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Sort Dropdown */}
+          <div style={{ width: '150px', flex: '0 0 auto' }}>
             <AppSelect
-              value={partyFilter}
-              onChange={(next) => {
-                playTapSound();
-                setPartyFilter(next);
-              }}
+              value={sortBy}
+              onChange={setSortBy}
               options={[
-                { value: 'all', label: `All Profiles (${customers.length})` },
-                { value: 'customer', label: 'Customers' },
-                { value: 'dues', label: 'Has Dues' },
-                { value: 'vip', label: 'VIPs ⭐' },
-                { value: 'supplier', label: 'Suppliers 📦' },
+                { value: 'dues', label: 'Highest Dues' },
+                { value: 'vip', label: 'VIP Clients' },
+                { value: 'name', label: 'Name (A-Z)' },
               ]}
-              style={{ minWidth: 185 }}
             />
           </div>
         </div>
       </div>
 
-      {/* 2. Client Directory Contained Window with Dropdown Accordion */}
-      <div className="glass-panel" style={{ padding: '1.25rem 1.5rem', overflow: 'hidden' }}>
+      {/* 2. Client Directory Cards Grid */}
+      <div className="glass-panel" style={{ padding: '1.25rem 1.4rem' }}>
         <div
           style={{
             display: 'flex',
@@ -692,38 +715,23 @@ export default function CustomerManager({
             </h3>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
-            {/* Quick Jump to Client Dropdown */}
-            <div style={{ width: '200px' }}>
-              <AppSelect
-                value={selectedCustomer ? String(selectedCustomer.id) : ''}
-                onChange={(val) => {
-                  const found = customers.find((c) => String(c.id) === String(val));
-                  if (found) handleSelectCustomer(found);
-                }}
-                placeholder="⚡ Jump to Client…"
-                options={[
-                  { value: '', label: '⚡ Jump to Client…' },
-                  ...customers.map((c) => ({
-                    value: String(c.id),
-                    label: `${c.name}${Number(c.sales_outstanding) > 0 ? ` (Due: ${currencySymbol}${c.sales_outstanding})` : ''}`
-                  }))
-                ]}
-              />
-            </div>
-
-            {/* Sort Dropdown */}
-            <div style={{ width: '150px' }}>
-              <AppSelect
-                value={sortBy}
-                onChange={setSortBy}
-                options={[
-                  { value: 'dues', label: 'Highest Dues' },
-                  { value: 'vip', label: 'VIP Clients' },
-                  { value: 'name', label: 'Name (A-Z)' },
-                ]}
-              />
-            </div>
+          {/* Quick Jump to Client Dropdown */}
+          <div style={{ width: '200px' }} onClick={(e) => e.stopPropagation()}>
+            <AppSelect
+              value={selectedCustomer ? String(selectedCustomer.id) : ''}
+              onChange={(val) => {
+                const found = customers.find((c) => String(c.id) === String(val));
+                if (found) handleSelectCustomer(found);
+              }}
+              placeholder="⚡ Jump to Client…"
+              options={[
+                { value: '', label: '⚡ Jump to Client…' },
+                ...customers.map((c) => ({
+                  value: String(c.id),
+                  label: `${c.name}${Number(c.sales_outstanding) > 0 ? ` (Due: ${currencySymbol}${c.sales_outstanding})` : ''}`
+                }))
+              ]}
+            />
           </div>
         </div>
 
@@ -841,30 +849,6 @@ export default function CustomerManager({
 
                       {/* Bottom Action Bar */}
                       <div className="client-dir-actions-row" onClick={(e) => e.stopPropagation()}>
-                        {c.phone && (
-                          <>
-                            <button
-                              type="button"
-                              className="client-act-btn is-wa"
-                              title="Chat on WhatsApp"
-                              onClick={(e) => openWhatsApp(c, e)}
-                            >
-                              <MessageCircle size={14} /> WA
-                            </button>
-
-                            {pt === 'customer' && (
-                              <button
-                                type="button"
-                                className="client-act-btn"
-                                title="Send Unpaid Statement via WhatsApp"
-                                onClick={(e) => remindUnpaid(c, e)}
-                              >
-                                <Bell size={13} /> Statement
-                              </button>
-                            )}
-                          </>
-                        )}
-
                         <button
                           type="button"
                           className="client-act-btn"
@@ -876,29 +860,31 @@ export default function CustomerManager({
 
                         <button
                           type="button"
-                          className="client-act-btn"
-                          title={`Switch status to ${pt === 'supplier' ? 'Customer' : 'Supplier'}`}
-                          onClick={(e) => handleTogglePartyType(c, e)}
+                          className="client-act-btn is-wa"
+                          title={c.phone ? "Chat on WhatsApp" : "Add Phone & Chat on WhatsApp"}
+                          onClick={(e) => openWhatsApp(c, e)}
                         >
-                          <ArrowLeftRight size={13} /> {pt === 'supplier' ? 'To Customer' : 'To Supplier'}
+                          <MessageCircle size={13} /> WA
                         </button>
 
                         <button
                           type="button"
-                          className="client-act-btn"
+                          className="client-act-btn is-icon-btn"
                           title="Edit Profile & Status"
                           onClick={(e) => openEditModal(c, e)}
+                          aria-label="Edit Profile"
                         >
-                          <Edit3 size={13} /> Edit
+                          <Edit3 size={13} />
                         </button>
 
                         <button
                           type="button"
-                          className="client-act-btn is-danger"
+                          className="client-act-btn is-danger is-icon-btn"
                           title="Delete Client"
                           onClick={(e) => askDeleteCustomer(c, e)}
+                          aria-label="Delete Client"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     </div>
@@ -1224,20 +1210,55 @@ export default function CustomerManager({
             />
           </div>
           <div className="form-group">
-            <label className="form-label">Duplicates to Merge (remove)</label>
-            <div style={{ maxHeight: 130, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem', background: 'var(--surface-muted)', padding: '0.5rem', borderRadius: 8 }}>
+            <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Duplicates to Merge (remove)</span>
+              {mergeDupes.length > 0 && (
+                <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--accent-teal)' }}>
+                  {mergeDupes.length} selected
+                </span>
+              )}
+            </label>
+            <div
+              className="merge-dupes-scroll"
+              style={{
+                maxHeight: 170,
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.4rem',
+                background: 'var(--surface-muted)',
+                padding: '0.6rem',
+                borderRadius: '12px',
+                border: '1px solid var(--border-color)',
+              }}
+            >
               {customers
                 .filter((c) => String(c.id) !== String(mergePrimary))
-                .map((c) => (
-                  <label key={c.id} style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', fontSize: '0.83rem', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={mergeDupes.includes(c.id)}
-                      onChange={() => toggleMergeDupe(c.id)}
-                    />
-                    {c.name}
-                  </label>
-                ))}
+                .map((c) => {
+                  const isChecked = mergeDupes.includes(c.id);
+                  return (
+                    <label
+                      key={c.id}
+                      className={`custom-checkbox-row ${isChecked ? 'is-checked' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleMergeDupe(c.id)}
+                      />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', minWidth: 0, flex: 1 }}>
+                        <span style={{ fontWeight: isChecked ? 800 : 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                          {c.name}
+                        </span>
+                        {c.phone && (
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            📞 {c.phone}
+                          </span>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })}
             </div>
           </div>
         </div>
