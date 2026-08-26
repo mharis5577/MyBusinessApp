@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle, FileText, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Bookmark, CheckCircle2, Settings, Palette, SlidersHorizontal } from 'lucide-react';
+import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle, FileText, FileSpreadsheet, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Bookmark, CheckCircle2, Settings, Palette, SlidersHorizontal } from 'lucide-react';
 import BillAdjustSheet from './BillAdjustSheet';
 import StatusBadge, { StatusSelect } from './StatusBadge';
 import TypeSelect from './TypeSelect';
@@ -12,7 +12,7 @@ import { pakistanToday, formatCurrency, formatBillDateTime, addDaysToDateString 
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { downloadBlob } from '../utils/downloadFile';
-import { downloadCsv, downloadTablePdf, exportMoney } from '../utils/tableExport';
+import { downloadCsv, downloadTablePdf, downloadBillsMasterExcel, exportMoney } from '../utils/tableExport';
 import { compressImageToDataUrl } from '../utils/imageCompress';
 import { persistPaymentProof } from '../utils/paymentProof';
 import {
@@ -37,6 +37,7 @@ import {
 const BILLS_PAGE_SIZE = 5;
 
 function HeaderOptionsDropdown({
+  onExportExcel,
   onExportCSV,
   onExportPDF,
   onRefresh,
@@ -91,15 +92,33 @@ function HeaderOptionsDropdown({
             disabled={!hasBills}
             onClick={() => {
               setOpen(false);
-              onExportCSV();
+              onExportExcel();
             }}
           >
             <div className="bills-dd-icon-box is-green">
+              <FileSpreadsheet size={14} />
+            </div>
+            <div className="bills-dd-text">
+              <strong>Export Excel (.xls)</strong>
+              <small>Formatted luxury workbook</small>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            className="bills-dropdown-item"
+            disabled={!hasBills}
+            onClick={() => {
+              setOpen(false);
+              onExportCSV();
+            }}
+          >
+            <div className="bills-dd-icon-box is-teal">
               <Download size={14} />
             </div>
             <div className="bills-dd-text">
               <strong>Export CSV</strong>
-              <small>Spreadsheet data</small>
+              <small>Raw data table</small>
             </div>
           </button>
 
@@ -730,6 +749,30 @@ export default function BillsDatabase({
     return { headers, rows };
   };
 
+  const handleExportExcel = async () => {
+    if (bills.length === 0) {
+      toast.info('No bills to export');
+      return;
+    }
+    try {
+      const filterBits = [
+        billTypeFilter !== 'all' ? billTypeFilter : null,
+        statusFilter !== 'all' ? statusFilter : null,
+        debouncedSearch ? `search "${debouncedSearch}"` : null,
+      ].filter(Boolean);
+
+      await downloadBillsMasterExcel({
+        bills: filteredBills.length ? filteredBills : bills,
+        filename: `Bills_Master_${pakistanToday()}.xls`,
+        title: 'Elite Chocolate — Bills Master & Sales Ledger',
+        subtitle: `${pakistanToday()} · ${bills.length} total bills${filterBits.length ? ` · Filtered: ${filterBits.join(' · ')}` : ''}`,
+      });
+      toast.success(`Exported ${filteredBills.length ? filteredBills.length : bills.length} bills (Excel)`);
+    } catch (err) {
+      if (err?.name !== 'AbortError') toast.error('Excel export failed: ' + err.message);
+    }
+  };
+
   const handleExportCSV = async () => {
     if (bills.length === 0) {
       toast.info('No bills to export');
@@ -823,6 +866,7 @@ export default function BillsDatabase({
         </div>
 
         <HeaderOptionsDropdown
+          onExportExcel={handleExportExcel}
           onExportCSV={handleExportCSV}
           onExportPDF={handleExportPDF}
           onRefresh={() => apiFetchBills({ soft: true })}

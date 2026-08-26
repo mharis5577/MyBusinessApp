@@ -2,16 +2,6 @@
  * Firebase Cloud Sync Module for ELITE CHOCOLATE POS
  * Provides PIN-protected Cloud Backup Vault (Push & Pull)
  */
-import { initializeApp, getApps } from 'firebase/app';
-import {
-  getFirestore,
-  doc,
-  setDoc,
-  getDoc,
-  collection,
-  getDocs,
-  deleteDoc,
-} from 'firebase/firestore';
 import { summarizeBackupPayload } from './backupManager';
 
 // Default Firebase project configuration (can be overridden by user in settings)
@@ -67,22 +57,50 @@ export function saveLastCloudSyncInfo(info) {
 
 let firestoreInstance = null;
 
-export function getFirestoreDb(customConfig = null) {
-  const config = customConfig || getStoredFirebaseConfig();
-  const appName = 'EliteChocolatePOSSync';
-  
-  let app;
-  const existingApps = getApps();
-  const found = existingApps.find((a) => a.name === appName);
+async function getFirebaseSdk(customConfig = null) {
+  try {
+    const { initializeApp, getApps } = await import('firebase/app');
+    const {
+      getFirestore,
+      doc,
+      setDoc,
+      getDoc,
+      collection,
+      getDocs,
+      deleteDoc,
+    } = await import('firebase/firestore');
 
-  if (found) {
-    app = found;
-  } else {
-    app = initializeApp(config, appName);
+    const config = customConfig || getStoredFirebaseConfig();
+    const appName = 'EliteChocolatePOSSync';
+
+    let app;
+    const existingApps = getApps();
+    const found = existingApps.find((a) => a.name === appName);
+
+    if (found) {
+      app = found;
+    } else {
+      app = initializeApp(config, appName);
+    }
+
+    firestoreInstance = getFirestore(app);
+    return {
+      db: firestoreInstance,
+      doc,
+      setDoc,
+      getDoc,
+      collection,
+      getDocs,
+      deleteDoc,
+    };
+  } catch (err) {
+    throw new Error('Firebase SDK is not available or failed to initialize: ' + err.message);
   }
+}
 
-  firestoreInstance = getFirestore(app);
-  return firestoreInstance;
+export async function getFirestoreDb(customConfig = null) {
+  const { db } = await getFirebaseSdk(customConfig);
+  return db;
 }
 
 /**
@@ -99,7 +117,7 @@ export async function hashPin(pin) {
       return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
     }
   } catch (_) {}
-  
+
   // Safe JS Fallback for legacy WebViews / HTTP contexts
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -150,10 +168,10 @@ export async function pushToCloudVault({
   if (!pin || String(pin).trim().length < 4) throw new Error('PIN Code must be at least 4 digits/characters');
   if (!payload || typeof payload !== 'object') throw new Error('Invalid shop data payload');
 
-  const db = getFirestoreDb(customConfig);
+  const { db, doc, setDoc, getDoc, collection, getDocs, deleteDoc } = await getFirebaseSdk(customConfig);
   const pinHash = await hashPin(pin);
   const vaultDocRef = doc(db, 'sync_vaults', cleanVaultId);
-  
+
   // Check existing vault PIN if vault exists
   const existingSnap = await getDoc(vaultDocRef);
   if (existingSnap.exists()) {
@@ -215,7 +233,7 @@ export async function inspectCloudVault({ vaultId, customConfig = null }) {
   const cleanVaultId = normalizeVaultId(vaultId);
   if (!cleanVaultId) throw new Error('Vault ID is required');
 
-  const db = getFirestoreDb(customConfig);
+  const { db, doc, getDoc } = await getFirebaseSdk(customConfig);
   const vaultDocRef = doc(db, 'sync_vaults', cleanVaultId);
   const snap = await getDoc(vaultDocRef);
 
@@ -246,7 +264,7 @@ export async function pullFromCloudVault({
   if (!cleanVaultId) throw new Error('Vault ID is required');
   if (!pin) throw new Error('PIN Code is required');
 
-  const db = getFirestoreDb(customConfig);
+  const { db, doc, getDoc, collection, getDocs } = await getFirebaseSdk(customConfig);
   const vaultDocRef = doc(db, 'sync_vaults', cleanVaultId);
   const snap = await getDoc(vaultDocRef);
 

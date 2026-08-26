@@ -39,7 +39,7 @@ import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { formatCurrency, formatPkMoney, pakistanToday } from '../utils/pakistan';
 import { playSuccessChime, playTapSound } from '../utils/audioEffects';
-import { downloadPartnerReportPdf, downloadPartnerReportCsv } from '../utils/tableExport';
+import { downloadPartnerReportPdf, downloadPartnerReportExcel, downloadPartnerReportCsv } from '../utils/tableExport';
 import EmptyState from './EmptyState';
 import PartnerEquityCharts from './PartnerEquityCharts';
 import PartnerWhatsAppDigestModal from './PartnerWhatsAppDigestModal';
@@ -373,12 +373,12 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
     }
   };
 
-  // Export CSV
+  // Export Excel Spreadsheet
   const handleDownloadCsv = async () => {
     try {
       playTapSound();
       const summary = calcData.summary || {};
-      await downloadPartnerReportCsv({
+      await downloadPartnerReportExcel({
         periodLabel: timeRange,
         totalSales: summary.total_sales || 0,
         totalBuying: summary.total_buying || 0,
@@ -387,11 +387,11 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
         orders: calcData.orders || [],
         settlementInfo: settlements[0] || calcData.last_settlement,
         currencySymbol,
-        filename: `Partner_Profit_${pakistanToday()}.csv`,
+        filename: `Partner_Profit_${pakistanToday()}.xls`,
       });
-      toast.success('Spreadsheet exported!');
+      toast.success('Partner statement Excel exported!');
     } catch (err) {
-      toast.error('Failed to export CSV: ' + err.message);
+      toast.error('Failed to export Excel: ' + err.message);
     }
   };
 

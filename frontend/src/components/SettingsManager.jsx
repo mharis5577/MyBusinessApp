@@ -305,8 +305,15 @@ export default function SettingsManager({
       return;
     }
     try {
-      const { downloadCsv, exportMoney } = await import('../utils/tableExport');
-      const headers = ['Type', 'Invoice', 'Party', 'Date', 'Total', 'Paid', 'Balance', 'Status'];
+      const { downloadTableExcel, exportMoney } = await import('../utils/tableExport');
+      const headers = ['Category', 'Invoice #', 'Customer / Party', 'Date', 'Total (Rs.)', 'Paid (Rs.)', 'Balance (Rs.)', 'Status'];
+      const colTypes = ['center', 'center', 'text', 'center', 'number', 'number', 'number', 'status'];
+      const colWidths = [100, 110, 190, 95, 110, 110, 110, 90];
+
+      let sumTotal = 0;
+      let sumPaid = 0;
+      let sumBalance = 0;
+
       const rows = report.bills.map((b) => {
         const total = Number(b.total_amount) || 0;
         const paid = Number(b.amount_paid) || 0;
@@ -316,21 +323,47 @@ export default function SettingsManager({
           if (balance <= 0) status = 'paid';
           else if (status === 'paid') status = 'due';
         }
+        sumTotal += total;
+        sumPaid += paid;
+        sumBalance += balance;
+
+        const typeLabel =
+          b.bill_type === 'supplier'
+            ? 'Saudia Buying'
+            : b.bill_type === 'help'
+            ? 'Help'
+            : b.bill_type === 'khata'
+            ? 'Credit Khata'
+            : 'Sale';
+
         return [
-          b.bill_type || '',
+          typeLabel,
           b.invoice_number || '',
           b.customer_name || '',
           b.bill_date || '',
-          exportMoney(total),
-          exportMoney(paid),
-          exportMoney(balance),
-          status,
+          total,
+          paid,
+          balance,
+          status.toUpperCase(),
         ];
       });
-      await downloadCsv(headers, rows, `monthly-report-${report.period}.csv`);
-      toast.success('Report exported (CSV)');
+
+      const summaryRow = ['TOTALS', `${rows.length} Bills`, '', '', sumTotal, sumPaid, sumBalance, ''];
+
+      await downloadTableExcel({
+        title: `Elite Chocolate — Monthly Report (${report.period})`,
+        subtitle: `Sales: Rs. ${exportMoney(report.sales_total)} · Buying: Rs. ${exportMoney(report.buying_total)} · Generated on ${new Date().toLocaleDateString('en-PK')}`,
+        sheetName: `Report ${report.period}`,
+        headers,
+        rows,
+        colTypes,
+        colWidths,
+        summaryRow,
+        filename: `Monthly_Report_${report.period}.xls`,
+      });
+      toast.success('Monthly report exported (Excel)');
     } catch (err) {
-      if (err?.name !== 'AbortError') toast.error('CSV export failed: ' + err.message);
+      if (err?.name !== 'AbortError') toast.error('Excel export failed: ' + err.message);
     }
   };
 
