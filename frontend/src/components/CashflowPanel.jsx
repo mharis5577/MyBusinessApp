@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   ArrowDownUp,
   BarChart2,
@@ -11,6 +11,7 @@ import {
   DollarSign,
   Wallet,
   Calendar,
+  CalendarDays,
   Download,
   FileSpreadsheet,
   CheckCircle2,
@@ -20,60 +21,55 @@ import {
   ArrowDownRight,
   FileText,
   Smartphone,
+  Sparkles,
+  ChevronDown,
+  Clock,
+  Filter,
+  Check,
+  X,
+  FileDown,
 } from 'lucide-react';
-import { formatCurrency } from '../utils/pakistan';
+import { formatCurrency, pakistanToday, addDaysToDateString } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import EmptyState from './EmptyState';
 import { billTypeBadgeClass, billTypeShortLabel, isHelpBill } from '../utils/billTypes';
-import { downloadCashflowReportPdf } from '../utils/tableExport';
+import { downloadCashflowReportPdf, downloadCashflowCsv } from '../utils/tableExport';
 
 /**
  * Modern Stripe/Shopify-style Financial Breakdown & Daily Profit Ledger
- * Replaces clunky SVG graphs with a clean, fully responsive daily timeline.
+ * Displays the daily profit timeline for the active view with pagination.
  */
 function DailyFinancialBreakdown({ data = [], currencySymbol = 'Rs.' }) {
-  const [timeRange, setTimeRange] = useState('7d');
   const [filterMode, setFilterMode] = useState('all'); // 'all' | 'profitable' | 'costs'
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [timeRange, filterMode]);
+  }, [data, filterMode]);
 
-  // Filter data based on selected time range
-  const rangeLimit =
-    timeRange === '1d'
-      ? 1
-      : timeRange === '7d'
-      ? 7
-      : timeRange === '14d'
-      ? 14
-      : timeRange === '30d'
-      ? 30
-      : 999;
-  const filteredTimeline = (data || []).slice(-rangeLimit).reverse();
+  const displayedTimeline = [...(data || [])].reverse();
 
-  const totalPeriodSales = filteredTimeline.reduce((s, d) => s + (Number(d.sales) || 0), 0);
-  const totalPeriodBuying = filteredTimeline.reduce((s, d) => s + (Number(d.buying) || 0), 0);
+  const totalPeriodSales = displayedTimeline.reduce((s, d) => s + (Number(d.sales) || 0), 0);
+  const totalPeriodBuying = displayedTimeline.reduce((s, d) => s + (Number(d.buying) || 0), 0);
   const totalPeriodProfit = totalPeriodSales - totalPeriodBuying;
   const periodMargin = totalPeriodSales > 0 ? ((totalPeriodProfit / totalPeriodSales) * 100).toFixed(1) : '0.0';
 
-  if (!filteredTimeline || filteredTimeline.length === 0) {
+  if (!displayedTimeline || displayedTimeline.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '1.5rem 0', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-        No financial timeline data recorded yet.
+        No financial timeline data recorded for this period.
       </div>
     );
   }
 
-  const displayedRows = filteredTimeline.filter((item) => {
+  const displayedRows = displayedTimeline.filter((item) => {
     if (filterMode === 'profitable') return (Number(item.profit) || 0) > 0;
     if (filterMode === 'costs') return (Number(item.buying) || 0) > 0;
     return true;
   });
 
-  const pageSize = 3;
+  const pageSize = 4;
   const totalPages = Math.max(1, Math.ceil(displayedRows.length / pageSize));
   const validPage = Math.min(Math.max(1, currentPage), totalPages);
   const startIndex = (validPage - 1) * pageSize;
@@ -86,46 +82,33 @@ function DailyFinancialBreakdown({ data = [], currencySymbol = 'Rs.' }) {
         <div className="cashflow-chart-title-group">
           <Layers size={18} style={{ color: 'var(--accent-teal)' }} />
           <span className="cashflow-chart-title">Daily Profit & Financial Breakdown</span>
+          <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+            ({displayedTimeline.length} Day{displayedTimeline.length === 1 ? '' : 's'})
+          </span>
         </div>
 
         <div className="cashflow-chart-controls">
-          {/* Time Range Filter */}
-          <div className="chart-pill-group" role="group" aria-label="Time Range">
+          <div className="chart-pill-group" role="group" aria-label="Ledger Filter">
             <button
               type="button"
-              className={`chart-pill-btn${timeRange === '1d' ? ' is-active' : ''}`}
-              onClick={() => setTimeRange('1d')}
-              title="Today (1 Day)"
+              className={`chart-pill-btn${filterMode === 'all' ? ' is-active' : ''}`}
+              onClick={() => setFilterMode('all')}
             >
-              1D
+              All Days
             </button>
             <button
               type="button"
-              className={`chart-pill-btn${timeRange === '7d' ? ' is-active' : ''}`}
-              onClick={() => setTimeRange('7d')}
+              className={`chart-pill-btn${filterMode === 'profitable' ? ' is-active' : ''}`}
+              onClick={() => setFilterMode('profitable')}
             >
-              7D
+              Profitable Only
             </button>
             <button
               type="button"
-              className={`chart-pill-btn${timeRange === '14d' ? ' is-active' : ''}`}
-              onClick={() => setTimeRange('14d')}
+              className={`chart-pill-btn${filterMode === 'costs' ? ' is-active' : ''}`}
+              onClick={() => setFilterMode('costs')}
             >
-              14D
-            </button>
-            <button
-              type="button"
-              className={`chart-pill-btn${timeRange === '30d' ? ' is-active' : ''}`}
-              onClick={() => setTimeRange('30d')}
-            >
-              30D
-            </button>
-            <button
-              type="button"
-              className={`chart-pill-btn${timeRange === 'all' ? ' is-active' : ''}`}
-              onClick={() => setTimeRange('all')}
-            >
-              All
+              Purchases Only
             </button>
           </div>
         </div>
@@ -141,7 +124,7 @@ function DailyFinancialBreakdown({ data = [], currencySymbol = 'Rs.' }) {
         }}
       >
         <div style={{ background: 'var(--surface-muted)', padding: '0.75rem', borderRadius: 10, border: '1px solid var(--border-color)' }}>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 650 }}>Sales Revenue</div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 650 }}>Period Sales</div>
           <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--status-paid)', marginTop: 2 }}>
             {formatCurrency(currencySymbol, totalPeriodSales)}
           </div>
@@ -169,7 +152,7 @@ function DailyFinancialBreakdown({ data = [], currencySymbol = 'Rs.' }) {
         </div>
       </div>
 
-      {/* 3. Daily Ledger Cards List — 3 per page */}
+      {/* 3. Daily Ledger Cards List */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
         {pageRows.map((item, idx) => {
           const sales = Number(item.sales) || 0;
@@ -289,7 +272,7 @@ function DailyFinancialBreakdown({ data = [], currencySymbol = 'Rs.' }) {
         })}
       </div>
 
-      {/* Pagination Page Shifter — Max 3 Days per Page */}
+      {/* Pagination Page Shifter */}
       {displayedRows.length > 0 && (
         <div
           className="bills-pagination-bar"
@@ -329,7 +312,6 @@ function DailyFinancialBreakdown({ data = [], currencySymbol = 'Rs.' }) {
                 <ChevronLeft size={14} /> Prev
               </button>
 
-              {/* Page Number Buttons */}
               {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
                 <button
                   key={pageNum}
@@ -387,9 +369,47 @@ function DailyFinancialBreakdown({ data = [], currencySymbol = 'Rs.' }) {
 }
 
 /**
+ * Helper to compute startDate, endDate, and human-friendly label for any period preset.
+ */
+function getPeriodDetails(periodKey, customStart = '', customEnd = '') {
+  const today = pakistanToday();
+  if (periodKey === 'today') {
+    return { startDate: today, endDate: today, label: 'Today', dateRangeStr: today, isMaster: false };
+  }
+  if (periodKey === 'yesterday') {
+    const yest = addDaysToDateString(today, -1);
+    return { startDate: yest, endDate: yest, label: 'Yesterday', dateRangeStr: yest, isMaster: false };
+  }
+  if (periodKey === '7d') {
+    const start = addDaysToDateString(today, -6);
+    return { startDate: start, endDate: today, label: 'Last 7 Days', dateRangeStr: `${start} to ${today}`, isMaster: false };
+  }
+  if (periodKey === '14d') {
+    const start = addDaysToDateString(today, -13);
+    return { startDate: start, endDate: today, label: 'Last 14 Days', dateRangeStr: `${start} to ${today}`, isMaster: false };
+  }
+  if (periodKey === '30d') {
+    const start = addDaysToDateString(today, -29);
+    return { startDate: start, endDate: today, label: 'Last 30 Days', dateRangeStr: `${start} to ${today}`, isMaster: false };
+  }
+  if (periodKey === 'this_month') {
+    const start = `${today.slice(0, 7)}-01`;
+    return { startDate: start, endDate: today, label: 'This Month', dateRangeStr: `${start} to ${today}`, isMaster: false };
+  }
+  if (periodKey === 'custom') {
+    const s = customStart || today;
+    const e = customEnd || today;
+    return { startDate: s, endDate: e, label: 'Custom Range', dateRangeStr: `${s} to ${e}`, isMaster: false };
+  }
+  // 'all' / default
+  return { startDate: '', endDate: '', label: 'All Time', dateRangeStr: 'From Beginning to Present', isMaster: true };
+}
+
+/**
  * Cashflow & Operating Balance Dashboard
  * Tracks incoming money (sales) vs outgoing money (Saudia buying).
- * Clearly separates "Help" money so personal loans don't distort profit metrics.
+ * Includes Period Filtering, Specific Period Downloads (PDF/Mobile/CSV),
+ * and Master Download to export all historical cashflow from the very beginning.
  */
 export function CashflowPanel({
   compact = false,
@@ -403,25 +423,82 @@ export function CashflowPanel({
   const toast = useToast();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingState, setExportingState] = useState(null); // 'period_pdf' | 'period_mobile' | 'period_csv' | 'master_pdf' | 'master_csv' | null
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const res = await apiFetch(compact ? '/api/cashflow?compact=1' : '/api/cashflow');
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
-      setData(json);
-    } catch (err) {
-      toast.error(err.message || 'Cashflow load failed');
-    } finally {
-      setLoading(false);
+  // Period filtering state
+  const [periodFilter, setPeriodFilter] = useState('all'); // 'all' | 'today' | 'yesterday' | '7d' | '14d' | '30d' | 'this_month' | 'custom'
+  const [customStart, setCustomStart] = useState(pakistanToday());
+  const [customEnd, setCustomEnd] = useState(pakistanToday());
+  const [showCustomPicker, setShowCustomPicker] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showMasterMenu, setShowMasterMenu] = useState(false);
+
+  const exportMenuRef = useRef(null);
+  const masterMenuRef = useRef(null);
+
+  // Close menus on outside click
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target)) {
+        setShowExportMenu(false);
+      }
+      if (masterMenuRef.current && !masterMenuRef.current.contains(e.target)) {
+        setShowMasterMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  const load = useCallback(
+    async (preset = periodFilter, cStart = customStart, cEnd = customEnd) => {
+      setLoading(true);
+      try {
+        const periodInfo = getPeriodDetails(preset, cStart, cEnd);
+        const params = new URLSearchParams();
+        if (compact) params.append('compact', '1');
+        if (periodInfo.startDate) params.append('startDate', periodInfo.startDate);
+        if (periodInfo.endDate) params.append('endDate', periodInfo.endDate);
+
+        const res = await apiFetch(`/api/cashflow?${params.toString()}`);
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+        setData(json);
+      } catch (err) {
+        toast.error(err.message || 'Cashflow load failed');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [compact, periodFilter, customStart, customEnd]
+  );
+
+  useEffect(() => {
+    load(periodFilter, customStart, customEnd);
+  }, [periodFilter, compact]);
+
+  const handlePeriodChange = (newPeriod) => {
+    setPeriodFilter(newPeriod);
+    if (newPeriod === 'custom') {
+      setShowCustomPicker(true);
+    } else {
+      setShowCustomPicker(false);
+      load(newPeriod, customStart, customEnd);
     }
   };
 
-  useEffect(() => {
-    load();
-  }, [compact]);
+  const applyCustomRange = () => {
+    if (!customStart || !customEnd) {
+      toast.warning('Please select both start and end dates');
+      return;
+    }
+    if (customStart > customEnd) {
+      toast.error('Start date cannot be after end date');
+      return;
+    }
+    setShowCustomPicker(false);
+    load('custom', customStart, customEnd);
+  };
 
   const openFlowBill = (row) => {
     if (!row?.id) return;
@@ -429,33 +506,111 @@ export function CashflowPanel({
     else if (onNavigate) onNavigate('database');
   };
 
-  const handleExportPdf = async (isMobile = false) => {
-    setExportingPdf(isMobile ? 'mobile' : 'a4');
+  // -------------------------------------------------------------
+  // 1. SPECIFIC PERIOD DOWNLOAD HANDLERS
+  // -------------------------------------------------------------
+  const handleExportPeriod = async (type = 'pdf') => {
+    setShowExportMenu(false);
+    const periodInfo = getPeriodDetails(periodFilter, customStart, customEnd);
+    setExportingState(`period_${type}`);
+
     try {
+      // Fetch full records for this period (all_records=1 ensures 100% data export)
+      const params = new URLSearchParams({ all_records: '1' });
+      if (periodInfo.startDate) params.append('startDate', periodInfo.startDate);
+      if (periodInfo.endDate) params.append('endDate', periodInfo.endDate);
+
+      const res = await apiFetch(`/api/cashflow?${params.toString()}`);
+      const fullData = await res.json();
+      if (!res.ok) throw new Error(fullData.error || 'Failed to fetch period data');
+
+      const dateSlug = periodInfo.startDate && periodInfo.endDate
+        ? `${periodInfo.startDate}_to_${periodInfo.endDate}`
+        : pakistanToday();
+
+      if (type === 'csv') {
+        await downloadCashflowCsv({
+          companyName: 'ELITE CHOCOLATE',
+          currencySymbol,
+          cashflow: fullData,
+          dailyTrend: fullData?.daily_trend || [],
+          moneyFlow: fullData?.money_flow || [],
+          periodLabel: periodInfo.label,
+          dateRange: periodInfo.dateRangeStr,
+          isMaster: periodInfo.isMaster,
+          filename: `Cashflow_${periodInfo.label.replace(/\s+/g, '_')}_${dateSlug}.csv`,
+        });
+        toast.success(`Period CSV (${periodInfo.label}) downloaded!`);
+      } else {
+        const isMobile = type === 'mobile';
+        await downloadCashflowReportPdf({
+          companyName: 'ELITE CHOCOLATE',
+          currencySymbol,
+          cashflow: fullData,
+          dailyTrend: fullData?.daily_trend || [],
+          moneyFlow: fullData?.money_flow || [],
+          isMobile,
+          periodLabel: periodInfo.label,
+          dateRange: periodInfo.dateRangeStr,
+          isMaster: periodInfo.isMaster,
+          filename: isMobile
+            ? `Cashflow_Mobile_${periodInfo.label.replace(/\s+/g, '_')}_${dateSlug}.pdf`
+            : `Cashflow_Statement_${periodInfo.label.replace(/\s+/g, '_')}_${dateSlug}.pdf`,
+        });
+        toast.success(isMobile ? `Mobile PDF Pass (${periodInfo.label}) downloaded!` : `A4 PDF Statement (${periodInfo.label}) downloaded!`);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to generate export file');
+    } finally {
+      setExportingState(null);
+    }
+  };
+
+  // -------------------------------------------------------------
+  // 2. MASTER DOWNLOAD HANDLERS (ALL-TIME FROM INCEPTION)
+  // -------------------------------------------------------------
+  const handleExportMaster = async (format = 'pdf') => {
+    setShowMasterMenu(false);
+    setExportingState(`master_${format}`);
+
+    try {
+      // Fetch entire master historical dataset without date bounds
+      const res = await apiFetch('/api/cashflow?all_records=1&master=1');
+      const masterData = await res.json();
+      if (!res.ok) throw new Error(masterData.error || 'Failed to fetch master data');
+
+      const todaySlug = pakistanToday();
+      const isMobile = format === 'mobile';
+
       await downloadCashflowReportPdf({
         companyName: 'ELITE CHOCOLATE',
         currencySymbol,
-        cashflow: data,
-        dailyTrend: data?.daily_trend || [],
-        moneyFlow: data?.money_flow || [],
+        cashflow: masterData,
+        dailyTrend: masterData?.daily_trend || [],
+        moneyFlow: masterData?.money_flow || [],
         isMobile,
+        periodLabel: 'All Time (From Inception)',
+        dateRange: 'Complete Historical Statement',
+        isMaster: true,
         filename: isMobile
-          ? `Cashflow_Mobile_${new Date().toISOString().slice(0, 10)}.pdf`
-          : `Cashflow_Statement_${new Date().toISOString().slice(0, 10)}.pdf`,
+          ? `Cashflow_MASTER_Mobile_${todaySlug}.pdf`
+          : `Cashflow_MASTER_AllTime_Statement_${todaySlug}.pdf`,
       });
-      toast.success(isMobile ? 'Mobile PDF downloaded!' : 'A4 PDF Statement downloaded!');
+      toast.success(isMobile ? 'Master Mobile View PDF downloaded!' : 'Master All-Time PDF Statement downloaded!');
     } catch (err) {
       console.error(err);
-      toast.error('Failed to generate PDF statement');
+      toast.error('Failed to generate Master statement');
     } finally {
-      setExportingPdf(false);
+      setExportingState(null);
     }
   };
 
   if (loading && !data) {
     return (
-      <div className={`panel-flat${embedded ? ' is-embedded' : ''}`} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem 0' }}>
-        <RefreshCw className="spin" size={20} /> Loading cashflow…
+      <div className={`panel-flat${embedded ? ' is-embedded' : ''}`} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 0' }}>
+        <RefreshCw className="spin" size={24} style={{ color: 'var(--accent-teal)', marginBottom: '0.5rem' }} />
+        <div>Loading cashflow ledger…</div>
       </div>
     );
   }
@@ -472,6 +627,7 @@ export function CashflowPanel({
     daily_trend = [],
   } = data || {};
 
+  const activePeriod = getPeriodDetails(periodFilter, customStart, customEnd);
   const helpGivenShow = helpGiven != null ? helpGiven : help_given;
   const helpOutShow = helpOutstandingProp != null ? helpOutstandingProp : help_outstanding;
 
@@ -482,43 +638,213 @@ export function CashflowPanel({
 
   return (
     <div className={`panel-flat cashflow-panel${compact ? ' is-compact' : ''}${embedded ? ' is-embedded' : ''}`}>
+      {/* Top Header Banner */}
       {!embedded && (
-        <div className="panel-flat-head">
+        <div className="panel-flat-head" style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
           <div>
-            <h3 className="panel-flat-title">
-              <ArrowDownUp size={17} /> Cashflow & Operating Balance
-            </h3>
-            <p className="panel-flat-sub">Sales in vs Saudia buying · Help money is separate</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <h3 className="panel-flat-title" style={{ margin: 0 }}>
+                <ArrowDownUp size={18} style={{ color: 'var(--accent-teal)' }} /> Cashflow & Operating Balance
+              </h3>
+              <span
+                style={{
+                  fontSize: '0.7rem',
+                  fontWeight: 750,
+                  padding: '0.15rem 0.5rem',
+                  borderRadius: 999,
+                  background: activePeriod.isMaster ? 'rgba(212, 175, 55, 0.15)' : 'rgba(45, 212, 191, 0.15)',
+                  color: activePeriod.isMaster ? '#eab308' : 'var(--accent-teal)',
+                  border: `1px solid ${activePeriod.isMaster ? 'rgba(212, 175, 55, 0.3)' : 'rgba(45, 212, 191, 0.3)'}`,
+                }}
+              >
+                {activePeriod.label}
+              </span>
+            </div>
+            <p className="panel-flat-sub" style={{ marginTop: '0.2rem' }}>
+              Incoming sales vs Saudia buying costs · Personal loans separated
+            </p>
           </div>
+
+          {/* Action Buttons Toolbar */}
           <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            <button
-              type="button"
-              className="btn-primary"
-              style={{ width: 'auto', minHeight: 34, padding: '0.35rem 0.75rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-              disabled={Boolean(exportingPdf)}
-              onClick={() => handleExportPdf(false)}
-              title="Download Full A4 PDF Statement"
-            >
-              {exportingPdf === 'a4' ? <RefreshCw className="spin" size={13} /> : <FileText size={13} />}
-              <span>{exportingPdf === 'a4' ? 'Exporting…' : 'PDF Statement'}</span>
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              style={{ width: 'auto', minHeight: 34, padding: '0.35rem 0.75rem', fontSize: '0.75rem', borderColor: 'var(--accent-teal)', color: 'var(--accent-teal)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-              disabled={Boolean(exportingPdf)}
-              onClick={() => handleExportPdf(true)}
-              title="Download Phone-optimized Mobile PDF"
-            >
-              {exportingPdf === 'mobile' ? <RefreshCw className="spin" size={13} /> : <Smartphone size={13} />}
-              <span>{exportingPdf === 'mobile' ? 'Exporting…' : 'Mobile PDF'}</span>
-            </button>
+            {/* 1. MASTER DOWNLOAD BUTTON (ALL TIME FROM BEGINNING) */}
+            <div style={{ position: 'relative' }} ref={masterMenuRef}>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{
+                  width: 'auto',
+                  minHeight: 34,
+                  padding: '0.35rem 0.8rem',
+                  fontSize: '0.76rem',
+                  fontWeight: 750,
+                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  border: 'none',
+                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                }}
+                disabled={Boolean(exportingState)}
+                onClick={() => setShowMasterMenu((prev) => !prev)}
+                title="Download complete Master Cashflow from beginning of time"
+              >
+                {exportingState?.startsWith('master') ? (
+                  <RefreshCw className="spin" size={13} />
+                ) : (
+                  <Sparkles size={13} style={{ color: '#fef08a' }} />
+                )}
+                <span>Master Download (All Time)</span>
+                <ChevronDown size={12} />
+              </button>
+
+              {showMasterMenu && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    right: 0,
+                    marginTop: '0.35rem',
+                    background: 'var(--surface-dropdown, #1e293b)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 10,
+                    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.4)',
+                    minWidth: 230,
+                    zIndex: 50,
+                    padding: '0.4rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.25rem',
+                  }}
+                >
+                  <div style={{ padding: '0.35rem 0.55rem', fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    All-Time Master Downloads
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{ justifyContent: 'flex-start', padding: '0.45rem 0.6rem', fontSize: '0.76rem', gap: '0.5rem', width: '100%', textAlign: 'left', borderRadius: 6 }}
+                    onClick={() => handleExportMaster('pdf')}
+                  >
+                    <FileText size={14} style={{ color: '#eab308' }} />
+                    <div>
+                      <div style={{ fontWeight: 700 }}>Master PDF Statement (A4)</div>
+                      <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)' }}>Complete multi-page history</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{ justifyContent: 'flex-start', padding: '0.45rem 0.6rem', fontSize: '0.76rem', gap: '0.5rem', width: '100%', textAlign: 'left', borderRadius: 6 }}
+                    onClick={() => handleExportMaster('mobile')}
+                  >
+                    <Smartphone size={14} style={{ color: 'var(--accent-teal)' }} />
+                    <div>
+                      <div style={{ fontWeight: 700 }}>Master Mobile View Download</div>
+                      <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)' }}>Phone-optimized mobile PDF pass</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* 2. SPECIFIC PERIOD DOWNLOAD BUTTON */}
+            <div style={{ position: 'relative' }} ref={exportMenuRef}>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{
+                  width: 'auto',
+                  minHeight: 34,
+                  padding: '0.35rem 0.75rem',
+                  fontSize: '0.75rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  borderColor: 'var(--border-color)',
+                }}
+                disabled={Boolean(exportingState)}
+                onClick={() => setShowExportMenu((prev) => !prev)}
+                title="Download Statement for the selected period"
+              >
+                {exportingState?.startsWith('period') ? (
+                  <RefreshCw className="spin" size={13} />
+                ) : (
+                  <Download size={13} />
+                )}
+                <span>Export Period</span>
+                <ChevronDown size={12} />
+              </button>
+
+              {showExportMenu && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    right: 0,
+                    marginTop: '0.35rem',
+                    background: 'var(--surface-dropdown, #1e293b)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 10,
+                    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.4)',
+                    minWidth: 220,
+                    zIndex: 50,
+                    padding: '0.4rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.25rem',
+                  }}
+                >
+                  <div style={{ padding: '0.35rem 0.55rem', fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    {activePeriod.label} Exports
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{ justifyContent: 'flex-start', padding: '0.45rem 0.6rem', fontSize: '0.76rem', gap: '0.5rem', width: '100%', textAlign: 'left', borderRadius: 6 }}
+                    onClick={() => handleExportPeriod('pdf')}
+                  >
+                    <FileText size={14} style={{ color: 'var(--status-paid)' }} />
+                    <div>
+                      <div style={{ fontWeight: 700 }}>Period PDF Statement</div>
+                      <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)' }}>Formal A4 report for {activePeriod.label}</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{ justifyContent: 'flex-start', padding: '0.45rem 0.6rem', fontSize: '0.76rem', gap: '0.5rem', width: '100%', textAlign: 'left', borderRadius: 6 }}
+                    onClick={() => handleExportPeriod('csv')}
+                  >
+                    <FileSpreadsheet size={14} style={{ color: '#38bdf8' }} />
+                    <div>
+                      <div style={{ fontWeight: 700 }}>Period CSV Spreadsheet</div>
+                      <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)' }}>Structured Excel / CSV ledger</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{ justifyContent: 'flex-start', padding: '0.45rem 0.6rem', fontSize: '0.76rem', gap: '0.5rem', width: '100%', textAlign: 'left', borderRadius: 6 }}
+                    onClick={() => handleExportPeriod('mobile')}
+                  >
+                    <Smartphone size={14} style={{ color: 'var(--accent-teal)' }} />
+                    <div>
+                      <div style={{ fontWeight: 700 }}>Period Mobile Pass</div>
+                      <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)' }}>Quick mobile receipt pass</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Refresh button */}
             <button
               type="button"
               className="btn-secondary"
               style={{ width: 'auto', minHeight: 34, padding: '0.35rem 0.7rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
               disabled={loading}
-              onClick={load}
+              onClick={() => load(periodFilter, customStart, customEnd)}
             >
               <RefreshCw size={13} className={loading ? 'spin' : undefined} /> <span>Refresh</span>
             </button>
@@ -526,41 +852,151 @@ export function CashflowPanel({
         </div>
       )}
 
-      {embedded && (
-        <div className="dash-dropdown-toolbar">
-          <span>Sales · Saudia · Help out {formatCurrency(currencySymbol, helpOutShow)}</span>
-          <div style={{ display: 'flex', gap: '0.35rem' }}>
+      {/* PERIOD FILTER SELECTOR BAR */}
+      <div
+        style={{
+          background: 'var(--surface-muted)',
+          borderRadius: 12,
+          padding: '0.6rem 0.75rem',
+          margin: '0.75rem 0',
+          border: '1px solid var(--border-color)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.5rem',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+            <CalendarDays size={15} style={{ color: 'var(--accent-teal)' }} />
+            <span>Select Period:</span>
+          </div>
+
+          {/* Quick Period Filter Pills */}
+          <div className="chart-pill-group" role="group" aria-label="Cashflow Period" style={{ flexWrap: 'wrap' }}>
             <button
               type="button"
-              className="btn-primary"
-              style={{ width: 'auto', minHeight: 30, padding: '0.25rem 0.6rem', fontSize: '0.72rem' }}
-              disabled={Boolean(exportingPdf)}
-              onClick={() => handleExportPdf(false)}
+              className={`chart-pill-btn${periodFilter === 'all' ? ' is-active' : ''}`}
+              onClick={() => handlePeriodChange('all')}
+              title="All-Time from Beginning"
             >
-              <FileText size={13} /> PDF
+              All Time
             </button>
             <button
               type="button"
-              className="btn-secondary"
-              style={{ width: 'auto', minHeight: 30, padding: '0.25rem 0.6rem', fontSize: '0.72rem', borderColor: 'var(--accent-teal)', color: 'var(--accent-teal)' }}
-              disabled={Boolean(exportingPdf)}
-              onClick={() => handleExportPdf(true)}
+              className={`chart-pill-btn${periodFilter === 'today' ? ' is-active' : ''}`}
+              onClick={() => handlePeriodChange('today')}
+              title="Today Only"
             >
-              <Smartphone size={13} /> Mobile
+              Today
             </button>
             <button
               type="button"
-              className="btn-secondary"
-              style={{ width: 'auto', minHeight: 30, padding: '0.25rem 0.6rem', fontSize: '0.72rem' }}
-              onClick={load}
+              className={`chart-pill-btn${periodFilter === 'yesterday' ? ' is-active' : ''}`}
+              onClick={() => handlePeriodChange('yesterday')}
+              title="Yesterday Only"
             >
-              <RefreshCw size={13} /> Refresh
+              Yesterday
+            </button>
+            <button
+              type="button"
+              className={`chart-pill-btn${periodFilter === '7d' ? ' is-active' : ''}`}
+              onClick={() => handlePeriodChange('7d')}
+              title="Last 7 Days"
+            >
+              7D
+            </button>
+            <button
+              type="button"
+              className={`chart-pill-btn${periodFilter === '14d' ? ' is-active' : ''}`}
+              onClick={() => handlePeriodChange('14d')}
+              title="Last 14 Days"
+            >
+              14D
+            </button>
+            <button
+              type="button"
+              className={`chart-pill-btn${periodFilter === '30d' ? ' is-active' : ''}`}
+              onClick={() => handlePeriodChange('30d')}
+              title="Last 30 Days"
+            >
+              30D
+            </button>
+            <button
+              type="button"
+              className={`chart-pill-btn${periodFilter === 'this_month' ? ' is-active' : ''}`}
+              onClick={() => handlePeriodChange('this_month')}
+              title="This Current Month"
+            >
+              This Month
+            </button>
+            <button
+              type="button"
+              className={`chart-pill-btn${periodFilter === 'custom' ? ' is-active' : ''}`}
+              onClick={() => handlePeriodChange('custom')}
+              title="Pick Custom Date Range"
+            >
+              Custom Range…
             </button>
           </div>
         </div>
-      )}
 
-      {/* KPI Cards */}
+        {/* Custom Date Range Selector Form */}
+        {(showCustomPicker || periodFilter === 'custom') && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '0.6rem',
+              paddingTop: '0.5rem',
+              borderTop: '1px dashed var(--border-subtle)',
+              marginTop: '0.2rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>From:</span>
+              <input
+                type="date"
+                className="input-field"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                style={{ minHeight: 30, padding: '0.25rem 0.5rem', fontSize: '0.78rem', width: 'auto' }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>To:</span>
+              <input
+                type="date"
+                className="input-field"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                style={{ minHeight: 30, padding: '0.25rem 0.5rem', fontSize: '0.78rem', width: 'auto' }}
+              />
+            </div>
+            <button
+              type="button"
+              className="btn-primary"
+              style={{ width: 'auto', minHeight: 30, padding: '0.25rem 0.75rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+              onClick={applyCustomRange}
+            >
+              <Check size={13} /> Apply Range
+            </button>
+          </div>
+        )}
+
+        {/* Active Range Subtitle Banner */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.74rem', color: 'var(--text-secondary)', flexWrap: 'wrap', gap: '0.4rem' }}>
+          <span>
+            Active Scope: <strong style={{ color: 'var(--text-primary)' }}>{activePeriod.label}</strong>
+            {activePeriod.dateRangeStr && <span> ({activePeriod.dateRangeStr})</span>}
+          </span>
+          <span style={{ color: 'var(--accent-teal)' }}>
+            Showing <strong>{daily_trend.length}</strong> active trading day{daily_trend.length === 1 ? '' : 's'}
+          </span>
+        </div>
+      </div>
+
+      {/* KPI Cards Grid */}
       <div className="cashflow-stats-grid">
         <div className="cashflow-stat-box">
           <div className="cashflow-stat-title">
@@ -617,7 +1053,7 @@ export function CashflowPanel({
       {/* Visual Cashflow Distribution Bar */}
       <div className="cashflow-distribution-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.82rem', fontWeight: 800 }}>
-          <span style={{ color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>Cash Flow Distribution</span>
+          <span style={{ color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>Cash Flow Distribution ({activePeriod.label})</span>
           <span style={{ color: 'var(--accent-teal)', fontSize: '0.75rem', fontWeight: 750 }}>
             {total_sales > 0 ? `Profit Margin: ${((net_profit / total_sales) * 100).toFixed(1)}%` : '0%'}
           </span>
@@ -640,24 +1076,37 @@ export function CashflowPanel({
         </div>
       </div>
 
-      {/* Modern Daily Financial Breakdown (Replaces clunky SVG graph) */}
+      {/* Daily Financial Breakdown */}
       <DailyFinancialBreakdown data={daily_trend.length ? daily_trend : []} currencySymbol={currencySymbol} />
 
       {!compact && (
         <>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '0.85rem 0' }}>
-            {onNavigate && (
-              <button type="button" className="btn-secondary" style={{ width: 'auto' }} onClick={() => onNavigate('create')}>
-                <TrendingUp size={14} /> New sale / buy bill
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', margin: '1rem 0 0.5rem 0' }}>
+            <h4 className="panel-flat-section" style={{ margin: 0 }}>
+              Recent money flow {money_flow.length > 0 && <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>({money_flow.length} items)</span>}
+            </h4>
+            <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ width: 'auto', minHeight: 30, padding: '0.25rem 0.65rem', fontSize: '0.74rem' }}
+                onClick={() => handleExportPeriod('csv')}
+              >
+                <FileSpreadsheet size={13} /> Export Stream CSV
               </button>
-            )}
+              {onNavigate && (
+                <button type="button" className="btn-secondary" style={{ width: 'auto', minHeight: 30, padding: '0.25rem 0.65rem', fontSize: '0.74rem' }} onClick={() => onNavigate('create')}>
+                  <TrendingUp size={13} /> New sale / buy bill
+                </button>
+              )}
+            </div>
           </div>
-          <h4 className="panel-flat-section">Recent money flow</h4>
+
           {money_flow.length === 0 ? (
-            <EmptyState title="No bills yet" body="Cashflow appears after you save sales, Saudia buys, or help loans." />
+            <EmptyState title="No bills found for this period" body="Try selecting a different date range or All Time." />
           ) : (
             <div className="mobile-card-list">
-              {money_flow.slice(0, 40).map((row) => (
+              {money_flow.slice(0, 60).map((row) => (
                 <button
                   key={`${row.id}-${row.date}`}
                   type="button"
@@ -693,3 +1142,4 @@ export function CashflowPanel({
 }
 
 export default CashflowPanel;
+

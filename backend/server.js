@@ -2136,29 +2136,52 @@ app.delete('/api/memos/:id', async (req, res) => {
 app.get('/api/cashflow', async (req, res) => {
   try {
     const compact = String(req.query.compact || '') === '1';
+    const allRecords = String(req.query.all_records || req.query.master || '') === '1';
+    const startDate = String(req.query.startDate || req.query.start_date || '').trim();
+    const endDate = String(req.query.endDate || req.query.end_date || '').trim();
+
+    let dateCond = '';
+    const dateParams = [];
+    if (startDate && endDate) {
+      dateCond = ' AND bill_date >= ? AND bill_date <= ?';
+      dateParams.push(startDate, endDate);
+    } else if (startDate) {
+      dateCond = ' AND bill_date >= ?';
+      dateParams.push(startDate);
+    } else if (endDate) {
+      dateCond = ' AND bill_date <= ?';
+      dateParams.push(endDate);
+    }
+
     const salesRow = await dbGet(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
-       WHERE COALESCE(bill_type, 'customer') = 'customer' AND status != 'cancelled'`
+       WHERE COALESCE(bill_type, 'customer') = 'customer' AND status != 'cancelled'${dateCond}`,
+      dateParams
     );
     const buyingRow = await dbGet(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
-       WHERE bill_type = 'supplier' AND status != 'cancelled'`
+       WHERE bill_type = 'supplier' AND status != 'cancelled'${dateCond}`,
+      dateParams
     );
     const paidSalesRow = await dbGet(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
-       WHERE COALESCE(bill_type, 'customer') = 'customer' AND status = 'paid'`
+       WHERE COALESCE(bill_type, 'customer') = 'customer' AND status = 'paid'${dateCond}`,
+      dateParams
     );
     const pendingSalesRow = await dbGet(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
-       WHERE COALESCE(bill_type, 'customer') = 'customer' AND status = 'pending'`
+       WHERE COALESCE(bill_type, 'customer') = 'customer' AND status = 'pending'${dateCond}`,
+      dateParams
     );
     const helpGivenRow = await dbGet(
       `SELECT COALESCE(SUM(total_amount), 0) as total FROM bills
-       WHERE (bill_type = 'help' OR bill_type = 'loan') AND status != 'cancelled'`
+       WHERE (bill_type = 'help' OR bill_type = 'loan') AND status != 'cancelled'${dateCond}`,
+      dateParams
     );
     const helpRepaidRow = await dbGet(
       `SELECT COALESCE(SUM(COALESCE(amount_paid, 0)), 0) as total FROM bills
-       WHERE (bill_type = 'help' OR bill_type = 'loan') AND status != 'cancelled'`
+       WHERE (bill_type = 'help' OR bill_type = 'loan') AND status != 'cancelled'${dateCond}`,
+      dateParams
     );
     const advanceRow = await dbGet('SELECT COALESCE(SUM(amount), 0) as total FROM advance_payments');
     const advances = compact
@@ -2167,9 +2190,13 @@ app.get('/api/cashflow', async (req, res) => {
 
     let money_flow = [];
     if (!compact) {
+      const limitClause = allRecords ? '' : 'LIMIT 100';
       const recentBills = await dbAll(
         `SELECT id, bill_type, invoice_number, customer_name, bill_date, total_amount, status, notes
-         FROM bills ORDER BY bill_date DESC, id DESC LIMIT 40`
+         FROM bills
+         WHERE 1=1 ${dateCond}
+         ORDER BY bill_date DESC, id DESC ${limitClause}`,
+        dateParams
       );
 
       money_flow = recentBills.map((b) => {
@@ -2210,11 +2237,13 @@ app.get('/api/cashflow', async (req, res) => {
               COUNT(CASE WHEN COALESCE(NULLIF(TRIM(bill_type), ''), 'customer') = 'customer' AND status != 'cancelled' THEN 1 END) as sales_count,
               COUNT(CASE WHEN bill_type = 'supplier' AND status != 'cancelled' THEN 1 END) as buying_count
        FROM bills
-       WHERE bill_date IS NOT NULL AND TRIM(bill_date) != '' AND status != 'cancelled'
+       WHERE bill_date IS NOT NULL AND TRIM(bill_date) != '' AND status != 'cancelled'${dateCond}
        GROUP BY bill_date
-       ORDER BY bill_date ASC`
+       ORDER BY bill_date ASC`,
+      dateParams
     );
-    const daily_trend = dailyTrendRows.map((r) => ({
+
+    const trendMapped = dailyTrendRows.map((r) => ({
       date: r.date,
       sales: Math.round((Number(r.sales) || 0) * 100) / 100,
       buying: Math.round((Number(r.buying) || 0) * 100) / 100,
@@ -2222,7 +2251,10 @@ app.get('/api/cashflow', async (req, res) => {
       profit: Math.round(((Number(r.sales) || 0) - (Number(r.buying) || 0)) * 100) / 100,
       sales_count: Number(r.sales_count) || 0,
       buying_count: Number(r.buying_count) || 0,
-    })).slice(-30);
+    }));
+
+    // If master/all_records or explicit date filtering is applied, include all days; otherwise slice last 60
+    const daily_trend = (allRecords || startDate || endDate) ? trendMapped : trendMapped.slice(-60);
 
     res.json({
       total_sales,
@@ -2239,6 +2271,11 @@ app.get('/api/cashflow', async (req, res) => {
       advances,
       money_flow,
       daily_trend,
+      period: {
+        startDate: startDate || null,
+        endDate: endDate || null,
+        isMaster: allRecords || (!startDate && !endDate),
+      },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

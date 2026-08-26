@@ -543,6 +543,7 @@ export async function downloadDailyProfitSummaryPdf({
 
 /**
  * Generate a luxury Cashflow Statement PDF report (supports Formal A4 Document and FinTech Mobile Pass format).
+ * Supports period-specific reports and Master all-time comprehensive statements with multi-page pagination.
  */
 export async function downloadCashflowReportPdf({
   companyName = 'ELITE CHOCOLATE',
@@ -551,6 +552,9 @@ export async function downloadCashflowReportPdf({
   dailyTrend = [],
   moneyFlow = [],
   isMobile = false,
+  periodLabel = 'All Time',
+  dateRange = '',
+  isMaster = false,
   filename = 'Cashflow_Statement.pdf',
 }) {
   const { jsPDF } = await import('jspdf');
@@ -562,23 +566,23 @@ export async function downloadCashflowReportPdf({
     const pdf = new jsPDF({
       orientation: 'portrait',
       unit: 'pt',
-      format: [380, 800],
+      format: [380, 850],
       compress: true,
     });
 
     const pageWidth = 380;
-    const pageHeight = 800;
+    const pageHeight = 850;
     const margin = 14;
     const usableW = pageWidth - margin * 2;
     let y = margin;
 
     // A. Mobile Pass Header Card
     pdf.setFillColor(15, 23, 42); // slate-900
-    pdf.roundedRect(margin, y, usableW, 56, 8, 8, 'F');
+    pdf.roundedRect(margin, y, usableW, 58, 8, 8, 'F');
 
     // Gold Accent Stripe
     pdf.setFillColor(212, 175, 55); // 24k Gold
-    pdf.roundedRect(margin, y + 53, usableW, 3, 2, 2, 'F');
+    pdf.roundedRect(margin, y + 55, usableW, 3, 2, 2, 'F');
 
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(13);
@@ -587,8 +591,8 @@ export async function downloadCashflowReportPdf({
 
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(8);
-    pdf.setTextColor(45, 212, 191); // Teal
-    pdf.text('MOBILE CASHFLOW PASS', margin + 12, y + 36);
+    pdf.setTextColor(isMaster ? 212 : 45, isMaster ? 175 : 212, isMaster ? 55 : 191);
+    pdf.text(isMaster ? 'MASTER CASHFLOW PASS (ALL-TIME)' : `CASHFLOW PASS · ${periodLabel.toUpperCase()}`, margin + 12, y + 36);
 
     const dateStr = new Date().toLocaleDateString('en-PK', {
       day: 'numeric',
@@ -600,13 +604,12 @@ export async function downloadCashflowReportPdf({
     pdf.setTextColor(203, 213, 225);
     pdf.text(dateStr, pageWidth - margin - 12, y + 26, { align: 'right' });
 
-    y += 66;
+    y += 68;
 
     // B. Hero Net Profit Card
     const totalSales = Number(cashflow.total_sales || 0);
     const buyingCost = Number(cashflow.buying_cost || 0);
     const netProfit = Number(cashflow.net_profit || 0);
-    const helpGiven = Number(cashflow.help_given || 0);
     const profitMargin = totalSales > 0 ? Math.round((netProfit / totalSales) * 100) : 0;
 
     pdf.setFillColor(240, 253, 244); // light emerald surface
@@ -685,10 +688,10 @@ export async function downloadCashflowReportPdf({
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(9);
     pdf.setTextColor(15, 23, 42);
-    pdf.text('RECENT ACTIVITY FEED', margin, y);
+    pdf.text(isMaster ? 'HISTORICAL ACTIVITY FEED' : `PERIOD ACTIVITY FEED (${periodLabel})`, margin, y);
     y += 8;
 
-    const feedList = (moneyFlow || []).slice(0, 9);
+    const feedList = (moneyFlow || []).slice(0, 11);
     if (!feedList.length) {
       pdf.setFont('helvetica', 'italic');
       pdf.setFontSize(8);
@@ -764,6 +767,7 @@ export async function downloadCashflowReportPdf({
 
   // ==========================================
   // 2. FORMAL A4 DOCUMENT FORMAT (Desktop/Print)
+  // Multi-page supported for period and Master reports
   // ==========================================
   const pdf = new jsPDF({
     orientation: 'portrait',
@@ -774,7 +778,7 @@ export async function downloadCashflowReportPdf({
 
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  const margin = 30;
+  const margin = 28;
   const usableW = pageWidth - margin * 2;
   let y = margin;
 
@@ -789,82 +793,91 @@ export async function downloadCashflowReportPdf({
 
   // 1. Header Banner
   pdf.setFillColor(15, 23, 42); // slate-900
-  pdf.roundedRect(margin, y, usableW, 58, 6, 6, 'F');
+  pdf.roundedRect(margin, y, usableW, 60, 6, 6, 'F');
 
   // Gold accent
   pdf.setFillColor(212, 175, 55);
-  pdf.rect(margin, y + 55, usableW, 3, 'F');
+  pdf.rect(margin, y + 57, usableW, 3, 'F');
 
   pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(14);
+  pdf.setFontSize(13.5);
   pdf.setTextColor(255, 255, 255);
   pdf.text(String(companyName).toUpperCase(), margin + 14, y + 22);
 
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(8.5);
-  pdf.setTextColor(45, 212, 191); // teal-400
-  pdf.text('CASHFLOW & OPERATING FINANCIAL STATEMENT', margin + 14, y + 36);
+  pdf.setTextColor(isMaster ? 212 : 45, isMaster ? 175 : 212, isMaster ? 55 : 191);
+  pdf.text(
+    isMaster
+      ? 'MASTER CASHFLOW & ALL-TIME OPERATING STATEMENT'
+      : `CASHFLOW & OPERATING FINANCIAL STATEMENT — ${String(periodLabel || 'PERIOD').toUpperCase()}`,
+    margin + 14,
+    y + 36
+  );
 
-  const nowStr = new Date().toLocaleDateString('en-PK', {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
   pdf.setFont('helvetica', 'normal');
-  pdf.setFontSize(8);
-  pdf.setTextColor(203, 213, 225);
-  pdf.text(nowStr, pageWidth - margin - 14, y + 28, { align: 'right' });
+  pdf.setFontSize(7.5);
+  pdf.setTextColor(148, 163, 184);
+  const periodSub = dateRange
+    ? `Period: ${periodLabel} (${dateRange}) · Generated ${new Date().toLocaleDateString('en-PK')}`
+    : `Period: ${periodLabel} · Generated ${new Date().toLocaleDateString('en-PK')}`;
+  pdf.text(periodSub, margin + 14, y + 49);
 
-  y += 72;
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(8);
+  pdf.setTextColor(212, 175, 55);
+  pdf.text(isMaster ? 'MASTER LEDGER' : 'PERIOD REPORT', pageWidth - margin - 90, y + 22);
+
+  y += 74;
 
   // 2. Financial Overview Cards
   const totalSales = Number(cashflow.total_sales || 0);
   const buyingCost = Number(cashflow.buying_cost || 0);
   const netProfit = Number(cashflow.net_profit || 0);
   const helpGiven = Number(cashflow.help_given || 0);
+  const profitMarginPct = totalSales > 0 ? ((netProfit / totalSales) * 100).toFixed(1) : '0.0';
 
   const kpis = [
     { label: 'TOTAL SALES (INVOICED)', value: `${currencySymbol} ${exportMoney(totalSales)}`, color: [16, 185, 129] },
     { label: 'SAUDIA BUYING (OUTFLOW)', value: `${currencySymbol} ${exportMoney(buyingCost)}`, color: [244, 63, 94] },
-    { label: 'NET PROFIT RETAINED', value: `${currencySymbol} ${exportMoney(netProfit)}`, color: [14, 165, 233] },
+    { label: 'NET PROFIT RETAINED', value: `${currencySymbol} ${exportMoney(netProfit)} (${profitMarginPct}%)`, color: [14, 165, 233] },
     { label: 'HELP MONEY GIVEN (OUT)', value: `${currencySymbol} ${exportMoney(helpGiven)}`, color: [234, 179, 8] },
   ];
 
   const cardW = (usableW - 18) / 2;
-  const cardH = 44;
+  const cardH = 42;
 
   kpis.forEach((kpi, idx) => {
     const col = idx % 2;
     const row = Math.floor(idx / 2);
     const cx = margin + col * (cardW + 18);
-    const cy = y + row * (cardH + 10);
+    const cy = y + row * (cardH + 8);
 
     pdf.setFillColor(248, 250, 252);
     pdf.setDrawColor(226, 232, 240);
     pdf.roundedRect(cx, cy, cardW, cardH, 4, 4, 'FD');
 
     pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(7.2);
+    pdf.setFontSize(7);
     pdf.setTextColor(100, 116, 139);
-    pdf.text(kpi.label, cx + 10, cy + 15);
+    pdf.text(kpi.label, cx + 10, cy + 14);
 
     pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(12);
+    pdf.setFontSize(11);
     pdf.setTextColor(kpi.color[0], kpi.color[1], kpi.color[2]);
-    pdf.text(kpi.value, cx + 10, cy + 32);
+    pdf.text(kpi.value, cx + 10, cy + 30);
   });
 
-  y += 2 * (cardH + 10) + 14;
+  y += 2 * (cardH + 8) + 12;
 
-  // 3. Daily Performance Table
+  // 3. Daily Performance Table (Full Multi-Page Rendering)
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(9.5);
   pdf.setTextColor(15, 23, 42);
-  pdf.text('Daily Cashflow Trend Breakdown', margin, y);
-  y += 10;
+  pdf.text(`Daily Cashflow Trend Breakdown (${dailyTrend.length} Days)`, margin, y);
+  y += 8;
 
-  const dayHeaders = ['Date', 'Sales In', 'Buying Out', 'Help Given', 'Net Profit'];
+  const dayHeaders = ['Date', 'Sales In', 'Saudia Buying', 'Help Out', 'Net Profit'];
   const dayColW = [usableW * 0.22, usableW * 0.2, usableW * 0.2, usableW * 0.18, usableW * 0.2];
   const dayColX = [];
   {
@@ -875,37 +888,44 @@ export async function downloadCashflowReportPdf({
     }
   }
 
-  pdf.setFillColor(30, 41, 59);
-  pdf.rect(margin, y, usableW, 18, 'F');
-  pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(7.5);
-  pdf.setTextColor(212, 175, 55);
-  dayHeaders.forEach((h, i) => {
-    const align = i === 0 ? 'left' : 'right';
-    const tx = align === 'right' ? dayColX[i] + dayColW[i] - 4 : dayColX[i] + 4;
-    pdf.text(h, tx, y + 12, { align });
-  });
-  y += 18;
+  const drawDayHeader = () => {
+    pdf.setFillColor(30, 41, 59);
+    pdf.rect(margin, y, usableW, 16, 'F');
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7.2);
+    pdf.setTextColor(212, 175, 55);
+    dayHeaders.forEach((h, i) => {
+      const align = i === 0 ? 'left' : 'right';
+      const tx = align === 'right' ? dayColX[i] + dayColW[i] - 4 : dayColX[i] + 4;
+      pdf.text(h, tx, y + 11.5, { align });
+    });
+    y += 16;
+  };
 
-  const trendList = (dailyTrend || []).slice(0, 14);
-  if (!trendList.length) {
+  drawDayHeader();
+
+  if (!dailyTrend.length) {
     pdf.setFont('helvetica', 'italic');
-    pdf.setFontSize(8.5);
+    pdf.setFontSize(8);
     pdf.setTextColor(140, 140, 140);
-    pdf.text('No cashflow trend data recorded.', margin + 8, y + 16);
-    y += 24;
+    pdf.text('No cashflow trend data recorded for this period.', margin + 8, y + 14);
+    y += 22;
   } else {
-    trendList.forEach((t, idx) => {
+    dailyTrend.forEach((t, idx) => {
+      if (checkPageBreak(18)) {
+        drawDayHeader();
+      }
+
       const isAlt = idx % 2 === 1;
       pdf.setFillColor(isAlt ? 248 : 255, isAlt ? 250 : 255, isAlt ? 252 : 255);
-      pdf.rect(margin, y, usableW, 16, 'F');
+      pdf.rect(margin, y, usableW, 15, 'F');
 
       pdf.setDrawColor(226, 232, 240);
       pdf.setLineWidth(0.4);
-      pdf.line(margin, y + 16, margin + usableW, y + 16);
+      pdf.line(margin, y + 15, margin + usableW, y + 15);
 
       pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(7.5);
+      pdf.setFontSize(7.2);
       pdf.setTextColor(15, 23, 42);
 
       const dSales = Number(t.sales || 0);
@@ -913,31 +933,31 @@ export async function downloadCashflowReportPdf({
       const dHelp = Number(t.help || 0);
       const dProfit = Number(t.profit || 0);
 
-      pdf.text(String(t.date || '—'), dayColX[0] + 4, y + 11.5);
-      pdf.text(`${currencySymbol} ${exportMoney(dSales)}`, dayColX[1] + dayColW[1] - 4, y + 11.5, { align: 'right' });
-      pdf.text(`${currencySymbol} ${exportMoney(dBuying)}`, dayColX[2] + dayColW[2] - 4, y + 11.5, { align: 'right' });
-      pdf.text(`${currencySymbol} ${exportMoney(dHelp)}`, dayColX[3] + dayColW[3] - 4, y + 11.5, { align: 'right' });
+      pdf.text(String(t.date || '—'), dayColX[0] + 4, y + 10.5);
+      pdf.text(`${currencySymbol} ${exportMoney(dSales)}`, dayColX[1] + dayColW[1] - 4, y + 10.5, { align: 'right' });
+      pdf.text(`${currencySymbol} ${exportMoney(dBuying)}`, dayColX[2] + dayColW[2] - 4, y + 10.5, { align: 'right' });
+      pdf.text(`${currencySymbol} ${exportMoney(dHelp)}`, dayColX[3] + dayColW[3] - 4, y + 10.5, { align: 'right' });
 
       pdf.setFont('helvetica', 'bold');
       pdf.setTextColor(dProfit >= 0 ? 16 : 239, dProfit >= 0 ? 185 : 68, dProfit >= 0 ? 129 : 68);
-      pdf.text(`${currencySymbol} ${exportMoney(dProfit)}`, dayColX[4] + dayColW[4] - 4, y + 11.5, { align: 'right' });
+      pdf.text(`${currencySymbol} ${exportMoney(dProfit)}`, dayColX[4] + dayColW[4] - 4, y + 10.5, { align: 'right' });
 
-      y += 16;
+      y += 15;
     });
   }
 
-  y += 16;
-  checkPageBreak(120);
+  y += 14;
+  checkPageBreak(90);
 
-  // 4. Recent Transactions Flow
+  // 4. Recent Transactions Flow (Full Multi-Page Rendering)
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(9.5);
   pdf.setTextColor(15, 23, 42);
-  pdf.text('Recent Money Transactions', margin, y);
-  y += 10;
+  pdf.text(`Itemized Cashflow Transactions (${moneyFlow.length} Total)`, margin, y);
+  y += 8;
 
   const flowHeaders = ['Type', 'Invoice #', 'Date', 'Party / Description', 'Amount'];
-  const flowColW = [usableW * 0.13, usableW * 0.16, usableW * 0.14, usableW * 0.41, usableW * 0.16];
+  const flowColW = [usableW * 0.12, usableW * 0.16, usableW * 0.14, usableW * 0.42, usableW * 0.16];
   const flowColX = [];
   {
     let x = margin;
@@ -947,38 +967,44 @@ export async function downloadCashflowReportPdf({
     }
   }
 
-  pdf.setFillColor(30, 41, 59);
-  pdf.rect(margin, y, usableW, 18, 'F');
-  pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(7.5);
-  pdf.setTextColor(212, 175, 55);
-  flowHeaders.forEach((h, i) => {
-    const align = i === 4 ? 'right' : i === 0 || i === 1 || i === 2 ? 'center' : 'left';
-    const tx = align === 'right' ? flowColX[i] + flowColW[i] - 4 : align === 'center' ? flowColX[i] + flowColW[i] / 2 : flowColX[i] + 4;
-    pdf.text(h, tx, y + 12, { align });
-  });
-  y += 18;
+  const drawFlowHeader = () => {
+    pdf.setFillColor(30, 41, 59);
+    pdf.rect(margin, y, usableW, 16, 'F');
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7.2);
+    pdf.setTextColor(212, 175, 55);
+    flowHeaders.forEach((h, i) => {
+      const align = i === 4 ? 'right' : i === 0 || i === 1 || i === 2 ? 'center' : 'left';
+      const tx = align === 'right' ? flowColX[i] + flowColW[i] - 4 : align === 'center' ? flowColX[i] + flowColW[i] / 2 : flowColX[i] + 4;
+      pdf.text(h, tx, y + 11.5, { align });
+    });
+    y += 16;
+  };
 
-  const flowList = (moneyFlow || []).slice(0, 16);
-  if (!flowList.length) {
+  drawFlowHeader();
+
+  if (!moneyFlow.length) {
     pdf.setFont('helvetica', 'italic');
-    pdf.setFontSize(8.5);
+    pdf.setFontSize(8);
     pdf.setTextColor(140, 140, 140);
-    pdf.text('No recent transactions.', margin + 8, y + 16);
-    y += 24;
+    pdf.text('No transactions recorded for this period.', margin + 8, y + 14);
+    y += 22;
   } else {
-    flowList.forEach((f, idx) => {
-      checkPageBreak(20);
+    moneyFlow.forEach((f, idx) => {
+      if (checkPageBreak(18)) {
+        drawFlowHeader();
+      }
+
       const isAlt = idx % 2 === 1;
       pdf.setFillColor(isAlt ? 248 : 255, isAlt ? 250 : 255, isAlt ? 252 : 255);
-      pdf.rect(margin, y, usableW, 17, 'F');
+      pdf.rect(margin, y, usableW, 15, 'F');
 
       pdf.setDrawColor(226, 232, 240);
       pdf.setLineWidth(0.4);
-      pdf.line(margin, y + 17, margin + usableW, y + 17);
+      pdf.line(margin, y + 15, margin + usableW, y + 15);
 
       pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(7.5);
+      pdf.setFontSize(7.2);
       pdf.setTextColor(15, 23, 42);
 
       const tStr = (f.bill_type || 'sale').toUpperCase();
@@ -990,20 +1016,20 @@ export async function downloadCashflowReportPdf({
       const amtNum = isHelp ? f.expenditure : isBuy ? f.buying : f.selling;
       const amtStr = `${isBuy || isHelp ? '-' : '+'}${currencySymbol} ${exportMoney(amtNum || 0)}`;
 
-      pdf.text(tStr, flowColX[0] + flowColW[0] / 2, y + 11.5, { align: 'center' });
-      pdf.text(invStr, flowColX[1] + flowColW[1] / 2, y + 11.5, { align: 'center' });
-      pdf.text(dStr, flowColX[2] + flowColW[2] / 2, y + 11.5, { align: 'center' });
-      pdf.text(commStr, flowColX[3] + 4, y + 11.5, { align: 'left' });
+      pdf.text(tStr, flowColX[0] + flowColW[0] / 2, y + 10.5, { align: 'center' });
+      pdf.text(invStr, flowColX[1] + flowColW[1] / 2, y + 10.5, { align: 'center' });
+      pdf.text(dStr, flowColX[2] + flowColW[2] / 2, y + 10.5, { align: 'center' });
+      pdf.text(commStr, flowColX[3] + 4, y + 10.5, { align: 'left' });
 
       pdf.setFont('helvetica', 'bold');
       pdf.setTextColor(isBuy || isHelp ? 244 : 16, isBuy || isHelp ? 63 : 185, isBuy || isHelp ? 94 : 129);
-      pdf.text(amtStr, flowColX[4] + flowColW[4] - 4, y + 11.5, { align: 'right' });
+      pdf.text(amtStr, flowColX[4] + flowColW[4] - 4, y + 10.5, { align: 'right' });
 
-      y += 17;
+      y += 15;
     });
   }
 
-  // Page Footers
+  // Page Footers on All Pages
   const pageCount = pdf.getNumberOfPages();
   for (let p = 1; p <= pageCount; p += 1) {
     pdf.setPage(p);
@@ -1014,12 +1040,104 @@ export async function downloadCashflowReportPdf({
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(7);
     pdf.setTextColor(148, 163, 184);
-    pdf.text('Generated with Elite Chocolate POS & Business Suite · Confidential', margin, pageHeight - 10);
+    pdf.text(
+      isMaster
+        ? 'Elite Chocolate POS & Business Suite · Master All-Time Cashflow Ledger · Confidential'
+        : `Elite Chocolate POS & Business Suite · Cashflow Report (${periodLabel}) · Confidential`,
+      margin,
+      pageHeight - 10
+    );
     pdf.text(`Page ${p} of ${pageCount}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
   }
 
   const blob = pdf.output('blob');
   await downloadBlob(blob, filename, 'application/pdf');
+  return 'downloaded';
+}
+
+/**
+ * Generate a clean, multi-section Cashflow CSV export (supports Period and Master All-Time).
+ */
+export async function downloadCashflowCsv({
+  companyName = 'ELITE CHOCOLATE',
+  currencySymbol = 'Rs.',
+  cashflow = {},
+  dailyTrend = [],
+  moneyFlow = [],
+  periodLabel = 'All Time',
+  dateRange = '',
+  isMaster = false,
+  filename = 'Cashflow_Export.csv',
+}) {
+  const totalSales = Number(cashflow.total_sales || 0);
+  const buyingCost = Number(cashflow.buying_cost || 0);
+  const netProfit = Number(cashflow.net_profit || 0);
+  const helpGiven = Number(cashflow.help_given || 0);
+  const helpOut = Number(cashflow.help_outstanding || 0);
+  const paidSales = Number(cashflow.paid_sales || 0);
+  const dueSales = Number(cashflow.pending_sales || 0);
+  const marginPct = totalSales > 0 ? ((netProfit / totalSales) * 100).toFixed(1) : '0.0';
+
+  const rows = [];
+
+  // 1. Report Title & Header
+  rows.push([`${companyName} — CASHFLOW FINANCIAL STATEMENT`]);
+  rows.push(['STATEMENT TYPE', isMaster ? 'MASTER CASHFLOW (ALL-TIME FROM INCEPTION)' : 'PERIOD CASHFLOW STATEMENT']);
+  rows.push(['PERIOD', periodLabel]);
+  if (dateRange) rows.push(['DATE RANGE', dateRange]);
+  rows.push(['GENERATED AT', new Date().toLocaleString('en-PK')]);
+  rows.push([]);
+
+  // 2. Executive KPI Summary
+  rows.push(['--- EXECUTIVE KPI SUMMARY ---']);
+  rows.push(['Metric', `Amount (${currencySymbol})`]);
+  rows.push(['Total Sales (Revenue)', totalSales]);
+  rows.push(['Saudia Buying (Costs)', buyingCost]);
+  rows.push(['Net Profit', netProfit]);
+  rows.push(['Operating Margin (%)', `${marginPct}%`]);
+  rows.push(['Paid Sales (Collected)', paidSales]);
+  rows.push(['Pending / Receivables', dueSales]);
+  rows.push(['Help Given (Loans Out)', helpGiven]);
+  rows.push(['Help Outstanding (Unrecovered)', helpOut]);
+  rows.push([]);
+
+  // 3. Daily Profit Ledger
+  rows.push(['--- DAILY FINANCIAL LEDGER BREAKDOWN ---']);
+  rows.push(['Date', `Sales In (${currencySymbol})`, `Saudia Buying Out (${currencySymbol})`, `Help Out (${currencySymbol})`, `Net Profit (${currencySymbol})`, 'Orders Count']);
+  (dailyTrend || []).forEach((d) => {
+    rows.push([
+      d.date || '',
+      Number(d.sales || 0),
+      Number(d.buying || 0),
+      Number(d.help || 0),
+      Number(d.profit || 0),
+      Number(d.sales_count || 0),
+    ]);
+  });
+  rows.push([]);
+
+  // 4. Itemized Transaction Stream
+  rows.push(['--- ITEMIZED CASHFLOW TRANSACTIONS ---']);
+  rows.push(['Date', 'Invoice #', 'Type', 'Party / Description', `Amount (${currencySymbol})`, 'Cash Effect', 'Status']);
+  (moneyFlow || []).forEach((m) => {
+    const isHelp = m.bill_type === 'help';
+    const isBuy = m.bill_type === 'supplier' || m.buying > 0;
+    const amt = isHelp ? m.expenditure : isBuy ? m.buying : m.selling;
+    const effect = isBuy || isHelp ? 'OUTFLOW (-)' : 'INFLOW (+)';
+    rows.push([
+      m.date || '',
+      m.invoice_number || '',
+      (m.bill_type || 'sale').toUpperCase(),
+      m.comment || '',
+      Number(amt || 0),
+      effect,
+      (m.status || '').toUpperCase(),
+    ]);
+  });
+
+  const csv = buildCsv([], rows);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  await downloadBlob(blob, filename, 'text/csv');
   return 'downloaded';
 }
 
