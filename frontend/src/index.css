@@ -8643,7 +8643,13 @@ input[type="checkbox"]:hover {
 .bills-card-dropdowns-row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.bills-card-dropdowns-row .status-dd,
+.bills-card-dropdowns-row .type-dd {
+  margin: 0;
 }
 
 .bills-card-btn-bar {

@@ -1322,7 +1322,6 @@ export default function BillsDatabase({
                       <StatusBadge status="cancelled" />
                     ) : (
                       <StatusSelect
-                        block
                         value={bill.status}
                         onChange={(next) => handleUpdateStatus(bill.id, next)}
                       />
@@ -1350,7 +1349,6 @@ export default function BillsDatabase({
                     )}
                     {!isCancelled(bill) && (
                       <TypeSelect
-                        block
                         value={bill.bill_type}
                         onChange={(next) => handleUpdateType(bill, next)}
                       />
