@@ -41,7 +41,7 @@ import {
   lockRequired,
   pinEnabled,
 } from './utils/appSecurity';
-import { APP_THEMES, getNextQuickTheme, getQuickThemes } from './utils/themeConfig';
+import { APP_THEMES, getNextQuickTheme, getQuickThemes, applyTheme } from './utils/themeConfig';
 import ThemeStudioModal from './components/ThemeStudioModal';
 import BackupRestoreModal from './components/BackupRestoreModal';
 
@@ -79,11 +79,11 @@ const KEEP_ALIVE_TABS = ['dashboard', 'create', 'database'];
 function getInitialTheme() {
   try {
     const saved = localStorage.getItem(THEME_KEY);
-    if (saved === 'light' || saved === 'dark' || saved === 'chocolatier') return saved;
+    if (saved) return saved;
   } catch (_) {
     /* ignore */
   }
-  return 'light';
+  return 'chocolatier';
 }
 
 function TabFallback() {
@@ -158,12 +158,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    try {
-      localStorage.setItem(THEME_KEY, theme);
-    } catch (_) {
-      /* ignore */
-    }
+    applyTheme(theme);
   }, [theme]);
 
   useEffect(() => {
@@ -751,55 +746,53 @@ export default function App() {
 
       <nav className="mobile-bottom-nav no-print" aria-label="Main">
         <div className="mobile-nav-dock">
-          <div className="mobile-nav-side">
-            <button
-              type="button"
-              className={`mobile-nav-item ${currentTab === 'dashboard' ? 'active' : ''}`}
-              onClick={() => goToTab('dashboard')}
-            >
-              <LayoutDashboard size={22} strokeWidth={currentTab === 'dashboard' ? 2.5 : 2} />
-              <span>Home</span>
-            </button>
-            <button
-              type="button"
-              className={`mobile-nav-item ${currentTab === 'database' ? 'active' : ''}`}
-              onClick={() => goToTab('database')}
-            >
-              <Database size={22} strokeWidth={currentTab === 'database' ? 2.5 : 2} />
-              <span>Bills</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            className={`mobile-nav-item ${currentTab === 'dashboard' ? 'active' : ''}`}
+            onClick={() => goToTab('dashboard')}
+          >
+            <LayoutDashboard size={20} strokeWidth={currentTab === 'dashboard' ? 2.5 : 2} />
+            <span>Home</span>
+          </button>
 
           <button
             type="button"
-            className={`mobile-nav-fab ${currentTab === 'create' ? 'active' : ''}`}
+            className={`mobile-nav-item ${currentTab === 'database' ? 'active' : ''}`}
+            onClick={() => goToTab('database')}
+          >
+            <Database size={20} strokeWidth={currentTab === 'database' ? 2.5 : 2} />
+            <span>Bills</span>
+          </button>
+
+          <button
+            type="button"
+            className={`mobile-nav-item mobile-nav-item--create ${currentTab === 'create' ? 'active' : ''}`}
             onClick={() => goToTab('create')}
             aria-label="Create bill"
           >
-            <span className="mobile-nav-fab-disc">
-              <Plus size={26} strokeWidth={2.75} />
-            </span>
-            <span className="mobile-nav-fab-label">New</span>
+            <div className="mobile-nav-create-btn">
+              <Plus size={20} strokeWidth={2.75} />
+            </div>
+            <span>New</span>
           </button>
 
-          <div className="mobile-nav-side mobile-nav-side--end">
-            <button
-              type="button"
-              className={`mobile-nav-item ${currentTab === 'customers' ? 'active' : ''}`}
-              onClick={() => goToTab('customers')}
-            >
-              <Users size={22} strokeWidth={currentTab === 'customers' ? 2.5 : 2} />
-              <span>Clients</span>
-            </button>
-            <button
-              type="button"
-              className={`mobile-nav-item ${moreActive ? 'active' : ''}`}
-              onClick={() => setMoreOpen(true)}
-            >
-              <MoreHorizontal size={22} strokeWidth={moreActive ? 2.5 : 2} />
-              <span>More</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            className={`mobile-nav-item ${currentTab === 'customers' ? 'active' : ''}`}
+            onClick={() => goToTab('customers')}
+          >
+            <Users size={20} strokeWidth={currentTab === 'customers' ? 2.5 : 2} />
+            <span>Clients</span>
+          </button>
+
+          <button
+            type="button"
+            className={`mobile-nav-item ${moreActive ? 'active' : ''}`}
+            onClick={() => setMoreOpen(true)}
+          >
+            <MoreHorizontal size={20} strokeWidth={moreActive ? 2.5 : 2} />
+            <span>More</span>
+          </button>
         </div>
       </nav>
     </div>

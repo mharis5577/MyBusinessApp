@@ -259,3 +259,44 @@ export function getNextQuickTheme(currentTheme, pair = null) {
   if (currentTheme === t1) return t2;
   return t1;
 }
+
+/**
+ * Instantly applies a theme by disabling CSS transitions across the DOM
+ * during the switch, preventing multi-element transition lag / jank.
+ */
+export function applyTheme(nextTheme) {
+  if (!nextTheme || typeof document === 'undefined') return;
+
+  const style = document.createElement('style');
+  style.appendChild(
+    document.createTextNode(
+      `*, *::before, *::after {
+        -webkit-transition: none !important;
+        -moz-transition: none !important;
+        -o-transition: none !important;
+        -ms-transition: none !important;
+        transition: none !important;
+      }`
+    )
+  );
+  document.head.appendChild(style);
+
+  document.documentElement.setAttribute('data-theme', nextTheme);
+  try {
+    localStorage.setItem('theme', nextTheme);
+  } catch (_) {}
+
+  // Force synchronous style recalculation
+  const _ = window.getComputedStyle(style).opacity;
+
+  // Clean up style element on next animation frame
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      try {
+        if (style.parentNode) {
+          style.parentNode.removeChild(style);
+        }
+      } catch (_) {}
+    });
+  });
+}

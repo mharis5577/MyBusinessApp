@@ -1890,6 +1890,12 @@ ${partnerSplitText}
 ━━━━━━━━━━━━━━━━━━━━
 ✅ *Audited & Reconciled via AutoBill Executive*`;
 
+      const halfShare = Math.round((netProfit / 2) * 100) / 100;
+      const partnerSplits = [
+        { name: 'Nomi', sharePct: 50, shareAmount: halfShare, formattedShare: `${currencySymbol} ${halfShare.toLocaleString('en-PK')}` },
+        { name: 'Haris', sharePct: 50, shareAmount: halfShare, formattedShare: `${currencySymbol} ${halfShare.toLocaleString('en-PK')}` },
+      ];
+
       return jsonOk({
         period,
         startDate: start,
@@ -1904,6 +1910,7 @@ ${partnerSplitText}
           buyingCount: buyingBills.length,
           netProfit,
           profitMarginPct,
+          partnerSplits,
           totalCashCollected,
           totalOverdueAmount,
           overdueCount: overdueBills.length,

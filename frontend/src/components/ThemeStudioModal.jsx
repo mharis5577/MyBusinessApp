@@ -152,7 +152,6 @@ export default function ThemeStudioModal({ open, onClose, currentTheme, onThemeC
                 className={`template-card ${active ? 'is-active' : ''}`}
                 onClick={() => {
                   onThemeChange?.(th.id);
-                  toast.success(`Theme switched to "${th.name}"`);
                 }}
                 style={{
                   border: active ? '2px solid var(--accent-teal)' : undefined,

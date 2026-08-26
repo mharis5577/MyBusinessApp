@@ -688,7 +688,6 @@ export default function BillsDatabase({
         <div className="bills-db-left">
           <div className="bills-db-title-row">
             <h2 className="bills-db-title">Invoices & Ledger</h2>
-            <span className="bills-db-count-pill">{bills.length}</span>
           </div>
           <p className="bills-db-sub">
             Retail sales · Saudia buying · Credit khata

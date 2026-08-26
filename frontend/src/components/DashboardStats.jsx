@@ -366,10 +366,11 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
   };
 
   const isHeroMonth = heroPeriod === 'month';
-  const heroProfit = isHeroMonth ? profit_month : profit_today;
-  const heroMargin = isHeroMonth ? margin_month : margin_today;
-  const heroSales = isHeroMonth ? sales_month : sales_today;
-  const heroCost = isHeroMonth ? cost_month : cost_today;
+  const isHeroWeek = heroPeriod === 'week';
+  const heroProfit = isHeroMonth ? profit_month : isHeroWeek ? profit_week : profit_today;
+  const heroMargin = isHeroMonth ? margin_month : isHeroWeek ? margin_week : margin_today;
+  const heroSales = isHeroMonth ? sales_month : isHeroWeek ? sales_week : sales_today;
+  const heroCost = isHeroMonth ? cost_month : isHeroWeek ? cost_week : cost_today;
 
   const currentSales =
     profitPeriod === 'today'
@@ -445,6 +446,13 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
                   onClick={() => { playTapSound(); setHeroPeriod('today'); }}
                 >
                   Today
+                </button>
+                <button
+                  type="button"
+                  className={`exec-period-tab ${heroPeriod === 'week' ? 'is-active' : ''}`}
+                  onClick={() => { playTapSound(); setHeroPeriod('week'); }}
+                >
+                  Week
                 </button>
                 <button
                   type="button"
@@ -532,40 +540,60 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
       </div>
       {/* 2. CORE 4-KPI FINANCIAL PULSE */}
       <div className="exec-kpi-grid">
-        <div className="exec-kpi-card" onClick={() => { playTapSound(); onNavigate('cashflow'); }}>
+        <div className="exec-kpi-card is-kpi-green" onClick={() => { playTapSound(); onNavigate('cashflow'); }}>
           <div className="exec-kpi-header">
             <span className="exec-kpi-title">Sales Collected</span>
-            <DollarSign size={15} className="exec-kpi-icon is-green" />
+            <div className="exec-kpi-icon-wrap is-green">
+              <Banknote size={15} strokeWidth={2.4} />
+            </div>
           </div>
           <div className="exec-kpi-value">{money(total_revenue)}</div>
-          <div className="exec-kpi-hint">Total cash/bank in</div>
+          <div className="exec-kpi-footer">
+            <span className="exec-kpi-hint">Total cash/bank in</span>
+            <ChevronRight size={13} className="exec-kpi-arrow" />
+          </div>
         </div>
 
-        <div className="exec-kpi-card" onClick={() => { playTapSound(); onNavigate('database'); }}>
+        <div className="exec-kpi-card is-kpi-amber" onClick={() => { playTapSound(); onNavigate('database'); }}>
           <div className="exec-kpi-header">
             <span className="exec-kpi-title">Customer Sales Due</span>
-            <Clock size={15} className="exec-kpi-icon is-amber" />
+            <div className="exec-kpi-icon-wrap is-amber">
+              <Clock size={15} strokeWidth={2.4} />
+            </div>
           </div>
           <div className="exec-kpi-value">{money(total_pending)}</div>
-          <div className="exec-kpi-hint">Pending customer khata</div>
+          <div className="exec-kpi-footer">
+            <span className="exec-kpi-hint">Pending customer khata</span>
+            <ChevronRight size={13} className="exec-kpi-arrow" />
+          </div>
         </div>
 
-        <div className={`exec-kpi-card ${total_overdue > 0 ? 'is-overdue-alert' : ''}`} onClick={() => { playTapSound(); onNavigate('aging'); }}>
+        <div className={`exec-kpi-card is-kpi-red ${total_overdue > 0 ? 'is-overdue-alert' : ''}`} onClick={() => { playTapSound(); onNavigate('aging'); }}>
           <div className="exec-kpi-header">
             <span className="exec-kpi-title">Overdue Receivables</span>
-            <AlertTriangle size={15} className={`exec-kpi-icon ${total_overdue > 0 ? 'is-red' : ''}`} />
+            <div className="exec-kpi-icon-wrap is-red">
+              <AlertTriangle size={15} strokeWidth={2.4} />
+            </div>
           </div>
           <div className="exec-kpi-value" style={{ color: total_overdue > 0 ? '#ef4444' : undefined }}>{money(total_overdue)}</div>
-          <div className="exec-kpi-hint">{overdue_bills_count > 0 ? `${overdue_bills_count} bills past due` : 'All accounts clear'}</div>
+          <div className="exec-kpi-footer">
+            <span className="exec-kpi-hint">{overdue_bills_count > 0 ? `${overdue_bills_count} bills past due` : 'All accounts clear'}</span>
+            <ChevronRight size={13} className="exec-kpi-arrow" />
+          </div>
         </div>
 
-        <div className="exec-kpi-card" onClick={() => { playTapSound(); goHelpBills(); }}>
+        <div className="exec-kpi-card is-kpi-purple" onClick={() => { playTapSound(); goHelpBills(); }}>
           <div className="exec-kpi-header">
             <span className="exec-kpi-title">Help Money Lent</span>
-            <HeartHandshake size={15} className="exec-kpi-icon is-purple" />
+            <div className="exec-kpi-icon-wrap is-purple">
+              <HeartHandshake size={15} strokeWidth={2.4} />
+            </div>
           </div>
           <div className="exec-kpi-value">{money(help_outstanding)}</div>
-          <div className="exec-kpi-hint">{help_count} active borrowers</div>
+          <div className="exec-kpi-footer">
+            <span className="exec-kpi-hint">{help_count} active borrowers</span>
+            <ChevronRight size={13} className="exec-kpi-arrow" />
+          </div>
         </div>
       </div>
 
