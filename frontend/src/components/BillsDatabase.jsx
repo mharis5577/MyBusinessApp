@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle, FileText, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Bookmark, CheckCircle2, Settings, Palette } from 'lucide-react';
+import { Search, Eye, Edit3, Download, RefreshCw, Check, X, Plus, Copy, Banknote, MessageSquare, Smartphone, ImagePlus, Undo2, Trash2, PlusCircle, FileText, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Bookmark, CheckCircle2, Settings, Palette, SlidersHorizontal } from 'lucide-react';
 import BillAdjustSheet from './BillAdjustSheet';
 import StatusBadge, { StatusSelect } from './StatusBadge';
 import TypeSelect from './TypeSelect';
@@ -35,6 +35,133 @@ import {
 } from '../utils/billTypes';
 
 const BILLS_PAGE_SIZE = 5;
+
+function HeaderOptionsDropdown({
+  onExportCSV,
+  onExportPDF,
+  onRefresh,
+  refreshing,
+  loading,
+  hasBills,
+  isSettingsActive,
+  onToggleSettings,
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside, { passive: true });
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [open]);
+
+  return (
+    <div className="bills-header-dropdown-wrap" ref={containerRef}>
+      <button
+        type="button"
+        className={`bills-header-dropdown-btn ${open ? 'is-open' : ''} ${isSettingsActive ? 'is-active' : ''}`}
+        onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        title="Ledger options & settings"
+        aria-label="Options"
+      >
+        <Settings size={16} />
+      </button>
+
+      {open && (
+        <div className="bills-header-dropdown-menu" role="menu">
+          <button
+            type="button"
+            className="bills-dropdown-item"
+            disabled={!hasBills}
+            onClick={() => {
+              setOpen(false);
+              onExportCSV();
+            }}
+          >
+            <div className="bills-dd-icon-box is-green">
+              <Download size={14} />
+            </div>
+            <div className="bills-dd-text">
+              <strong>Export CSV</strong>
+              <small>Spreadsheet data</small>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            className="bills-dropdown-item"
+            disabled={!hasBills}
+            onClick={() => {
+              setOpen(false);
+              onExportPDF();
+            }}
+          >
+            <div className="bills-dd-icon-box is-blue">
+              <FileText size={14} />
+            </div>
+            <div className="bills-dd-text">
+              <strong>Export PDF</strong>
+              <small>Printable summary</small>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            className="bills-dropdown-item"
+            disabled={refreshing || loading}
+            onClick={() => {
+              setOpen(false);
+              onRefresh();
+            }}
+          >
+            <div className="bills-dd-icon-box is-teal">
+              <RefreshCw size={14} className={refreshing ? 'spin' : undefined} />
+            </div>
+            <div className="bills-dd-text">
+              <strong>Refresh Ledger</strong>
+              <small>Fetch latest bills</small>
+            </div>
+          </button>
+
+          <div className="bills-dropdown-divider" />
+
+          <button
+            type="button"
+            className={`bills-dropdown-item ${isSettingsActive ? 'is-active' : ''}`}
+            onClick={() => {
+              setOpen(false);
+              onToggleSettings();
+            }}
+          >
+            <div className="bills-dd-icon-box is-amber">
+              <Settings size={14} />
+            </div>
+            <div className="bills-dd-text">
+              <strong>Invoice Style & Settings</strong>
+              <small>{isSettingsActive ? 'Currently active' : 'Templates & layout'}</small>
+            </div>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function BillsCardMenu({ id, openId, setOpenId, label, icon: Icon, children, danger = false }) {
   const ref = useRef(null);
@@ -167,6 +294,7 @@ export default function BillsDatabase({
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(null);
 
   // Edit Modal State
   const [editingBill, setEditingBill] = useState(null);
@@ -694,47 +822,16 @@ export default function BillsDatabase({
           </p>
         </div>
 
-        <div className="bills-header-actions">
-          <button
-            type="button"
-            className="bills-mini-action-btn"
-            onClick={handleExportCSV}
-            disabled={!bills.length}
-            title="Export CSV spreadsheet"
-            aria-label="Export CSV"
-          >
-            <Download size={14} />
-          </button>
-          <button
-            type="button"
-            className="bills-mini-action-btn"
-            onClick={handleExportPDF}
-            disabled={!bills.length}
-            title="Export PDF report"
-            aria-label="Export PDF"
-          >
-            <FileText size={14} />
-          </button>
-          <button
-            type="button"
-            className="bills-mini-action-btn"
-            onClick={() => apiFetchBills({ soft: true })}
-            title="Refresh database"
-            aria-label="Refresh database"
-            disabled={refreshing || loading}
-          >
-            <RefreshCw size={14} className={refreshing ? 'spin' : undefined} />
-          </button>
-          <button
-            type="button"
-            className={`bills-mini-action-btn ${billTypeFilter === 'settings' ? 'is-active' : ''}`}
-            onClick={() => setBillTypeFilter(billTypeFilter === 'settings' ? 'all' : 'settings')}
-            title="Bill Style & Template Settings"
-            aria-label="Bill Settings"
-          >
-            <Settings size={14} />
-          </button>
-        </div>
+        <HeaderOptionsDropdown
+          onExportCSV={handleExportCSV}
+          onExportPDF={handleExportPDF}
+          onRefresh={() => apiFetchBills({ soft: true })}
+          refreshing={refreshing}
+          loading={loading}
+          hasBills={bills.length > 0}
+          isSettingsActive={billTypeFilter === 'settings'}
+          onToggleSettings={() => setBillTypeFilter(billTypeFilter === 'settings' ? 'all' : 'settings')}
+        />
       </div>
 
       {/* 2. Clean Modern Filter Panel */}
@@ -812,16 +909,6 @@ export default function BillsDatabase({
               onClick={() => setBillTypeFilter('help')}
             >
               Help
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={billTypeFilter === 'settings'}
-              className={`bills-type-tab${billTypeFilter === 'settings' ? ' is-active' : ''}`}
-              onClick={() => setBillTypeFilter('settings')}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-            >
-              <Settings size={13} /> Settings
             </button>
           </div>
 
