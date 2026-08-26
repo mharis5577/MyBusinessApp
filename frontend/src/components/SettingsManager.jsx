@@ -299,50 +299,6 @@ export default function SettingsManager({
     }
   };
 
-  const exportReportCsv = async () => {
-    if (!report?.bills?.length) {
-      toast.info('Load a month with bills first');
-      return;
-    }
-    try {
-      const { downloadCsv, exportMoney } = await import('../utils/tableExport');
-      const headers = ['Category', 'Invoice #', 'Party', 'Date', 'Total', 'Paid', 'Balance', 'Status'];
-      const rows = report.bills.map((b) => {
-        const total = Number(b.total_amount) || 0;
-        const paid = Number(b.amount_paid) || 0;
-        const balance = Math.max(0, Math.round((total - paid) * 100) / 100);
-        let status = b.status || 'pending';
-        if (total > 0) {
-          if (balance <= 0) status = 'paid';
-          else if (status === 'paid') status = 'due';
-        }
-        const typeLabel =
-          b.bill_type === 'supplier'
-            ? 'Saudia Buying'
-            : b.bill_type === 'help'
-            ? 'Help'
-            : b.bill_type === 'khata'
-            ? 'Credit Khata'
-            : 'Sale';
-
-        return [
-          typeLabel,
-          b.invoice_number || '',
-          b.customer_name || '',
-          b.bill_date || '',
-          exportMoney(total),
-          exportMoney(paid),
-          exportMoney(balance),
-          status.toUpperCase(),
-        ];
-      });
-      await downloadCsv(headers, rows, `monthly-report-${report.period}.csv`);
-      toast.success('Report exported (CSV)');
-    } catch (err) {
-      if (err?.name !== 'AbortError') toast.error('CSV export failed: ' + err.message);
-    }
-  };
-
   const exportReportPdf = async () => {
     if (!report?.bills?.length) {
       toast.info('Load a month with bills first');
@@ -1105,7 +1061,7 @@ export default function SettingsManager({
                   <h3 className="settings-header-name">Monthly Financial Reports</h3>
                 </div>
                 <p className="settings-header-desc">
-                  View period totals, buying costs, estimated profit, and export PDF/CSV
+                  View period totals, buying costs, estimated profit, and export PDF statement
                 </p>
               </div>
               <div className="settings-card-chevron">
@@ -1119,10 +1075,7 @@ export default function SettingsManager({
                   <input className="form-input" type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} style={{ width: 'auto', minWidth: 160 }} />
                   <button type="button" className="btn-secondary" onClick={loadMonthlyReport} style={{ width: 'auto' }}>Load Report</button>
                   {report && (
-                    <>
-                      <button type="button" className="btn-secondary" onClick={exportReportCsv} style={{ width: 'auto' }}>Export CSV</button>
-                      <button type="button" className="btn-secondary" onClick={exportReportPdf} style={{ width: 'auto' }}>Export PDF</button>
-                    </>
+                    <button type="button" className="btn-secondary" onClick={exportReportPdf} style={{ width: 'auto' }}>Export PDF</button>
                   )}
                 </div>
                 {report && (

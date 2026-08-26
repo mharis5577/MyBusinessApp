@@ -17,7 +17,9 @@ import {
   Package,
   Layers,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  FileText,
+  Smartphone,
 } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
@@ -384,20 +386,24 @@ function DailyFinancialBreakdown({ data = [], currencySymbol = 'Rs.' }) {
   );
 }
 
-export default function CashflowPanel({
-  currencySymbol = 'Rs.',
+/**
+ * Cashflow & Operating Balance Dashboard
+ * Tracks incoming money (sales) vs outgoing money (Saudia buying).
+ * Clearly separates "Help" money so personal loans don't distort profit metrics.
+ */
+export function CashflowPanel({
   compact = false,
+  embedded = false,
+  currencySymbol = 'Rs.',
+  helpGiven = null,
+  helpOutstanding: helpOutstandingProp = null,
   onNavigate,
   onViewBill,
-  embedded = false,
-  helpGiven,
-  helpOutstanding: helpOutstandingProp,
 }) {
   const toast = useToast();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [exportingPdf, setExportingPdf] = useState(false);
-  const [exportingCsv, setExportingCsv] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -423,8 +429,8 @@ export default function CashflowPanel({
     else if (onNavigate) onNavigate('database');
   };
 
-  const handleExportPdf = async () => {
-    setExportingPdf(true);
+  const handleExportPdf = async (isMobile = false) => {
+    setExportingPdf(isMobile ? 'mobile' : 'a4');
     try {
       await downloadCashflowReportPdf({
         companyName: 'ELITE CHOCOLATE',
@@ -432,9 +438,12 @@ export default function CashflowPanel({
         cashflow: data,
         dailyTrend: data?.daily_trend || [],
         moneyFlow: data?.money_flow || [],
-        filename: `Cashflow_Statement_${new Date().toISOString().slice(0, 10)}.pdf`,
+        isMobile,
+        filename: isMobile
+          ? `Cashflow_Mobile_${new Date().toISOString().slice(0, 10)}.pdf`
+          : `Cashflow_Statement_${new Date().toISOString().slice(0, 10)}.pdf`,
       });
-      toast.success('Cashflow PDF Statement downloaded!');
+      toast.success(isMobile ? 'Mobile PDF downloaded!' : 'A4 PDF Statement downloaded!');
     } catch (err) {
       console.error(err);
       toast.error('Failed to generate PDF statement');
@@ -481,23 +490,37 @@ export default function CashflowPanel({
             </h3>
             <p className="panel-flat-sub">Sales in vs Saudia buying · Help money is separate</p>
           </div>
-          <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <button
               type="button"
               className="btn-primary"
-              style={{ width: 'auto', minHeight: 34, padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
-              disabled={exportingPdf}
-              onClick={handleExportPdf}
+              style={{ width: 'auto', minHeight: 34, padding: '0.35rem 0.75rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              disabled={Boolean(exportingPdf)}
+              onClick={() => handleExportPdf(false)}
+              title="Download Full A4 PDF Statement"
             >
-              <Download size={14} /> {exportingPdf ? 'Exporting PDF…' : 'PDF Statement'}
+              {exportingPdf === 'a4' ? <RefreshCw className="spin" size={13} /> : <FileText size={13} />}
+              <span>{exportingPdf === 'a4' ? 'Exporting…' : 'PDF Statement'}</span>
             </button>
             <button
               type="button"
               className="btn-secondary"
-              style={{ width: 'auto', minHeight: 34, padding: '0.35rem 0.7rem', fontSize: '0.75rem' }}
+              style={{ width: 'auto', minHeight: 34, padding: '0.35rem 0.75rem', fontSize: '0.75rem', borderColor: 'var(--accent-teal)', color: 'var(--accent-teal)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              disabled={Boolean(exportingPdf)}
+              onClick={() => handleExportPdf(true)}
+              title="Download Phone-optimized Mobile PDF"
+            >
+              {exportingPdf === 'mobile' ? <RefreshCw className="spin" size={13} /> : <Smartphone size={13} />}
+              <span>{exportingPdf === 'mobile' ? 'Exporting…' : 'Mobile PDF'}</span>
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ width: 'auto', minHeight: 34, padding: '0.35rem 0.7rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              disabled={loading}
               onClick={load}
             >
-              <RefreshCw size={14} /> Refresh
+              <RefreshCw size={13} className={loading ? 'spin' : undefined} /> <span>Refresh</span>
             </button>
           </div>
         </div>
@@ -511,10 +534,19 @@ export default function CashflowPanel({
               type="button"
               className="btn-primary"
               style={{ width: 'auto', minHeight: 30, padding: '0.25rem 0.6rem', fontSize: '0.72rem' }}
-              disabled={exportingPdf}
-              onClick={handleExportPdf}
+              disabled={Boolean(exportingPdf)}
+              onClick={() => handleExportPdf(false)}
             >
-              <Download size={13} /> PDF
+              <FileText size={13} /> PDF
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ width: 'auto', minHeight: 30, padding: '0.25rem 0.6rem', fontSize: '0.72rem', borderColor: 'var(--accent-teal)', color: 'var(--accent-teal)' }}
+              disabled={Boolean(exportingPdf)}
+              onClick={() => handleExportPdf(true)}
+            >
+              <Smartphone size={13} /> Mobile
             </button>
             <button
               type="button"
@@ -659,3 +691,5 @@ export default function CashflowPanel({
     </div>
   );
 }
+
+export default CashflowPanel;

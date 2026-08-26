@@ -12,7 +12,7 @@ import { pakistanToday, formatCurrency, formatBillDateTime, addDaysToDateString 
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { downloadBlob } from '../utils/downloadFile';
-import { downloadCsv, downloadTablePdf, exportMoney } from '../utils/tableExport';
+import { downloadTablePdf, exportMoney } from '../utils/tableExport';
 import { compressImageToDataUrl } from '../utils/imageCompress';
 import { persistPaymentProof } from '../utils/paymentProof';
 import {
@@ -38,7 +38,6 @@ const BILLS_PAGE_SIZE = 5;
 
 function HeaderOptionsDropdown({
   onExportPDF,
-  onExportCSV,
   onRefresh,
   refreshing,
   loading,
@@ -100,24 +99,6 @@ function HeaderOptionsDropdown({
             <div className="bills-dd-text">
               <strong>Export PDF</strong>
               <small>Printable executive statement</small>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            className="bills-dropdown-item"
-            disabled={!hasBills}
-            onClick={() => {
-              setOpen(false);
-              onExportCSV();
-            }}
-          >
-            <div className="bills-dd-icon-box is-teal">
-              <Download size={14} />
-            </div>
-            <div className="bills-dd-text">
-              <strong>Export CSV</strong>
-              <small>Raw data table</small>
             </div>
           </button>
 
@@ -730,20 +711,6 @@ export default function BillsDatabase({
     return { headers, rows };
   };
 
-  const handleExportCSV = async () => {
-    if (bills.length === 0) {
-      toast.info('No bills to export');
-      return;
-    }
-    try {
-      const { headers, rows } = buildBillsExportTable();
-      await downloadCsv(headers, rows, `Bills_Master_${pakistanToday()}.csv`);
-      toast.success(`Exported ${rows.length} bill${rows.length === 1 ? '' : 's'} (CSV)`);
-    } catch (err) {
-      if (err?.name !== 'AbortError') toast.error('CSV export failed: ' + err.message);
-    }
-  };
-
   const handleExportPDF = async () => {
     const listToExport = filteredBills.length > 0 ? filteredBills : bills;
     if (listToExport.length === 0) {
@@ -838,7 +805,6 @@ export default function BillsDatabase({
 
         <HeaderOptionsDropdown
           onExportPDF={handleExportPDF}
-          onExportCSV={handleExportCSV}
           onRefresh={() => apiFetchBills({ soft: true })}
           refreshing={refreshing}
           loading={loading}

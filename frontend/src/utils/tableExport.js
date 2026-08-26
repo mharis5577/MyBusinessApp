@@ -542,7 +542,7 @@ export async function downloadDailyProfitSummaryPdf({
 }
 
 /**
- * Generate a luxury multi-page Cashflow Statement PDF report.
+ * Generate a luxury Cashflow Statement PDF report (supports Formal A4 Document and FinTech Mobile Pass format).
  */
 export async function downloadCashflowReportPdf({
   companyName = 'ELITE CHOCOLATE',
@@ -550,9 +550,221 @@ export async function downloadCashflowReportPdf({
   cashflow = {},
   dailyTrend = [],
   moneyFlow = [],
+  isMobile = false,
   filename = 'Cashflow_Statement.pdf',
 }) {
   const { jsPDF } = await import('jspdf');
+
+  // ==========================================
+  // 1. MOBILE FINTECH PASS FORMAT (Phone Size)
+  // ==========================================
+  if (isMobile) {
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'pt',
+      format: [380, 800],
+      compress: true,
+    });
+
+    const pageWidth = 380;
+    const pageHeight = 800;
+    const margin = 14;
+    const usableW = pageWidth - margin * 2;
+    let y = margin;
+
+    // A. Mobile Pass Header Card
+    pdf.setFillColor(15, 23, 42); // slate-900
+    pdf.roundedRect(margin, y, usableW, 56, 8, 8, 'F');
+
+    // Gold Accent Stripe
+    pdf.setFillColor(212, 175, 55); // 24k Gold
+    pdf.roundedRect(margin, y + 53, usableW, 3, 2, 2, 'F');
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(13);
+    pdf.setTextColor(255, 255, 255);
+    pdf.text(String(companyName).toUpperCase(), margin + 12, y + 22);
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(8);
+    pdf.setTextColor(45, 212, 191); // Teal
+    pdf.text('MOBILE CASHFLOW PASS', margin + 12, y + 36);
+
+    const dateStr = new Date().toLocaleDateString('en-PK', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(203, 213, 225);
+    pdf.text(dateStr, pageWidth - margin - 12, y + 26, { align: 'right' });
+
+    y += 66;
+
+    // B. Hero Net Profit Card
+    const totalSales = Number(cashflow.total_sales || 0);
+    const buyingCost = Number(cashflow.buying_cost || 0);
+    const netProfit = Number(cashflow.net_profit || 0);
+    const helpGiven = Number(cashflow.help_given || 0);
+    const profitMargin = totalSales > 0 ? Math.round((netProfit / totalSales) * 100) : 0;
+
+    pdf.setFillColor(240, 253, 244); // light emerald surface
+    pdf.setDrawColor(187, 247, 208);
+    pdf.setLineWidth(1);
+    pdf.roundedRect(margin, y, usableW, 64, 8, 8, 'FD');
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(21, 128, 61); // emerald-700
+    pdf.text('NET PROFIT RETAINED', margin + 14, y + 18);
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(18);
+    pdf.setTextColor(5, 150, 105); // emerald-600
+    pdf.text(`${currencySymbol} ${exportMoney(netProfit)}`, margin + 14, y + 42);
+
+    // Margin Pill on right
+    pdf.setFillColor(16, 185, 129);
+    pdf.roundedRect(pageWidth - margin - 88, y + 26, 74, 20, 10, 10, 'F');
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(255, 255, 255);
+    pdf.text(`${profitMargin}% Margin`, pageWidth - margin - 51, y + 39, { align: 'center' });
+
+    y += 72;
+
+    // C. 2x2 Metrics Grid Cards
+    const metrics = [
+      { label: 'SALES (INVOICED)', value: `${currencySymbol} ${exportMoney(totalSales)}`, color: [16, 185, 129] },
+      { label: 'SAUDIA BUYING', value: `${currencySymbol} ${exportMoney(buyingCost)}`, color: [244, 63, 94] },
+      { label: 'PAID COLLECTED', value: `${currencySymbol} ${exportMoney(cashflow.paid_sales || 0)}`, color: [14, 165, 233] },
+      { label: 'RECEIVABLES / DUE', value: `${currencySymbol} ${exportMoney(cashflow.pending_sales || 0)}`, color: [234, 179, 8] },
+    ];
+
+    const cardW = (usableW - 8) / 2;
+    const cardH = 42;
+
+    metrics.forEach((m, idx) => {
+      const col = idx % 2;
+      const row = Math.floor(idx / 2);
+      const cx = margin + col * (cardW + 8);
+      const cy = y + row * (cardH + 7);
+
+      pdf.setFillColor(248, 250, 252);
+      pdf.setDrawColor(226, 232, 240);
+      pdf.roundedRect(cx, cy, cardW, cardH, 6, 6, 'FD');
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(6.8);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(m.label, cx + 8, cy + 14);
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(11);
+      pdf.setTextColor(m.color[0], m.color[1], m.color[2]);
+      pdf.text(m.value, cx + 8, cy + 31);
+    });
+
+    y += 2 * (cardH + 7) + 8;
+
+    // D. Visual Cashflow Split Bar
+    const gross = Math.max(1, totalSales + buyingCost);
+    const salesPct = Math.min(100, Math.max(0, Math.round((totalSales / gross) * 100)));
+    const barW = usableW;
+    const salesBarW = (barW * salesPct) / 100;
+
+    pdf.setFillColor(244, 63, 94); // red/rose base
+    pdf.roundedRect(margin, y, barW, 8, 4, 4, 'F');
+    pdf.setFillColor(16, 185, 129); // green sales
+    pdf.roundedRect(margin, y, Math.max(12, salesBarW), 8, 4, 4, 'F');
+
+    y += 18;
+
+    // E. Recent Transactions (Mobile Feed Cards)
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(9);
+    pdf.setTextColor(15, 23, 42);
+    pdf.text('RECENT ACTIVITY FEED', margin, y);
+    y += 8;
+
+    const feedList = (moneyFlow || []).slice(0, 9);
+    if (!feedList.length) {
+      pdf.setFont('helvetica', 'italic');
+      pdf.setFontSize(8);
+      pdf.setTextColor(148, 163, 184);
+      pdf.text('No transaction records found.', margin + 8, y + 14);
+      y += 22;
+    } else {
+      feedList.forEach((f) => {
+        const isHelp = f.bill_type === 'help';
+        const isBuy = f.bill_type === 'supplier' || f.buying > 0;
+        const amtNum = isHelp ? f.expenditure : isBuy ? f.buying : f.selling;
+        const amtStr = `${isBuy || isHelp ? '-' : '+'}${currencySymbol} ${exportMoney(amtNum || 0)}`;
+        const typeLabel = isBuy ? 'BUY' : isHelp ? 'HELP' : 'SALE';
+
+        // Card Container
+        pdf.setFillColor(255, 255, 255);
+        pdf.setDrawColor(226, 232, 240);
+        pdf.roundedRect(margin, y, usableW, 32, 5, 5, 'FD');
+
+        // Type Pill
+        if (isBuy) pdf.setFillColor(254, 226, 226);
+        else if (isHelp) pdf.setFillColor(254, 243, 199);
+        else pdf.setFillColor(220, 252, 231);
+        pdf.roundedRect(margin + 6, y + 6, 32, 12, 3, 3, 'F');
+
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(6);
+        if (isBuy) pdf.setTextColor(220, 38, 38);
+        else if (isHelp) pdf.setTextColor(217, 119, 6);
+        else pdf.setTextColor(22, 163, 74);
+        pdf.text(typeLabel, margin + 22, y + 14.5, { align: 'center' });
+
+        // Party / Customer Name
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(7.8);
+        pdf.setTextColor(15, 23, 42);
+        const partyName = String(f.comment || 'Transaction').substring(0, 34);
+        pdf.text(partyName, margin + 43, y + 14);
+
+        // Sub Meta: Inv # and Date
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(6.8);
+        pdf.setTextColor(100, 116, 139);
+        pdf.text(`${f.invoice_number || '—'} · ${f.date || ''}`, margin + 43, y + 25);
+
+        // Right Amount Badge
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(9.5);
+        if (isBuy || isHelp) pdf.setTextColor(225, 29, 72);
+        else pdf.setTextColor(16, 185, 129);
+        pdf.text(amtStr, pageWidth - margin - 8, y + 19, { align: 'right' });
+
+        y += 36;
+      });
+    }
+
+    // F. Mobile Pass Footer Stamp
+    pdf.setDrawColor(226, 232, 240);
+    pdf.setLineWidth(0.5);
+    pdf.line(margin, pageHeight - 24, pageWidth - margin, pageHeight - 24);
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7);
+    pdf.setTextColor(100, 116, 139);
+    pdf.text('📱 Verified Mobile Cashflow Pass', margin, pageHeight - 12);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text('Elite Chocolate Suite', pageWidth - margin, pageHeight - 12, { align: 'right' });
+
+    const blob = pdf.output('blob');
+    await downloadBlob(blob, filename, 'application/pdf');
+    return 'downloaded';
+  }
+
+  // ==========================================
+  // 2. FORMAL A4 DOCUMENT FORMAT (Desktop/Print)
+  // ==========================================
   const pdf = new jsPDF({
     orientation: 'portrait',
     unit: 'pt',
@@ -725,7 +937,7 @@ export async function downloadCashflowReportPdf({
   y += 10;
 
   const flowHeaders = ['Type', 'Invoice #', 'Date', 'Party / Description', 'Amount'];
-  const flowColW = [usableW * 0.15, usableW * 0.2, usableW * 0.18, usableW * 0.3, usableW * 0.17];
+  const flowColW = [usableW * 0.13, usableW * 0.16, usableW * 0.14, usableW * 0.41, usableW * 0.16];
   const flowColX = [];
   {
     let x = margin;
@@ -772,11 +984,11 @@ export async function downloadCashflowReportPdf({
       const tStr = (f.bill_type || 'sale').toUpperCase();
       const invStr = String(f.invoice_number || '—');
       const dStr = String(f.date || '');
-      const commStr = String(f.comment || '').substring(0, 36);
+      const commStr = String(f.comment || '').substring(0, 60);
       const isHelp = tStr === 'HELP';
       const isBuy = tStr === 'SUPPLIER' || f.buying > 0;
       const amtNum = isHelp ? f.expenditure : isBuy ? f.buying : f.selling;
-      const amtStr = `${isBuy || isHelp ? '−' : '+'}${currencySymbol} ${exportMoney(amtNum || 0)}`;
+      const amtStr = `${isBuy || isHelp ? '-' : '+'}${currencySymbol} ${exportMoney(amtNum || 0)}`;
 
       pdf.text(tStr, flowColX[0] + flowColW[0] / 2, y + 11.5, { align: 'center' });
       pdf.text(invStr, flowColX[1] + flowColW[1] / 2, y + 11.5, { align: 'center' });
@@ -1024,8 +1236,8 @@ export async function downloadPartnerReportPdf({
     const invStr = String(o.invoice_number || '').substring(0, 14);
     const partyStr = String(o.customer_name || 'Walk-in').substring(0, 24);
 
-    const salesStr = isBuy || isHelp ? '−' : `${exportMoney(o.total_amount || 0)}`;
-    const buyStr = isBuy ? `${exportMoney(o.total_amount || 0)}` : '−';
+    const salesStr = isBuy || isHelp ? '—' : `${exportMoney(o.total_amount || 0)}`;
+    const buyStr = isBuy ? `${exportMoney(o.total_amount || 0)}` : '—';
     const profitStr = isHelp ? 'Rs. 0' : isBuy ? `-Rs. ${exportMoney(o.total_amount)}` : `+Rs. ${exportMoney(o.total_amount)}`;
 
     const isSettled = Boolean(
