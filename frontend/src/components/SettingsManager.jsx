@@ -305,15 +305,8 @@ export default function SettingsManager({
       return;
     }
     try {
-      const { downloadTableExcel, exportMoney } = await import('../utils/tableExport');
-      const headers = ['Category', 'Invoice #', 'Customer / Party', 'Date', 'Total (Rs.)', 'Paid (Rs.)', 'Balance (Rs.)', 'Status'];
-      const colTypes = ['center', 'center', 'text', 'center', 'number', 'number', 'number', 'status'];
-      const colWidths = [100, 110, 190, 95, 110, 110, 110, 90];
-
-      let sumTotal = 0;
-      let sumPaid = 0;
-      let sumBalance = 0;
-
+      const { downloadCsv, exportMoney } = await import('../utils/tableExport');
+      const headers = ['Category', 'Invoice #', 'Party', 'Date', 'Total', 'Paid', 'Balance', 'Status'];
       const rows = report.bills.map((b) => {
         const total = Number(b.total_amount) || 0;
         const paid = Number(b.amount_paid) || 0;
@@ -323,10 +316,6 @@ export default function SettingsManager({
           if (balance <= 0) status = 'paid';
           else if (status === 'paid') status = 'due';
         }
-        sumTotal += total;
-        sumPaid += paid;
-        sumBalance += balance;
-
         const typeLabel =
           b.bill_type === 'supplier'
             ? 'Saudia Buying'
@@ -341,29 +330,16 @@ export default function SettingsManager({
           b.invoice_number || '',
           b.customer_name || '',
           b.bill_date || '',
-          total,
-          paid,
-          balance,
+          exportMoney(total),
+          exportMoney(paid),
+          exportMoney(balance),
           status.toUpperCase(),
         ];
       });
-
-      const summaryRow = ['TOTALS', `${rows.length} Bills`, '', '', sumTotal, sumPaid, sumBalance, ''];
-
-      await downloadTableExcel({
-        title: `Elite Chocolate — Monthly Report (${report.period})`,
-        subtitle: `Sales: Rs. ${exportMoney(report.sales_total)} · Buying: Rs. ${exportMoney(report.buying_total)} · Generated on ${new Date().toLocaleDateString('en-PK')}`,
-        sheetName: `Report ${report.period}`,
-        headers,
-        rows,
-        colTypes,
-        colWidths,
-        summaryRow,
-        filename: `Monthly_Report_${report.period}.xls`,
-      });
-      toast.success('Monthly report exported (Excel)');
+      await downloadCsv(headers, rows, `monthly-report-${report.period}.csv`);
+      toast.success('Report exported (CSV)');
     } catch (err) {
-      if (err?.name !== 'AbortError') toast.error('Excel export failed: ' + err.message);
+      if (err?.name !== 'AbortError') toast.error('CSV export failed: ' + err.message);
     }
   };
 
@@ -374,7 +350,7 @@ export default function SettingsManager({
     }
     try {
       const { downloadTablePdf, exportMoney } = await import('../utils/tableExport');
-      const headers = ['Type', 'Invoice', 'Party', 'Date', 'Total', 'Paid', 'Balance', 'Status'];
+      const headers = ['Category', 'Invoice #', 'Party / Customer', 'Date', 'Total (Rs.)', 'Paid (Rs.)', 'Balance (Rs.)', 'Status'];
       const rows = report.bills.map((b) => {
         const total = Number(b.total_amount) || 0;
         const paid = Number(b.amount_paid) || 0;
@@ -384,26 +360,44 @@ export default function SettingsManager({
           if (balance <= 0) status = 'paid';
           else if (status === 'paid') status = 'due';
         }
+        const typeLabel =
+          b.bill_type === 'supplier'
+            ? 'Saudia Buying'
+            : b.bill_type === 'help'
+            ? 'Help'
+            : b.bill_type === 'khata'
+            ? 'Credit Khata'
+            : 'Sale';
+
         return [
-          b.bill_type || '',
+          typeLabel,
           b.invoice_number || '',
           b.customer_name || '',
           b.bill_date || '',
           exportMoney(total),
           exportMoney(paid),
           exportMoney(balance),
-          status,
+          status.toUpperCase(),
         ];
       });
       const sym = settings.currency_symbol || 'Rs.';
+
+      const summaryCards = [
+        { label: 'MONTHLY SALES', value: `${sym} ${exportMoney(report.sales_total)}`, color: [16, 185, 129] },
+        { label: 'COLLECTED AMOUNT', value: `${sym} ${exportMoney(report.sales_paid)}`, color: [14, 165, 233] },
+        { label: 'BUYING COST', value: `${sym} ${exportMoney(report.buying_total)}`, color: [239, 68, 68] },
+        { label: 'ESTIMATED PROFIT', value: `${sym} ${exportMoney(report.estimated_profit)}`, color: [212, 175, 55] },
+      ];
+
       await downloadTablePdf({
-        title: 'Elite Chocolate — Monthly Report',
-        subtitle: `${report.period} · Sales ${sym} ${exportMoney(report.sales_total)} · Collected ${sym} ${exportMoney(report.sales_paid)} · Buying ${sym} ${exportMoney(report.buying_total)}${report.help_outstanding ? ` · Help out ${sym} ${exportMoney(report.help_outstanding)}` : ''}`,
+        title: `Elite Chocolate — Monthly Report (${report.period})`,
+        subtitle: `Period: ${report.period} · ${rows.length} Total Bills Included · Generated on ${new Date().toLocaleDateString('en-PK')}`,
         headers,
         rows,
-        filename: `monthly-report-${report.period}.pdf`,
+        summaryCards,
+        filename: `Monthly_Report_${report.period}.pdf`,
         landscape: true,
-        colWeights: [1.1, 1.3, 1.5, 1.1, 1.2, 1.2, 1.2, 0.9],
+        colWeights: [1.1, 1.2, 1.6, 1.0, 1.1, 1.1, 1.1, 0.8],
       });
       toast.success('Report exported (PDF)');
     } catch (err) {

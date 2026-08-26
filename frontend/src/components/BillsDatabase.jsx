@@ -12,7 +12,7 @@ import { pakistanToday, formatCurrency, formatBillDateTime, addDaysToDateString 
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { downloadBlob } from '../utils/downloadFile';
-import { downloadCsv, downloadTablePdf, downloadBillsMasterExcel, exportMoney } from '../utils/tableExport';
+import { downloadCsv, downloadTablePdf, exportMoney } from '../utils/tableExport';
 import { compressImageToDataUrl } from '../utils/imageCompress';
 import { persistPaymentProof } from '../utils/paymentProof';
 import {
@@ -37,9 +37,8 @@ import {
 const BILLS_PAGE_SIZE = 5;
 
 function HeaderOptionsDropdown({
-  onExportExcel,
-  onExportCSV,
   onExportPDF,
+  onExportCSV,
   onRefresh,
   refreshing,
   loading,
@@ -92,15 +91,15 @@ function HeaderOptionsDropdown({
             disabled={!hasBills}
             onClick={() => {
               setOpen(false);
-              onExportExcel();
+              onExportPDF();
             }}
           >
-            <div className="bills-dd-icon-box is-green">
-              <FileSpreadsheet size={14} />
+            <div className="bills-dd-icon-box is-blue">
+              <FileText size={14} />
             </div>
             <div className="bills-dd-text">
-              <strong>Export Excel (.xls)</strong>
-              <small>Formatted luxury workbook</small>
+              <strong>Export PDF</strong>
+              <small>Printable executive statement</small>
             </div>
           </button>
 
@@ -119,24 +118,6 @@ function HeaderOptionsDropdown({
             <div className="bills-dd-text">
               <strong>Export CSV</strong>
               <small>Raw data table</small>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            className="bills-dropdown-item"
-            disabled={!hasBills}
-            onClick={() => {
-              setOpen(false);
-              onExportPDF();
-            }}
-          >
-            <div className="bills-dd-icon-box is-blue">
-              <FileText size={14} />
-            </div>
-            <div className="bills-dd-text">
-              <strong>Export PDF</strong>
-              <small>Printable summary</small>
             </div>
           </button>
 
@@ -749,30 +730,6 @@ export default function BillsDatabase({
     return { headers, rows };
   };
 
-  const handleExportExcel = async () => {
-    if (bills.length === 0) {
-      toast.info('No bills to export');
-      return;
-    }
-    try {
-      const filterBits = [
-        billTypeFilter !== 'all' ? billTypeFilter : null,
-        statusFilter !== 'all' ? statusFilter : null,
-        debouncedSearch ? `search "${debouncedSearch}"` : null,
-      ].filter(Boolean);
-
-      await downloadBillsMasterExcel({
-        bills: filteredBills.length ? filteredBills : bills,
-        filename: `Bills_Master_${pakistanToday()}.xls`,
-        title: 'Elite Chocolate — Bills Master & Sales Ledger',
-        subtitle: `${pakistanToday()} · ${bills.length} total bills${filterBits.length ? ` · Filtered: ${filterBits.join(' · ')}` : ''}`,
-      });
-      toast.success(`Exported ${filteredBills.length ? filteredBills.length : bills.length} bills (Excel)`);
-    } catch (err) {
-      if (err?.name !== 'AbortError') toast.error('Excel export failed: ' + err.message);
-    }
-  };
-
   const handleExportCSV = async () => {
     if (bills.length === 0) {
       toast.info('No bills to export');
@@ -788,7 +745,8 @@ export default function BillsDatabase({
   };
 
   const handleExportPDF = async () => {
-    if (bills.length === 0) {
+    const listToExport = filteredBills.length > 0 ? filteredBills : bills;
+    if (listToExport.length === 0) {
       toast.info('No bills to export');
       return;
     }
@@ -797,16 +755,29 @@ export default function BillsDatabase({
       const filterBits = [
         billTypeFilter !== 'all' ? billTypeFilter : null,
         statusFilter !== 'all' ? statusFilter : null,
-        debouncedSearch ? `search “${debouncedSearch}”` : null,
+        debouncedSearch ? `search "${debouncedSearch}"` : null,
       ].filter(Boolean);
+
+      const totalBilled = listToExport.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
+      const totalPaid = listToExport.reduce((s, b) => s + (Number(b.amount_paid) || 0), 0);
+      const totalBal = Math.max(0, totalBilled - totalPaid);
+
+      const summaryCards = [
+        { label: 'TOTAL INVOICES', value: `${listToExport.length} Bills`, color: [15, 23, 42] },
+        { label: 'TOTAL INVOICED', value: `Rs. ${exportMoney(totalBilled)}`, color: [16, 185, 129] },
+        { label: 'COLLECTED AMOUNT', value: `Rs. ${exportMoney(totalPaid)}`, color: [14, 165, 233] },
+        { label: 'RECEIVABLES / DUE', value: `Rs. ${exportMoney(totalBal)}`, color: [239, 68, 68] },
+      ];
+
       await downloadTablePdf({
-        title: 'Elite Chocolate — Bills Master',
-        subtitle: `${pakistanToday()} · ${rows.length} bill(s)${filterBits.length ? ` · ${filterBits.join(' · ')}` : ''}`,
+        title: 'Elite Chocolate — Invoices & Sales Ledger',
+        subtitle: `${pakistanToday()} · ${listToExport.length} bill(s)${filterBits.length ? ` · Filtered: ${filterBits.join(' · ')}` : ''}`,
         headers,
         rows,
-        filename: `Bills_Master_${pakistanToday()}.pdf`,
+        summaryCards,
+        filename: `Bills_Ledger_${pakistanToday()}.pdf`,
         landscape: true,
-        colWeights: [1.2, 1.3, 1.4, 1.1, 0.7, 1.1, 1.1, 1.1, 1.1, 0.8],
+        colWeights: [1.1, 1.2, 1.6, 1.0, 0.7, 1.1, 1.1, 1.1, 1.1, 0.8],
       });
       toast.success(`Exported ${rows.length} bill${rows.length === 1 ? '' : 's'} (PDF)`);
     } catch (err) {
@@ -866,9 +837,8 @@ export default function BillsDatabase({
         </div>
 
         <HeaderOptionsDropdown
-          onExportExcel={handleExportExcel}
-          onExportCSV={handleExportCSV}
           onExportPDF={handleExportPDF}
+          onExportCSV={handleExportCSV}
           onRefresh={() => apiFetchBills({ soft: true })}
           refreshing={refreshing}
           loading={loading}

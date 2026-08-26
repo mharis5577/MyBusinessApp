@@ -24,7 +24,7 @@ import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import EmptyState from './EmptyState';
 import { billTypeBadgeClass, billTypeShortLabel, isHelpBill } from '../utils/billTypes';
-import { downloadCashflowReportPdf, downloadCashflowExcel, downloadCashflowCsv } from '../utils/tableExport';
+import { downloadCashflowReportPdf } from '../utils/tableExport';
 
 /**
  * Modern Stripe/Shopify-style Financial Breakdown & Daily Profit Ledger
@@ -443,24 +443,6 @@ export default function CashflowPanel({
     }
   };
 
-  const handleExportCsv = async () => {
-    setExportingCsv(true);
-    try {
-      await downloadCashflowExcel({
-        moneyFlow: data?.money_flow || [],
-        dailyTrend: data?.daily_trend || [],
-        currencySymbol,
-        filename: `Cashflow_Statement_${new Date().toISOString().slice(0, 10)}.xls`,
-      });
-      toast.success('Cashflow Excel statement exported!');
-    } catch (err) {
-      console.error(err);
-      toast.error('Failed to export Excel');
-    } finally {
-      setExportingCsv(false);
-    }
-  };
-
   if (loading && !data) {
     return (
       <div className={`panel-flat${embedded ? ' is-embedded' : ''}`} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1rem 0' }}>
@@ -508,15 +490,6 @@ export default function CashflowPanel({
               onClick={handleExportPdf}
             >
               <Download size={14} /> {exportingPdf ? 'Exporting PDF…' : 'PDF Statement'}
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              style={{ width: 'auto', minHeight: 34, padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
-              disabled={exportingCsv}
-              onClick={handleExportCsv}
-            >
-              <FileSpreadsheet size={14} /> {exportingCsv ? 'Exporting…' : 'Export Excel'}
             </button>
             <button
               type="button"

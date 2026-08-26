@@ -4,19 +4,43 @@ const STORAGE_KEY = 'cocoadesk-bill-send-prefs';
 export const BILL_TARGET_OPTIONS = [
   {
     id: 'desktop',
-    label: 'Desktop',
+    label: 'Standard (A4)',
     hint: 'Full A4 page',
     layout: 'a4',
     defaultSize: 'large',
     layoutWidth: 820,
   },
   {
+    id: 'phone',
+    label: 'Mobile Bill',
+    hint: 'Phone A4 format',
+    layout: 'phone',
+    defaultSize: 'compact',
+    layoutWidth: 420,
+  },
+  {
     id: 'mobile',
-    label: 'Mobile',
-    hint: 'Phone-size card',
+    label: 'Mobile Card',
+    hint: 'Official receipt card',
     layout: 'phone',
     defaultSize: 'compact',
     layoutWidth: 390,
+  },
+  {
+    id: 'thermal',
+    label: 'Thermal',
+    hint: '80mm POS receipt',
+    layout: 'thermal',
+    defaultSize: 'compact',
+    layoutWidth: 340,
+  },
+  {
+    id: 'story',
+    label: 'Story Card',
+    hint: '9:16 Social card',
+    layout: 'story',
+    defaultSize: 'standard',
+    layoutWidth: 480,
   },
 ];
 
@@ -58,9 +82,9 @@ export const BILL_FORMAT_OPTIONS = [
 ];
 
 export const DEFAULT_BILL_SEND_PREFS = {
-  target: 'mobile',
-  format: 'image',
-  size: 'compact',
+  target: 'desktop',
+  format: 'pdf',
+  size: 'large',
   quality: 'balanced',
 };
 
@@ -100,27 +124,32 @@ export function saveBillSendPrefs(prefs) {
   return next;
 }
 
-/** When switching Desktop/Mobile, apply the matching default size. */
+/** When switching target, apply the matching default size. */
 export function prefsForTarget(targetId, prev = {}) {
-  const target = BILL_TARGET_OPTIONS.find((o) => o.id === targetId) || BILL_TARGET_OPTIONS[1];
+  const target = BILL_TARGET_OPTIONS.find((o) => o.id === targetId) || BILL_TARGET_OPTIONS[0];
   return saveBillSendPrefs({
     ...prev,
     target: target.id,
     size: target.defaultSize,
-    // Mobile shares work best as JPG; desktop often wants PDF
-    format: target.id === 'desktop' ? prev.format || 'pdf' : 'image',
+    format: target.id === 'desktop' ? prev.format || 'pdf' : (prev.format || 'image'),
   });
 }
 
 export function resolveBillExportOptions(prefs = DEFAULT_BILL_SEND_PREFS) {
-  const target = BILL_TARGET_OPTIONS.find((o) => o.id === prefs.target) || BILL_TARGET_OPTIONS[1];
+  const targetId = prefs?.target || 'desktop';
+  const target = BILL_TARGET_OPTIONS.find((o) => o.id === targetId) || {
+    id: targetId,
+    label: targetId,
+    layout: targetId === 'thermal' ? 'thermal' : targetId === 'story' ? 'story' : targetId === 'mobile' || targetId === 'phone' ? 'phone' : 'a4',
+    defaultSize: targetId === 'desktop' ? 'large' : 'compact',
+    layoutWidth: targetId === 'thermal' ? 340 : targetId === 'story' ? 480 : targetId === 'phone' ? 420 : targetId === 'mobile' ? 390 : 820,
+  };
   const size = BILL_SIZE_OPTIONS.find((o) => o.id === prefs.size) || BILL_SIZE_OPTIONS[0];
   const quality = BILL_QUALITY_OPTIONS.find((o) => o.id === prefs.quality) || BILL_QUALITY_OPTIONS[1];
   const format = BILL_FORMAT_OPTIONS.find((o) => o.id === prefs.format) || BILL_FORMAT_OPTIONS[0];
 
-  // Mobile: keep export narrow so it reads as a phone card, not A4
   const maxWidth =
-    target.layout === 'phone' ? Math.min(size.maxWidth, 900) : size.maxWidth;
+    target.layout === 'phone' || target.layout === 'thermal' ? Math.min(size.maxWidth, 900) : size.maxWidth;
 
   return {
     target: target.id,

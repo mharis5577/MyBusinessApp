@@ -144,20 +144,31 @@ function prepareClone(cloned, element, { maxWidth, layoutWidth, clonedDoc } = {}
 
   const isStory = cloned.classList.contains('story-card-sheet');
   const isMobilePass = cloned.classList.contains('mc-pass');
+  const isThermal = cloned.classList.contains('thermal-sheet');
+  const isMbBill = cloned.classList.contains('mb-bill');
 
-  if (!isStory && !isMobilePass) {
+  if (isThermal) {
     cloned.style.background = '#ffffff';
-    cloned.style.color = '#111111';
-    // Ensure all standard invoice text is crisp, deep black & dark slate
-    cloned.querySelectorAll('.inv-company-name, .inv-num, .inv-client-name, .inv-table th, .inv-table td, .inv-total-row, .inv-bank-box').forEach((el) => {
-      el.style.color = '#111111';
-    });
-    cloned.querySelectorAll('.inv-meta-label, .inv-client-sub, .inv-notes-text, .inv-footer-center, .inv-item-note').forEach((el) => {
-      el.style.color = '#4b5563';
-    });
+    cloned.style.color = '#000000';
+    cloned.style.width = '340px';
+    cloned.style.maxWidth = '340px';
+    cloned.style.margin = '0 auto';
+    cloned.style.padding = '14px 16px';
+  } else if (isStory) {
+    cloned.style.width = '440px';
+    cloned.style.maxWidth = '440px';
+    cloned.style.margin = '0 auto';
+  } else if (isMbBill) {
+    cloned.style.background = '#ffffff';
+    cloned.style.width = '420px';
+    cloned.style.maxWidth = '420px';
+    cloned.style.margin = '0 auto';
   } else if (isMobilePass) {
     cloned.style.background = '#ffffff';
     cloned.style.color = '#111111';
+    cloned.style.width = '390px';
+    cloned.style.maxWidth = '390px';
+    cloned.style.margin = '0 auto';
     // Ensure all mobile pass texts are crisp and high contrast
     cloned.querySelectorAll('.mc-meta-txt, .mc-client-name, .mc-item-name, .mc-item-sum, .mc-pay-line').forEach((el) => {
       el.style.color = '#111111';
@@ -170,6 +181,16 @@ function prepareClone(cloned, element, { maxWidth, layoutWidth, clonedDoc } = {}
     cloned.querySelectorAll('.mc-meta-item, .mc-item-row, .mc-ledger, .mc-pay-strip').forEach((el) => {
       el.style.background = '#f7f6f2';
       el.style.borderColor = '#dcd8cf';
+    });
+  } else {
+    cloned.style.background = '#ffffff';
+    cloned.style.color = '#111111';
+    // Ensure all standard invoice text is crisp, deep black & dark slate
+    cloned.querySelectorAll('.inv-company-name, .inv-num, .inv-client-name, .inv-table th, .inv-table td, .inv-total-row, .inv-bank-box').forEach((el) => {
+      el.style.color = '#111111';
+    });
+    cloned.querySelectorAll('.inv-meta-label, .inv-client-sub, .inv-notes-text, .inv-footer-center, .inv-item-note').forEach((el) => {
+      el.style.color = '#4b5563';
     });
   }
 

@@ -39,7 +39,7 @@ import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { formatCurrency, formatPkMoney, pakistanToday } from '../utils/pakistan';
 import { playSuccessChime, playTapSound } from '../utils/audioEffects';
-import { downloadPartnerReportPdf, downloadPartnerReportExcel, downloadPartnerReportCsv } from '../utils/tableExport';
+import { downloadPartnerReportPdf } from '../utils/tableExport';
 import EmptyState from './EmptyState';
 import PartnerEquityCharts from './PartnerEquityCharts';
 import PartnerWhatsAppDigestModal from './PartnerWhatsAppDigestModal';
@@ -373,27 +373,7 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
     }
   };
 
-  // Export Excel Spreadsheet
-  const handleDownloadCsv = async () => {
-    try {
-      playTapSound();
-      const summary = calcData.summary || {};
-      await downloadPartnerReportExcel({
-        periodLabel: timeRange,
-        totalSales: summary.total_sales || 0,
-        totalBuying: summary.total_buying || 0,
-        netProfit: summary.net_profit || 0,
-        partners: calcData.partner_splits || [],
-        orders: calcData.orders || [],
-        settlementInfo: settlements[0] || calcData.last_settlement,
-        currencySymbol,
-        filename: `Partner_Profit_${pakistanToday()}.xls`,
-      });
-      toast.success('Partner statement Excel exported!');
-    } catch (err) {
-      toast.error('Failed to export Excel: ' + err.message);
-    }
-  };
+
 
   // Share via WhatsApp
   const handleShareWhatsApp = (partnerPhone) => {
@@ -1064,23 +1044,6 @@ ${splitsText}
                   title="Download / Share Partner Statement PDF"
                 >
                   <FileText size={13} /> Export PDF
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={handleDownloadCsv}
-                  style={{
-                    padding: '0.42rem 0.85rem',
-                    fontSize: '0.78rem',
-                    borderRadius: '999px',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.35rem',
-                    whiteSpace: 'nowrap',
-                  }}
-                  title="Export to CSV / Excel spreadsheet"
-                >
-                  <FileSpreadsheet size={13} /> Export Excel
                 </button>
               </div>
             </div>

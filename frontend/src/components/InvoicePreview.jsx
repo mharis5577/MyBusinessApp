@@ -339,8 +339,14 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onEdit, onBi
   }, [shopPaymentMethods, selectedBankIds]);
 
   const paymentInstructions = compactPaymentInstructions(settings.payment_instructions, activePaymentMethods);
+  const renderablePaymentMethods = React.useMemo(() => {
+    return activePaymentMethods.filter((m) => {
+      const lines = paymentMethodLines(m);
+      return lines && lines.length > 0;
+    });
+  }, [activePaymentMethods]);
   const hasShopPayment =
-    activePaymentMethods.length > 0 || Boolean(paymentInstructions);
+    renderablePaymentMethods.length > 0 || Boolean(paymentInstructions);
   const primaryWallet =
     activePaymentMethods.find((m) => m.mobile_wallet)?.mobile_wallet ||
     activePaymentMethods.find((m) => m.account_number)?.account_number ||
@@ -394,9 +400,9 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onEdit, onBi
   const exportOptsFromPrefs = (prefs) => resolveBillExportOptions(prefs || loadBillSendPrefs());
 
   const buildBillBlob = async (prefs) => {
-    const currentView = billView;
-    const exportTarget = prefs?.target || (currentView === 'mobile' ? 'mobile' : currentView === 'story' ? 'story' : currentView === 'thermal' ? 'thermal' : 'desktop');
-    const opts = exportOptsFromPrefs({ ...prefs, target: exportTarget });
+    const activeView = billView || 'desktop';
+    const exportTarget = prefs?.target || activeView;
+    const opts = exportOptsFromPrefs({ ...loadBillSendPrefs(), ...prefs, target: exportTarget });
 
     // Switch visible layout to target view for accurate screenshot capture
     setBillView(exportTarget);
@@ -432,7 +438,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onEdit, onBi
       throw err;
     } finally {
       // Always restore user's active billView format!
-      setBillView(currentView);
+      setBillView(activeView);
     }
   };
 
@@ -446,7 +452,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onEdit, onBi
   const handleDownloadPDF = async () => {
     setSharing('pdf');
     try {
-      const { blob, filename } = await buildBillBlob({ ...loadBillSendPrefs(), format: 'pdf' });
+      const { blob, filename } = await buildBillBlob({ format: 'pdf', target: billView });
       await downloadBlob(blob, filename, 'application/pdf');
       toast.success('PDF saved');
     } catch (err) {
@@ -459,7 +465,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onEdit, onBi
   const handleDownloadImage = async () => {
     setSharing('image');
     try {
-      const { blob, filename } = await buildBillBlob({ ...loadBillSendPrefs(), format: 'image' });
+      const { blob, filename } = await buildBillBlob({ format: 'image', target: billView });
       await downloadBlob(blob, filename, 'image/jpeg');
       toast.success('Image saved');
     } catch (err) {
@@ -472,7 +478,8 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onEdit, onBi
   const handleSendBill = async (prefs) => {
     setSharing('send');
     try {
-      const { blob, opts, filename } = await buildBillBlob(prefs);
+      const target = prefs?.target || billView;
+      const { blob, opts, filename } = await buildBillBlob({ ...prefs, target });
       const caption = shareCaption();
       const result = await saveOrShareBlob(blob, filename, opts.mime, {
         title: isSupplier
@@ -496,7 +503,8 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onEdit, onBi
   const handleSaveBill = async (prefs) => {
     setSharing('save');
     try {
-      const { blob, opts, filename } = await buildBillBlob(prefs);
+      const target = prefs?.target || billView;
+      const { blob, opts, filename } = await buildBillBlob({ ...prefs, target });
       await downloadBlob(blob, filename, opts.mime);
       toast.success(opts.format === 'pdf' ? 'PDF saved' : 'Image saved');
       setSendOpen(false);
@@ -510,8 +518,9 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onEdit, onBi
   const handleWhatsAppShare = async (prefs) => {
     setSharing('whatsapp');
     try {
-      const usePrefs = prefs || { ...loadBillSendPrefs(), format: 'image' };
-      const { blob, opts, filename } = await buildBillBlob({ ...usePrefs, format: usePrefs.format || 'image' });
+      const target = prefs?.target || billView;
+      const format = prefs?.format || 'image';
+      const { blob, opts, filename } = await buildBillBlob({ ...prefs, target, format });
       const caption = shareCaption();
       const result = await saveOrShareBlob(blob, filename, opts.mime, {
         title: isSupplier
@@ -560,10 +569,12 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onEdit, onBi
   const handleEmailShare = async (prefs) => {
     setSharing('email');
     try {
-      const usePrefs = prefs || { ...loadBillSendPrefs(), format: 'pdf' };
+      const target = prefs?.target || billView;
+      const format = prefs?.format || 'pdf';
       const { blob, opts, filename } = await buildBillBlob({
-        ...usePrefs,
-        format: usePrefs.format || 'pdf',
+        ...prefs,
+        target,
+        format,
       });
       const subject = isSupplier
         ? `Payment advice ${liveBill.invoice_number} from ${companyName}`
@@ -1835,7 +1846,7 @@ export default function InvoicePreview({ bill, onBack, onDuplicate, onEdit, onBi
           ) : hasShopPayment ? (
             <div className="inv-paybox">
               <strong><BiLabel en="Payment Details" ur="ادائیگی تفصیلات" urdu={urdu} /></strong>
-              {activePaymentMethods.map((method) => (
+              {renderablePaymentMethods.map((method) => (
                 <div key={method.id} className="inv-paybox-method">
                   {paymentMethodLines(method).map((line) => (
                     <div key={line}>{line}</div>

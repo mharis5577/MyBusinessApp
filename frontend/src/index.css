@@ -8869,21 +8869,21 @@ input[type="checkbox"]:hover {
   overflow-wrap: anywhere;
 }
 
-/* Meta grid — 2 cols, auto expand to 4 when 4 cells present */
 .invoice-sheet .inv-meta-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.55rem 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  gap: 0.6rem 1.15rem;
   background: #ffffff;
-  padding: 0.7rem 1rem;
+  padding: 0.75rem 1.2rem;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
   min-width: 0;
+  box-sizing: border-box;
 }
 
 .invoice-sheet .inv-meta-grid:has(.inv-meta-cell:nth-child(4)) {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
 }
 
 /* Party Strip */

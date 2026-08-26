@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Share2, Download, MessageSquare, Mail, X, Loader2, Monitor, Smartphone } from 'lucide-react';
+import { Share2, Download, MessageSquare, Mail, X, Loader2, Monitor, Smartphone, Receipt, Sparkles, FileText } from 'lucide-react';
 import {
   BILL_TARGET_OPTIONS,
   BILL_FORMAT_OPTIONS,
@@ -33,11 +33,9 @@ export default function SendBillSheet({
 
   useEffect(() => {
     if (!open) return undefined;
-    let loaded = loadBillSendPrefs();
-    if (preferredTarget === 'mobile' || preferredTarget === 'desktop') {
-      loaded = prefsForTarget(preferredTarget, loaded);
-    }
-    setPrefs(loaded);
+    const loaded = loadBillSendPrefs();
+    const activeTarget = preferredTarget || loaded.target || 'desktop';
+    setPrefs({ ...loaded, target: activeTarget });
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
@@ -85,7 +83,7 @@ export default function SendBillSheet({
         <div className="send-bill-body">
           <fieldset className="send-bill-fieldset" disabled={working}>
             <legend>Send for</legend>
-            <div className="send-bill-seg" role="radiogroup" aria-label="Send for">
+            <div className="send-bill-seg" role="radiogroup" aria-label="Send for" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.45rem' }}>
               {BILL_TARGET_OPTIONS.map((opt) => (
                 <button
                   key={opt.id}
@@ -95,7 +93,15 @@ export default function SendBillSheet({
                   className={`send-bill-seg-btn send-bill-target-btn ${prefs.target === opt.id ? 'is-active' : ''}`}
                   onClick={() => setTarget(opt.id)}
                 >
-                  {opt.id === 'desktop' ? <Monitor size={16} /> : <Smartphone size={16} />}
+                  {opt.id === 'desktop' ? (
+                    <FileText size={16} />
+                  ) : opt.id === 'thermal' ? (
+                    <Receipt size={16} />
+                  ) : opt.id === 'story' ? (
+                    <Sparkles size={16} />
+                  ) : (
+                    <Smartphone size={16} />
+                  )}
                   <span>{opt.label}</span>
                   <small>{opt.hint}</small>
                 </button>
