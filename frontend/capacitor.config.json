@@ -1,5 +1,5 @@
 {
-  "appId": "pk.elitechocolate.pos.test",
+  "appId": "pk.elitechocolate.pos.v2",
   "appName": "CocoaDesk",
   "webDir": "dist",
   "server": {
