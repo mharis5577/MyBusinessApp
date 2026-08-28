@@ -180,7 +180,7 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
     let isMounted = true;
     const init = async () => {
       setLoading(true);
-      await Promise.all([fetchPartners(), fetchAuxData(), fetchBreakdown()]);
+      await Promise.all([fetchPartners(), fetchAuxData()]);
       if (isMounted) setLoading(false);
     };
     init();
@@ -189,7 +189,7 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch breakdown smoothly in background when filter/period changes without unmounting DOM
+  // Runs on mount and whenever the period filter changes, without unmounting the DOM.
   useEffect(() => {
     fetchBreakdown();
   }, [fetchBreakdown]);
