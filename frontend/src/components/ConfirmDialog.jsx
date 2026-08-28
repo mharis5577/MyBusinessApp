@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Trash2 } from 'lucide-react';
+import useDialog from '../utils/useDialog';
 
 /**
  * App-styled confirm modal (replaces window.confirm).
@@ -17,19 +18,7 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }) {
-  useEffect(() => {
-    if (!open) return undefined;
-    const onKey = (e) => {
-      if (e.key === 'Escape' && !busy) onCancel?.();
-    };
-    window.addEventListener('keydown', onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
-    };
-  }, [open, busy, onCancel]);
+  const dialogRef = useDialog(open, onCancel, { closeOnEscape: !busy });
 
   if (!open) return null;
 
@@ -42,11 +31,13 @@ export default function ConfirmDialog({
       }}
     >
       <div
+        ref={dialogRef}
         className="glass-panel confirm-dialog"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-desc"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="confirm-dialog-icon" aria-hidden>

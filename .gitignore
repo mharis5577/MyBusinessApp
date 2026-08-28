@@ -17,8 +17,10 @@ frontend/android/**/build/
 *.ap_
 *.keystore
 *.jks
-!frontend/android/keystore/
-!frontend/android/keystore/elite-release.jks
+
+# Signing secrets — supply via keystore.properties locally or CI secrets
+frontend/android/keystore.properties
+frontend/android/keystore/
 
 # Env / OS
 .env

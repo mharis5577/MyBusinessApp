@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
+import useDialog from '../utils/useDialog';
 import { useToast } from '../toast/ToastContext';
 import { playTapSound, playSuccessChime } from '../utils/audioEffects';
 import { normalizePartyName } from '../utils/aging';
@@ -90,6 +91,10 @@ export default function CustomerManager({
   const [editPayeeAccountNumber, setEditPayeeAccountNumber] = useState('');
   const [editPayeePaymentNotes, setEditPayeePaymentNotes] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const addDialogRef = useDialog(showAddModal, () => setShowAddModal(false));
+  const editDialogRef = useDialog(Boolean(editCustomer), () => setEditCustomer(null), {
+    closeOnEscape: !savingEdit,
+  });
 
   // Merge tool
   const [mergePrimary, setMergePrimary] = useState('');
@@ -1311,12 +1316,20 @@ export default function CustomerManager({
       {/* 5. Add Client Profile Modal */}
       {showAddModal &&
         createPortal(
-          <div className="client-modal-overlay" onClick={() => setShowAddModal(false)}>
-            <div className="client-modal-card" onClick={(e) => e.stopPropagation()}>
+          <div className="client-modal-overlay" onClick={() => setShowAddModal(false)} role="presentation">
+            <div
+              ref={addDialogRef}
+              className="client-modal-card"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="add-client-title"
+              tabIndex={-1}
+            >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <UserPlus size={20} style={{ color: 'var(--accent-teal)' }} />
-                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>Add New Client Profile</h3>
+                  <h3 id="add-client-title" style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>Add New Client Profile</h3>
                 </div>
                 <button
                   type="button"
@@ -1449,12 +1462,20 @@ export default function CustomerManager({
       {/* 6. Edit Client Profile Modal */}
       {editCustomer &&
         createPortal(
-          <div className="client-modal-overlay" onClick={() => !savingEdit && setEditCustomer(null)}>
-            <div className="client-modal-card" onClick={(e) => e.stopPropagation()}>
+          <div className="client-modal-overlay" onClick={() => !savingEdit && setEditCustomer(null)} role="presentation">
+            <div
+              ref={editDialogRef}
+              className="client-modal-card"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="edit-client-title"
+              tabIndex={-1}
+            >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <Edit3 size={20} style={{ color: 'var(--accent-teal)' }} />
-                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>Edit Profile & Status</h3>
+                  <h3 id="edit-client-title" style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>Edit Profile & Status</h3>
                 </div>
                 <button
                   type="button"

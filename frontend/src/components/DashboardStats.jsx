@@ -504,6 +504,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
           <button
             type="button"
             className="exec-dock-btn is-alert"
+            aria-label="Overdue queue"
             onClick={() => {
               playTapSound();
               setAutomationTab('reminders');
@@ -511,7 +512,7 @@ export default function DashboardStats({ onNavigate, onViewBill, currencySymbol 
             }}
           >
             <Bell size={14} />
-            <span>Overdue Queue</span>
+            <span>Overdue</span>
             {total_overdue > 0 ? (
               <span className="exec-badge-count is-alert">{overdue_bills_count || '!'} Due</span>
             ) : (

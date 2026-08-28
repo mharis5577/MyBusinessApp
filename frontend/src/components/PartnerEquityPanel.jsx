@@ -44,6 +44,7 @@ import EmptyState from './EmptyState';
 import PartnerEquityCharts from './PartnerEquityCharts';
 import PartnerWhatsAppDigestModal from './PartnerWhatsAppDigestModal';
 import ConfirmDialog from './ConfirmDialog';
+import useDialog from '../utils/useDialog';
 
 export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = {} }) {
   const toast = useToast();
@@ -69,6 +70,7 @@ export default function PartnerEquityPanel({ currencySymbol = 'Rs.', settings = 
   // Modals
   const [showPayoutModal, setShowPayoutModal] = useState(false);
   const [showDigestModal, setShowDigestModal] = useState(false);
+  const payoutDialogRef = useDialog(showPayoutModal, () => setShowPayoutModal(false));
   const [payoutForm, setPayoutForm] = useState({
     partner_id: '',
     amount: '',
@@ -2017,8 +2019,17 @@ ${splitsText}
       {showPayoutModal &&
         createPortal(
           <div className="client-modal-overlay" onClick={() => setShowPayoutModal(false)} role="presentation">
-            <div className="client-modal-card glass-panel" onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: '460px' }}>
-              <h3 style={{ fontSize: '1.15rem', fontWeight: 800, marginBottom: '0.8rem' }}>Record Partner Payout</h3>
+            <div
+              ref={payoutDialogRef}
+              className="client-modal-card glass-panel"
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: '100%', maxWidth: '460px' }}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="partner-payout-title"
+              tabIndex={-1}
+            >
+              <h3 id="partner-payout-title" style={{ fontSize: '1.15rem', fontWeight: 800, marginBottom: '0.8rem' }}>Record Partner Payout</h3>
 
               <form onSubmit={handleCreatePayout}>
                 <div style={{ marginBottom: '0.8rem' }}>

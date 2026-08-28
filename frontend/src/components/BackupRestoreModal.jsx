@@ -30,6 +30,7 @@ import {
   PHONE_FOLDER,
 } from '../utils/backupManager';
 import { readPickedFileText } from '../utils/downloadFile';
+import useDialog from '../utils/useDialog';
 import { useToast } from '../toast/ToastContext';
 
 export default function BackupRestoreModal({ open, onClose, settings = {}, onSettingsUpdated }) {
@@ -42,6 +43,7 @@ export default function BackupRestoreModal({ open, onClose, settings = {}, onSet
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
   const deleteConfirmRef = useRef(null);
+  const dialogRef = useDialog(open, onClose, { closeOnEscape: !busy });
 
   const lastAuto = getLastAutoBackupAt();
   const lastPhonePath = getLastPhoneBackupPath();
@@ -61,15 +63,6 @@ export default function BackupRestoreModal({ open, onClose, settings = {}, onSet
       refreshSnapshots();
     }
   }, [open]);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') onClose?.();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open, onClose]);
 
   useEffect(() => {
     if (!pendingDelete) return undefined;
@@ -274,10 +267,13 @@ export default function BackupRestoreModal({ open, onClose, settings = {}, onSet
       role="presentation"
     >
       <div
+        ref={dialogRef}
         className="glass-panel"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
+        aria-labelledby="backup-vault-title"
+        tabIndex={-1}
         style={{
           maxWidth: 580,
           width: '100%',
@@ -294,7 +290,7 @@ export default function BackupRestoreModal({ open, onClose, settings = {}, onSet
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <Download size={22} style={{ color: 'var(--accent-teal)' }} />
             <div>
-              <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+              <h3 id="backup-vault-title" style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
                 Backup & Restore Vault
               </h3>
               <p style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', margin: 0 }}>
@@ -317,7 +313,6 @@ export default function BackupRestoreModal({ open, onClose, settings = {}, onSet
         <div style={{ marginBottom: '1.25rem' }}>
           <FirebaseCloudSyncPanel
             companyPhone={settings.company_phone}
-            appPin={settings.app_pin}
             onRestoreComplete={refreshSnapshots}
           />
         </div>

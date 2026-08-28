@@ -3,7 +3,7 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import db, { dbAll, dbGet, dbRun } from './db.js';
+import { dbAll, dbGet, dbRun, withTransaction } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,11 +12,27 @@ import { serializePaymentMethods, withPaymentMethods, getPaymentMethods } from '
 import { normalizeBillType, invoicePrefixForType, partyTypeForBill, outstandingByPartyName } from './utils/billTypes.js';
 import { saleOverviewTotals } from './utils/dashboardStats.js';
 import { performAutoBackup, generateBusinessBrief, getOverdueQueue } from './utils/automationEngine.js';
+import { isDemoBill, isDemoCustomer } from './utils/demoData.js';
 
 const app = express();
 const PORT = process.env.PORT || 11000;
+// Dev tool: bind to loopback so the shop DB is not reachable from the network.
+const HOST = process.env.HOST || '127.0.0.1';
 
-app.use(cors());
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:10000,http://127.0.0.1:10000')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, cb) {
+      // No Origin header = curl / same-origin navigation, which is fine here.
+      if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      return cb(new Error('Origin not allowed'));
+    },
+  })
+);
 app.use(express.json({ limit: '25mb' }));
 
 function isCancelled(bill) {
@@ -128,14 +144,16 @@ app.use((req, res, next) => {
 // -------------------------------------------------------------
 app.post('/api/reset-db', async (req, res) => {
   try {
-    await dbRun('DELETE FROM bill_payments');
-    await dbRun('DELETE FROM bill_items');
-    await dbRun('DELETE FROM bills');
-    await dbRun('DELETE FROM stock_adjustments');
-    await dbRun('DELETE FROM customer_product_rates');
-    await dbRun('DELETE FROM advance_payments');
-    await dbRun('DELETE FROM customers');
-    await dbRun('DELETE FROM products');
+    await withTransaction(async () => {
+      await dbRun('DELETE FROM bill_payments');
+      await dbRun('DELETE FROM bill_items');
+      await dbRun('DELETE FROM bills');
+      await dbRun('DELETE FROM stock_adjustments');
+      await dbRun('DELETE FROM customer_product_rates');
+      await dbRun('DELETE FROM advance_payments');
+      await dbRun('DELETE FROM customers');
+      await dbRun('DELETE FROM products');
+    });
     res.json({ success: true, message: 'All database tables wiped successfully.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -705,18 +723,13 @@ app.post('/api/products/:id/adjust-stock', async (req, res) => {
     if (!product) return res.status(404).json({ error: 'Product not found' });
 
     const nextStock = Math.max(0, (Number(product.stock) || 0) + delta);
-    await dbRun('BEGIN IMMEDIATE');
-    try {
+    await withTransaction(async () => {
       await dbRun('UPDATE products SET stock = ? WHERE id = ?', [nextStock, req.params.id]);
       await dbRun(
         'INSERT INTO stock_adjustments (product_id, delta, reason, notes) VALUES (?, ?, ?, ?)',
         [req.params.id, delta, reason, notes]
       );
-      await dbRun('COMMIT');
-    } catch (e) {
-      await dbRun('ROLLBACK');
-      throw e;
-    }
+    });
 
     const updated = await dbGet('SELECT * FROM products WHERE id = ?', [req.params.id]);
     res.json(updated);
@@ -902,12 +915,13 @@ app.post('/api/bills', async (req, res) => {
     const todayStr = pakistanToday();
     const dueStr = due_date || todayStr;
 
-    await dbRun('BEGIN IMMEDIATE');
+    // Recompute rather than trust the client, so stored totals always match enrichBill.
+    const totals = recalcBillTotals({ tax_rate, discount_rate }, items);
 
     let result;
     let billId;
 
-    try {
+    await withTransaction(async () => {
       const insertBill = async (number) =>
         dbRun(
           `INSERT INTO bills (
@@ -926,12 +940,12 @@ app.post('/api/bills', async (req, res) => {
             bill_date || todayStr,
             bill_time || pakistanNowTime(),
             dueStr,
-            subtotal || 0,
+            totals.subtotal,
             tax_rate || 0,
-            tax_amount || 0,
+            totals.tax_amount,
             discount_rate || 0,
-            discount_amount || 0,
-            total_amount || 0,
+            totals.discount_amount,
+            totals.total_amount,
             status || 'pending',
             notes || '',
             payment_method || 'Bank Transfer / Raast / Cash',
@@ -1017,16 +1031,7 @@ app.post('/api/bills', async (req, res) => {
           ]
         );
       }
-
-      await dbRun('COMMIT');
-    } catch (innerErr) {
-      try {
-        await dbRun('ROLLBACK');
-      } catch (_) {
-        /* ignore rollback errors */
-      }
-      throw innerErr;
-    }
+    });
 
     const createdBill = await dbGet('SELECT * FROM bills WHERE id = ?', [billId]);
     if (!createdBill) {
@@ -1034,7 +1039,7 @@ app.post('/api/bills', async (req, res) => {
     }
     createdBill.items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [billId]);
 
-    console.log(`[Success] Saved ${bType} Bill #${invNum} (ID: ${billId}) - Total: ${total_amount}`);
+    console.log(`[Success] Saved ${bType} Bill #${invNum} (ID: ${billId}) - Total: ${totals.total_amount}`);
     res.status(201).json(createdBill);
   } catch (err) {
     console.error('Error saving bill:', err);
@@ -1080,6 +1085,14 @@ app.put('/api/bills/:id', async (req, res) => {
     if (!existingBill) return res.status(404).json({ error: 'Bill not found' });
     if (isCancelled(existingBill)) return res.status(400).json({ error: 'Cancelled bills cannot be edited' });
 
+    const effTaxRate = tax_rate ?? existingBill.tax_rate;
+    const effDiscountRate = discount_rate ?? existingBill.discount_rate;
+    const totals = Array.isArray(items)
+      ? recalcBillTotals({ tax_rate: effTaxRate, discount_rate: effDiscountRate }, items)
+      : null;
+
+    // Bill row and its line items must land together or not at all.
+    await withTransaction(async () => {
     await dbRun(
       `UPDATE bills SET
         bill_type = ?, invoice_number = ?, customer_name = ?, customer_email = ?,
@@ -1098,12 +1111,12 @@ app.put('/api/bills/:id', async (req, res) => {
         bill_date || existingBill.bill_date,
         bill_time ?? existingBill.bill_time ?? '',
         due_date || existingBill.due_date,
-        subtotal ?? existingBill.subtotal,
-        tax_rate ?? existingBill.tax_rate,
-        tax_amount ?? existingBill.tax_amount,
-        discount_rate ?? existingBill.discount_rate,
-        discount_amount ?? existingBill.discount_amount,
-        total_amount ?? existingBill.total_amount,
+        totals ? totals.subtotal : existingBill.subtotal,
+        effTaxRate,
+        totals ? totals.tax_amount : existingBill.tax_amount,
+        effDiscountRate,
+        totals ? totals.discount_amount : existingBill.discount_amount,
+        totals ? totals.total_amount : existingBill.total_amount,
         status || existingBill.status,
         notes ?? existingBill.notes ?? '',
         payment_method || existingBill.payment_method || 'Bank Transfer / Raast / Cash',
@@ -1126,6 +1139,7 @@ app.put('/api/bills/:id', async (req, res) => {
         );
       }
     }
+    });
 
     const updatedBill = await dbGet('SELECT * FROM bills WHERE id = ?', [id]);
     const paidAmt = Number(updatedBill.amount_paid) || 0;
@@ -1252,15 +1266,17 @@ app.post('/api/bills/:id/cancel', async (req, res) => {
     if (!bill) return res.status(404).json({ error: 'Bill not found' });
     if (isCancelled(bill)) return res.status(400).json({ error: 'Bill is already cancelled' });
     const items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [bill.id]);
-    const qtyByItemId = new Map(items.map((it) => [Number(it.id), remainingQty(it)]));
-    await restoreStockForQtys(bill, items, qtyByItemId, 'bill cancel');
     const reason = String(req.body.reason || '').trim();
     const noteLine = `Cancelled ${pakistanToday()}${reason ? `: ${reason}` : ''}`;
     const notes = [bill.notes, noteLine].filter(Boolean).join('\n');
-    await dbRun(
-      `UPDATE bills SET status = 'cancelled', cancelled_at = ?, cancel_reason = ?, notes = ? WHERE id = ?`,
-      [new Date().toISOString(), reason, notes, bill.id]
-    );
+    await withTransaction(async () => {
+      const qtyByItemId = new Map(items.map((it) => [Number(it.id), remainingQty(it)]));
+      await restoreStockForQtys(bill, items, qtyByItemId, 'bill cancel');
+      await dbRun(
+        `UPDATE bills SET status = 'cancelled', cancelled_at = ?, cancel_reason = ?, notes = ? WHERE id = ?`,
+        [new Date().toISOString(), reason, notes, bill.id]
+      );
+    });
     res.json(await loadFullBill(bill.id));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1288,17 +1304,18 @@ app.post('/api/bills/:id/return', async (req, res) => {
     }
     if (!qtyByItemId.size) return res.status(400).json({ error: 'Enter at least one quantity to return' });
 
-    await restoreStockForQtys(bill, items, qtyByItemId, 'bill return');
-    for (const it of items) {
+    // returned_qty is persisted before stock moves, so a retry cannot double-credit.
+    const returnedItems = items.map((it) => {
       const extra = qtyByItemId.get(Number(it.id)) || 0;
-      if (!extra) continue;
+      if (!extra) return it;
       const returned_qty = (Number(it.returned_qty) || 0) + extra;
-      const lineTotal = Math.round((Number(it.quantity) - returned_qty) * (Number(it.unit_price) || 0) * 100) / 100;
-      await dbRun('UPDATE bill_items SET returned_qty = ?, total = ? WHERE id = ?', [returned_qty, lineTotal, it.id]);
-    }
-
-    const freshItems = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [bill.id]);
-    const totals = recalcBillTotals(bill, freshItems);
+      return {
+        ...it,
+        returned_qty,
+        total: Math.round((Number(it.quantity) - returned_qty) * (Number(it.unit_price) || 0) * 100) / 100,
+      };
+    });
+    const totals = recalcBillTotals(bill, returnedItems);
     const reason = String(req.body.reason || '').trim();
     const summary = [...qtyByItemId.entries()]
       .map(([itemId, qty]) => {
@@ -1308,30 +1325,43 @@ app.post('/api/bills/:id/return', async (req, res) => {
       .join(', ');
     const noteLine = `Return ${pakistanToday()}: ${summary}${reason ? ` (${reason})` : ''}`;
     const notes = [bill.notes, noteLine].filter(Boolean).join('\n');
-    const fullyReturned = freshItems.length > 0 && freshItems.every((it) => remainingQty(it) <= 0);
+    const fullyReturned = returnedItems.length > 0 && returnedItems.every((it) => remainingQty(it) <= 0);
 
-    if (fullyReturned) {
-      await dbRun(
-        `UPDATE bills SET subtotal = ?, discount_amount = ?, tax_amount = ?, total_amount = ?,
-          status = 'cancelled', cancelled_at = ?, cancel_reason = ?, notes = ? WHERE id = ?`,
-        [
-          totals.subtotal,
-          totals.discount_amount,
-          totals.tax_amount,
-          totals.total_amount,
-          new Date().toISOString(),
-          reason || 'All items returned',
-          notes,
-          bill.id,
-        ]
-      );
-      return res.json(await loadFullBill(bill.id));
-    }
+    await withTransaction(async () => {
+      for (const it of returnedItems) {
+        if (!qtyByItemId.get(Number(it.id))) continue;
+        await dbRun('UPDATE bill_items SET returned_qty = ?, total = ? WHERE id = ?', [
+          it.returned_qty,
+          it.total,
+          it.id,
+        ]);
+      }
+      await restoreStockForQtys(bill, items, qtyByItemId, 'bill return');
 
-    await dbRun(
-      `UPDATE bills SET subtotal = ?, discount_amount = ?, tax_amount = ?, total_amount = ?, notes = ? WHERE id = ?`,
-      [totals.subtotal, totals.discount_amount, totals.tax_amount, totals.total_amount, notes, bill.id]
-    );
+      if (fullyReturned) {
+        await dbRun(
+          `UPDATE bills SET subtotal = ?, discount_amount = ?, tax_amount = ?, total_amount = ?,
+            status = 'cancelled', cancelled_at = ?, cancel_reason = ?, notes = ? WHERE id = ?`,
+          [
+            totals.subtotal,
+            totals.discount_amount,
+            totals.tax_amount,
+            totals.total_amount,
+            new Date().toISOString(),
+            reason || 'All items returned',
+            notes,
+            bill.id,
+          ]
+        );
+      } else {
+        await dbRun(
+          `UPDATE bills SET subtotal = ?, discount_amount = ?, tax_amount = ?, total_amount = ?, notes = ? WHERE id = ?`,
+          [totals.subtotal, totals.discount_amount, totals.tax_amount, totals.total_amount, notes, bill.id]
+        );
+      }
+    });
+
+    if (fullyReturned) return res.json(await loadFullBill(bill.id));
     res.json(await refreshBillPaidStatus(bill.id));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1356,13 +1386,15 @@ app.delete('/api/bills/:id', async (req, res) => {
     const bill = await dbGet('SELECT * FROM bills WHERE id = ?', [req.params.id]);
     if (!bill) return res.status(404).json({ error: 'Bill not found' });
     const items = await dbAll('SELECT * FROM bill_items WHERE bill_id = ?', [bill.id]);
-    if (!isCancelled(bill)) {
-      const qtyByItemId = new Map(items.map((it) => [Number(it.id), remainingQty(it)]));
-      await restoreStockForQtys(bill, items, qtyByItemId, 'bill delete');
-    }
-    await dbRun('DELETE FROM bill_payments WHERE bill_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM bill_items WHERE bill_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM bills WHERE id = ?', [req.params.id]);
+    await withTransaction(async () => {
+      if (!isCancelled(bill)) {
+        const qtyByItemId = new Map(items.map((it) => [Number(it.id), remainingQty(it)]));
+        await restoreStockForQtys(bill, items, qtyByItemId, 'bill delete');
+      }
+      await dbRun('DELETE FROM bill_payments WHERE bill_id = ?', [req.params.id]);
+      await dbRun('DELETE FROM bill_items WHERE bill_id = ?', [req.params.id]);
+      await dbRun('DELETE FROM bills WHERE id = ?', [req.params.id]);
+    });
     res.json({ success: true, message: 'Bill deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1631,8 +1663,9 @@ app.get('/api/reports/monthly', async (req, res) => {
 app.get('/api/backup', async (req, res) => {
   try {
     const payload = {
+      schema_version: 2,
       exported_at: new Date().toISOString(),
-      settings: await dbAll('SELECT * FROM settings'),
+      settings: (await dbAll('SELECT * FROM settings')).map(({ app_pin, ...rest }) => rest),
       customers: await dbAll('SELECT * FROM customers'),
       products: await dbAll('SELECT * FROM products'),
       bills: await dbAll('SELECT * FROM bills'),
@@ -1666,8 +1699,7 @@ app.post('/api/restore', async (req, res) => {
       return res.status(400).json({ error: 'Invalid backup payload' });
     }
 
-    await dbRun('BEGIN IMMEDIATE');
-    try {
+    await withTransaction(async () => {
       await dbRun('DELETE FROM bill_payments');
       await dbRun('DELETE FROM bill_items');
       await dbRun('DELETE FROM bills');
@@ -1782,6 +1814,8 @@ app.post('/api/restore', async (req, res) => {
       if (data.settings && data.settings[0]) {
         const s = data.settings[0];
         const pay = serializePaymentMethods(getPaymentMethods(s), s.payment_instructions);
+        // Backups no longer carry app_pin, so keep whatever is already configured here.
+        const currentPin = (await dbGet('SELECT app_pin FROM settings LIMIT 1'))?.app_pin || '';
         await dbRun(
           `UPDATE settings SET
             company_name=?, company_email=?, company_phone=?, company_address=?, company_tax_id=?,
@@ -1793,18 +1827,13 @@ app.post('/api/restore', async (req, res) => {
             s.company_name, s.company_email, s.company_phone, s.company_address, s.company_tax_id,
             s.logo_url || '', s.currency_symbol || 'Rs.', s.default_tax_rate || 0, pay.bank_name,
             pay.account_title, pay.account_number, pay.mobile_wallet, pay.payment_instructions,
-            pay.payment_methods, s.app_pin || '', s.urdu_labels ? 1 : 0, s.low_stock_threshold ?? 5,
+            pay.payment_methods, s.app_pin || currentPin, s.urdu_labels ? 1 : 0, s.low_stock_threshold ?? 5,
             s.biometric_lock ? 1 : 0, s.due_reminders ? 1 : 0,
             s.show_developer_credit === 0 || s.show_developer_credit === false ? 0 : 1,
           ]
         );
       }
-
-      await dbRun('COMMIT');
-    } catch (e) {
-      await dbRun('ROLLBACK');
-      throw e;
-    }
+    });
 
     res.json({ success: true, message: 'Backup restored successfully' });
   } catch (err) {
@@ -1895,8 +1924,7 @@ app.post('/api/customers/merge', async (req, res) => {
     const primary = await dbGet('SELECT * FROM customers WHERE id = ?', [primaryId]);
     if (!primary) return res.status(404).json({ error: 'Primary customer not found' });
 
-    await dbRun('BEGIN IMMEDIATE');
-    try {
+    await withTransaction(async () => {
       for (const dupId of duplicateIds) {
         const dup = await dbGet('SELECT * FROM customers WHERE id = ?', [dupId]);
         if (!dup) continue;
@@ -1968,11 +1996,7 @@ app.post('/api/customers/merge', async (req, res) => {
 
         await dbRun('DELETE FROM customers WHERE id = ?', [dupId]);
       }
-      await dbRun('COMMIT');
-    } catch (e) {
-      await dbRun('ROLLBACK');
-      throw e;
-    }
+    });
 
     const updated = await dbGet('SELECT * FROM customers WHERE id = ?', [primaryId]);
     res.json({ success: true, customer: updated, merged: duplicateIds.length });
@@ -2901,11 +2925,22 @@ if (fs.existsSync(frontendDist)) {
   });
 }
 
+// Unmatched API routes should answer JSON, not an HTML error page.
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `No such endpoint: ${req.method} ${req.path}` });
+});
+
+app.use((err, req, res, _next) => {
+  console.error(`[${req.method} ${req.originalUrl}]`, err);
+  // Raw SQLite messages leak table and column names, so keep them server-side.
+  res.status(500).json({ error: 'Server error — check the API console for details.' });
+});
+
 // Start Server
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   console.log(`====================================================`);
-  console.log(`Auto Bill REST API Server running on port ${PORT}`);
+  console.log(`Auto Bill REST API Server running on ${HOST}:${PORT}`);
   console.log(`API URL: http://localhost:${PORT}/api/bills`);
-  console.log(`Production URL: http://localhost:${PORT}`);
+  console.log(`Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
   console.log(`====================================================`);
 });

@@ -11,6 +11,7 @@ import AppSelect from './AppSelect';
 import PayeeBankSelect from './PayeeBankSelect';
 import { clearBillDraft, draftHasContent, loadBillDraft, saveBillDraft } from '../utils/billDraft';
 import { HELP_PERIODS, normalizeBillType, CREATE_BILL_TYPE_KEY } from '../utils/billTypes';
+import { recalcBillTotals } from '../utils/billAdjust';
 
 export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.', defaultTaxRate = 0, draftBill = null, onDraftConsumed, active = true }) {
   const toast = useToast();
@@ -718,11 +719,13 @@ export default function SmartBillForm({ onBillGenerated, currencySymbol = 'Rs.',
     }
   };
 
-  // Math Calculations
-  const subtotal = items.reduce((sum, item) => sum + (parseFloat(item.quantity || 0) * parseFloat(item.unit_price || 0)), 0);
-  const taxAmount = (subtotal * (parseFloat(taxRate) || 0)) / 100;
-  const discountAmount = (subtotal * (parseFloat(discountRate) || 0)) / 100;
-  const totalAmount = Math.max(0, subtotal + taxAmount - discountAmount);
+  // Math Calculations — must stay identical to the read-back path in enrichBill
+  const {
+    subtotal,
+    discount_amount: discountAmount,
+    tax_amount: taxAmount,
+    total_amount: totalAmount,
+  } = recalcBillTotals({ tax_rate: taxRate, discount_rate: discountRate }, items);
   const isCashSale = billType !== 'help' && String(paymentMethod).toLowerCase().includes('cash');
   const tenderedNum = parseFloat(cashTendered);
   const changeDue =

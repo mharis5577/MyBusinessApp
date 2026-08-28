@@ -1,5 +1,6 @@
 import { Download, Share2, Upload, Shield } from 'lucide-react';
 import BrandMark from './BrandMark';
+import useDialog from '../utils/useDialog';
 
 export const DATA_SAFETY_SEEN_KEY = 'cocoadesk-data-safety-seen';
 
@@ -24,22 +25,26 @@ export function markDataSafetySeen() {
  * Explains phone-local storage and routes to Backup & Restore.
  */
 export default function DataSafetySheet({ open, onDismiss, onBackup, onRestore }) {
-  if (!open) return null;
-
   const finish = (next) => {
     markDataSafetySeen();
     onDismiss?.();
     next?.();
   };
 
+  const dialogRef = useDialog(open, finish);
+
+  if (!open) return null;
+
   return (
     <div className="more-menu-overlay data-safety-overlay" onClick={() => finish()} role="presentation">
       <div
+        ref={dialogRef}
         className="more-menu-sheet glass-panel data-safety-sheet"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="data-safety-title"
+        tabIndex={-1}
       >
         <div className="data-safety-brand">
           <BrandMark size={48} />

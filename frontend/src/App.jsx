@@ -41,9 +41,17 @@ import {
   lockRequired,
   pinEnabled,
 } from './utils/appSecurity';
+import {
+  verifyPin,
+  registerFailedPin,
+  clearFailedPins,
+  lockoutSecondsRemaining,
+} from './utils/appPin';
+import { runCloudAutoSync } from './utils/cloudAutoSync';
 import { APP_THEMES, getNextQuickTheme, getQuickThemes, applyTheme } from './utils/themeConfig';
-import ThemeStudioModal from './components/ThemeStudioModal';
-import BackupRestoreModal from './components/BackupRestoreModal';
+const ThemeStudioModal = lazy(() => import('./components/ThemeStudioModal'));
+// Lazy: pulls in the Firebase cloud-sync UI, which most sessions never open.
+const BackupRestoreModal = lazy(() => import('./components/BackupRestoreModal'));
 
 const SmartBillForm = lazy(() => import('./components/SmartBillForm'));
 const InvoicePreview = lazy(() => import('./components/InvoicePreview'));
@@ -189,6 +197,26 @@ export default function App() {
     checkBiometricAvailable().then((r) => setBioAvailable(Boolean(r.available)));
   }, []);
 
+  // Cloud backup runs here, not in the Cloud Sync panel, so it works unattended.
+  useEffect(() => {
+    if (lockRequired(settings) && !unlocked) return undefined;
+    const phone = settings.company_phone || '';
+    const kick = () => {
+      runCloudAutoSync({ companyPhone: phone }).catch((err) =>
+        console.warn('Cloud auto-sync skipped', err)
+      );
+    };
+    const t = setTimeout(kick, 20000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') kick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [settings.company_phone, unlocked]);
+
   useEffect(() => {
     if (!dueRemindersEnabled(settings)) return undefined;
     if (lockRequired(settings) && !unlocked) return undefined;
@@ -280,18 +308,28 @@ export default function App() {
     return () => clearTimeout(t);
   }, [showSplash, needsLock]);
 
-  const handlePinSubmit = (e) => {
+  const handlePinSubmit = async (e) => {
     e.preventDefault();
     if (!pinEnabled(settings)) {
       // Biometric-only mode: PIN not set — require fingerprint
       setPinError('Turn on fingerprint or set a PIN in Settings');
       return;
     }
-    if (pinInput === String(settings.app_pin).trim()) {
-      markUnlocked();
-    } else {
-      setPinError('Incorrect PIN');
+    const wait = lockoutSecondsRemaining();
+    if (wait > 0) {
+      setPinError(`Too many attempts — wait ${wait}s`);
+      return;
     }
+    if (await verifyPin(pinInput, settings.app_pin)) {
+      clearFailedPins();
+      markUnlocked();
+      return;
+    }
+    const { lockedForSeconds } = registerFailedPin();
+    setPinInput('');
+    setPinError(
+      lockedForSeconds ? `Incorrect PIN — wait ${lockedForSeconds}s` : 'Incorrect PIN'
+    );
   };
 
   const handleFingerprint = async () => {
@@ -300,6 +338,7 @@ export default function App() {
     setPinError('');
     try {
       await authenticateBiometric();
+      clearFailedPins();
       markUnlocked();
     } catch (err) {
       if (err?.message && !/cancel/i.test(err.message)) {
@@ -358,24 +397,28 @@ export default function App() {
     }
   };
 
-  const lastThemeTapRef = React.useRef(0);
+  const themeTapTimerRef = React.useRef(null);
 
   const toggleTheme = () => {
     playTapSound();
     setTheme((prev) => getNextQuickTheme(prev));
   };
 
+  // Defer the toggle so a second tap can cancel it and open the studio instead.
   const handleThemeClick = () => {
-    const now = Date.now();
-    if (now - lastThemeTapRef.current < 350) {
-      // Double tap detected!
-      lastThemeTapRef.current = 0;
+    if (themeTapTimerRef.current) {
+      clearTimeout(themeTapTimerRef.current);
+      themeTapTimerRef.current = null;
       setThemeModalOpen(true);
       return;
     }
-    lastThemeTapRef.current = now;
-    toggleTheme();
+    themeTapTimerRef.current = setTimeout(() => {
+      themeTapTimerRef.current = null;
+      toggleTheme();
+    }, 260);
   };
+
+  useEffect(() => () => clearTimeout(themeTapTimerRef.current), []);
 
   const handleInstallApp = async () => {
     if (!deferredInstall) {
@@ -450,6 +493,9 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <a href="#main-content" className="skip-link no-print">
+        Skip to main content
+      </a>
       <header className="navbar no-print">
         <a
           href="#"
@@ -543,7 +589,6 @@ export default function App() {
             type="button"
             className="nav-btn icon-only"
             onClick={handleThemeClick}
-            onDoubleClick={() => setThemeModalOpen(true)}
             title={`Active: ${APP_THEMES.find((t) => t.id === theme)?.name || theme} (Click to toggle · Double-click for Theme Studio)`}
             aria-label="Toggle App Theme"
           >
@@ -564,7 +609,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="app-container">
+      <main className="app-container" id="main-content" tabIndex={-1}>
         {aliveTabs.dashboard && (
           <div
             className={`tab-page${currentTab === 'dashboard' ? ` tab-page--${tabDir}` : ''}`}
@@ -730,19 +775,25 @@ export default function App() {
         onRestore={openBackupSettings}
       />
 
-      <ThemeStudioModal
-        open={themeModalOpen}
-        onClose={() => setThemeModalOpen(false)}
-        currentTheme={theme}
-        onThemeChange={(next) => setTheme(next)}
-      />
+      <Suspense fallback={null}>
+        {themeModalOpen && (
+          <ThemeStudioModal
+            open={themeModalOpen}
+            onClose={() => setThemeModalOpen(false)}
+            currentTheme={theme}
+            onThemeChange={(next) => setTheme(next)}
+          />
+        )}
 
-      <BackupRestoreModal
-        open={backupModalOpen}
-        onClose={() => setBackupModalOpen(false)}
-        settings={settings}
-        onSettingsUpdated={fetchSettings}
-      />
+        {backupModalOpen && (
+          <BackupRestoreModal
+            open={backupModalOpen}
+            onClose={() => setBackupModalOpen(false)}
+            settings={settings}
+            onSettingsUpdated={fetchSettings}
+          />
+        )}
+      </Suspense>
 
       <nav className="mobile-bottom-nav no-print" aria-label="Main">
         <div className="mobile-nav-dock">

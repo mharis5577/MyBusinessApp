@@ -5,6 +5,7 @@ import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
 import { isCancelled, remainingQty } from '../utils/billAdjust';
+import useDialog from '../utils/useDialog';
 import ConfirmDialog from './ConfirmDialog';
 
 export default function BillAdjustSheet({ bill, open, onClose, onUpdated, currencySymbol = 'Rs.' }) {
@@ -14,6 +15,7 @@ export default function BillAdjustSheet({ bill, open, onClose, onUpdated, curren
   const [qtyMap, setQtyMap] = useState({});
   const [busy, setBusy] = useState(false);
   const [cancelConfirm, setCancelConfirm] = useState(false);
+  const dialogRef = useDialog(open && Boolean(bill) && !cancelConfirm, onClose, { closeOnEscape: !busy });
 
   useEffect(() => {
     if (!open || !bill) return;
@@ -24,15 +26,6 @@ export default function BillAdjustSheet({ bill, open, onClose, onUpdated, curren
     for (const it of bill.items || []) next[it.id] = '';
     setQtyMap(next);
   }, [open, bill]);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
 
   if (!open || !bill || isCancelled(bill)) return null;
 
@@ -98,12 +91,14 @@ export default function BillAdjustSheet({ bill, open, onClose, onUpdated, curren
       {createPortal(
         <div className="modal-sheet modal-sheet--portal" onClick={onClose}>
           <div
+            ref={dialogRef}
             className="glass-panel"
             style={{ width: '100%', maxWidth: 520, overflowY: 'auto', padding: '1.15rem 1.2rem 1.35rem' }}
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
             aria-labelledby="bill-adjust-title"
+            tabIndex={-1}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
               <div>

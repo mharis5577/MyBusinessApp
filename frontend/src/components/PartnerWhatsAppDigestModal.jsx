@@ -15,6 +15,7 @@ import {
 import { formatCurrency } from '../utils/pakistan';
 import { normalizeWhatsAppPhone } from '../utils/paymentReminder';
 import { playSuccessChime, playTapSound } from '../utils/audioEffects';
+import useDialog from '../utils/useDialog';
 import { useToast } from '../toast/ToastContext';
 
 export default function PartnerWhatsAppDigestModal({
@@ -30,20 +31,7 @@ export default function PartnerWhatsAppDigestModal({
   const [activeTemplate, setActiveTemplate] = useState('weekly'); // 'weekly' | 'settlement' | 'payout'
   const [copied, setCopied] = useState(false);
   const [selectedPartnerId, setSelectedPartnerId] = useState(partners[0]?.id || 1);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onKey = (e) => {
-      if (e.key === 'Escape') onClose?.();
-    };
-    window.addEventListener('keydown', onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
-    };
-  }, [open, onClose]);
+  const dialogRef = useDialog(open, onClose);
 
   if (!open) return null;
 
@@ -159,11 +147,14 @@ export default function PartnerWhatsAppDigestModal({
   return createPortal(
     <div className="client-modal-overlay" onClick={onClose} role="presentation">
       <div
+        ref={dialogRef}
         className="client-modal-card glass-panel"
         onClick={(e) => e.stopPropagation()}
         style={{ maxWidth: '580px', width: '100%' }}
         role="dialog"
         aria-modal="true"
+        aria-labelledby="partner-digest-title"
+        tabIndex={-1}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -182,7 +173,7 @@ export default function PartnerWhatsAppDigestModal({
               <MessageCircle size={20} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800 }}>1-Tap WhatsApp Partner Digest</h3>
+              <h3 id="partner-digest-title" style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800 }}>1-Tap WhatsApp Partner Digest</h3>
               <p style={{ margin: '0.15rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                 Share live dividends & statements directly with Nomi & Haris
               </p>

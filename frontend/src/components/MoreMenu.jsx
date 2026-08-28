@@ -1,7 +1,10 @@
 import { ArrowDownUp, Settings, X, Download, Sparkles, Clock, StickyNote, Users2, Package } from 'lucide-react';
 import { DeveloperCredit } from './BrandMark';
+import useDialog from '../utils/useDialog';
 
 export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, activeTab }) {
+  const dialogRef = useDialog(open, onClose);
+
   if (!open) return null;
 
   const go = (tab) => {
@@ -11,9 +14,17 @@ export default function MoreMenu({ open, onClose, onNavigate, onOpenBackup, acti
 
   return (
     <div className="more-menu-overlay" onClick={onClose} role="presentation">
-      <div className="more-menu-sheet glass-panel" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+      <div
+        ref={dialogRef}
+        className="more-menu-sheet glass-panel"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="more-menu-title"
+        tabIndex={-1}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
-          <h3 style={{ fontSize: '1.05rem', fontWeight: 800 }}>More</h3>
+          <h3 id="more-menu-title" style={{ fontSize: '1.05rem', fontWeight: 800 }}>More</h3>
           <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.55rem' }} onClick={onClose}>
             <X size={16} />
           </button>

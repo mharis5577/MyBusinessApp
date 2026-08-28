@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Banknote, X } from 'lucide-react';
 import { apiFetch } from '../api/client';
@@ -6,13 +6,14 @@ import { useToast } from '../toast/ToastContext';
 import { formatCurrency, pakistanToday } from '../utils/pakistan';
 import { billBalance, paymentSummaryText } from '../utils/billPayments';
 import { isHelpBill } from '../utils/billTypes';
+import useDialog from '../utils/useDialog';
 import AppSelect from './AppSelect';
 
 const METHODS = ['Cash', 'Bank Transfer / Raast', 'JazzCash', 'EasyPaisa', 'Card'];
 
 export default function QuickPaySheet({ bill, open, onClose, onSaved, currencySymbol = 'Rs.' }) {
   const toast = useToast();
-  const formRef = useRef(null);
+  const dialogRef = useDialog(open && Boolean(bill), onClose);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('Cash');
   const [tendered, setTendered] = useState('');
@@ -88,16 +89,18 @@ export default function QuickPaySheet({ bill, open, onClose, onSaved, currencySy
       onClick={onClose}
     >
       <form
-        ref={formRef}
+        ref={dialogRef}
         onSubmit={submit}
         className="glass-panel pay-modal"
         role="dialog"
         aria-modal="true"
+        aria-labelledby="quick-pay-title"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
           <div>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>
+            <h3 id="quick-pay-title" style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>
               {help ? 'Record repayment' : 'Record payment'}
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0' }}>

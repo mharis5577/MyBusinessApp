@@ -264,39 +264,26 @@ export function getNextQuickTheme(currentTheme, pair = null) {
  * Instantly applies a theme by disabling CSS transitions across the DOM
  * during the switch, preventing multi-element transition lag / jank.
  */
+let themeSwitchTimer = null;
+
 export function applyTheme(nextTheme) {
   if (!nextTheme || typeof document === 'undefined') return;
 
-  const style = document.createElement('style');
-  style.appendChild(
-    document.createTextNode(
-      `*, *::before, *::after {
-        -webkit-transition: none !important;
-        -moz-transition: none !important;
-        -o-transition: none !important;
-        -ms-transition: none !important;
-        transition: none !important;
-      }`
-    )
-  );
-  document.head.appendChild(style);
+  const root = document.documentElement;
+  root.classList.add('theme-switching');
 
-  document.documentElement.setAttribute('data-theme', nextTheme);
+  root.setAttribute('data-theme', nextTheme);
   try {
     localStorage.setItem('theme', nextTheme);
   } catch (_) {}
 
-  // Force synchronous style recalculation
-  const _ = window.getComputedStyle(style).opacity;
+  // Force a synchronous recalc so the new theme paints in one frame.
+  void root.offsetHeight;
 
-  // Clean up style element on next animation frame
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      try {
-        if (style.parentNode) {
-          style.parentNode.removeChild(style);
-        }
-      } catch (_) {}
-    });
-  });
+  // A timer rather than rAF, so the class is cleared even in a hidden tab.
+  clearTimeout(themeSwitchTimer);
+  themeSwitchTimer = setTimeout(() => {
+    root.classList.remove('theme-switching');
+    themeSwitchTimer = null;
+  }, 60);
 }

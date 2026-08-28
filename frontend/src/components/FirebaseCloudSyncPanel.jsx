@@ -33,13 +33,18 @@ import {
   getAutoSyncSettings,
   saveAutoSyncSettings,
   triggerAutoCloudSyncIfNeeded,
+  getStoredVaultPin,
+  saveStoredVaultPin,
+  getAutoSyncFailure,
+  daysSinceLastCloudSync,
+  saveAutoSyncFailure,
 } from '../utils/firebaseSync';
 import {
   restoreFromPayload,
   runFullBackup,
 } from '../utils/backupManager';
 
-export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '', onRestoreComplete }) {
+export default function FirebaseCloudSyncPanel({ companyPhone = '', onRestoreComplete }) {
   const toast = useToast();
   const [tab, setTab] = useState('push'); // 'push' | 'pull' | 'config'
   const [vaultId, setVaultId] = useState('');
@@ -58,6 +63,8 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
 
   // Auto-Cloud Sync state
   const [autoSync, setAutoSync] = useState(getAutoSyncSettings);
+  const [syncFailure, setSyncFailure] = useState(getAutoSyncFailure);
+  const [staleDays, setStaleDays] = useState(daysSinceLastCloudSync);
 
   // Firebase Config state
   const [fbConfig, setFbConfig] = useState(getStoredFirebaseConfig);
@@ -68,33 +75,16 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
       ? normalizeVaultId(companyPhone)
       : 'elite_chocolate_store';
     const activeVault = vaultId || defaultVault;
-    const activePin = pin || appPin || '';
+    // Never seed from the app PIN: it is a salted hash that changes on every save.
+    const activePin = pin || getStoredVaultPin() || '';
     setVaultId(activeVault);
     setPin(activePin);
     setLastInfo(getLastCloudSyncInfo());
     const stored = getStoredFirebaseConfig();
     setFbConfig(stored);
     setIsUsingCustomConfig(Boolean(stored && stored.projectId !== DEFAULT_FIREBASE_CONFIG.projectId));
-
-    // Background Auto-Sync Check
-    if (activeVault && activePin && activePin.length >= 4) {
-      triggerAutoCloudSyncIfNeeded({
-        vaultId: activeVault,
-        pin: activePin,
-        deviceName,
-        getPayloadFn: async () => {
-          const res = await apiFetch('/api/backup');
-          return await res.json();
-        },
-      }).then((info) => {
-        if (info) {
-          setLastInfo(info);
-          setAutoSync(getAutoSyncSettings());
-          toast.success('✨ Auto-Backup quietly synced to Cloud Vault!');
-        }
-      }).catch(() => {});
-    }
-  }, [companyPhone, appPin]);
+    // Auto-sync itself runs from App level so it works without opening this panel.
+  }, [companyPhone]);
 
   const handleInspect = async () => {
     if (!vaultId.trim()) {
@@ -150,6 +140,9 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
           deviceName,
         });
         setLastInfo(syncInfo);
+        saveAutoSyncFailure(null);
+        setSyncFailure(null);
+        setStaleDays(0);
         toast.success('🎉 Backup successfully pushed to Cloud Vault!');
       } catch (err) {
         if (err?.code === 'PIN_MISMATCH' || err?.message?.includes('PIN_MISMATCH')) {
@@ -305,6 +298,31 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
       {/* Expanded Panel Body */}
       {isExpanded && (
         <div>
+          {(syncFailure || staleDays === null || staleDays >= 3) && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '0.5rem',
+                padding: '0.6rem 0.75rem',
+                fontSize: '0.78rem',
+                fontWeight: 650,
+                background: syncFailure ? 'rgba(220,60,60,0.12)' : 'rgba(230,170,40,0.12)',
+                color: syncFailure ? 'var(--danger)' : 'var(--warning, #d79a1e)',
+                borderBottom: '1px solid var(--border-color)',
+              }}
+            >
+              <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>
+                {syncFailure
+                  ? `Last cloud backup failed: ${syncFailure.message}`
+                  : staleDays === null
+                    ? 'This shop has never been backed up to the cloud. Set a vault PIN and push now.'
+                    : `No cloud backup for ${staleDays} days.`}
+              </span>
+            </div>
+          )}
+
           {/* Responsive Mode Tabs */}
           <div
             style={{
@@ -438,7 +456,10 @@ export default function FirebaseCloudSyncPanel({ companyPhone = '', appPin = '',
                       className="form-input"
                       style={{ paddingLeft: '2.2rem', paddingRight: '2.3rem', fontFamily: 'var(--font-mono)', letterSpacing: '0.1em', fontSize: '0.85rem' }}
                       value={pin}
-                      onChange={(e) => setPin(e.target.value)}
+                      onChange={(e) => {
+                        setPin(e.target.value);
+                        saveStoredVaultPin(e.target.value);
+                      }}
                       placeholder="Enter 4-6 digit PIN"
                       maxLength={12}
                       required

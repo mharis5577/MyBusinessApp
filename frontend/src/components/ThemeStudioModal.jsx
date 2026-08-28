@@ -3,26 +3,19 @@ import { createPortal } from 'react-dom';
 import { Sparkles, Repeat, Check, X } from 'lucide-react';
 import { APP_THEMES, getQuickThemes, saveQuickThemes } from '../utils/themeConfig';
 import AppSelect from './AppSelect';
+import useDialog from '../utils/useDialog';
 import { useToast } from '../toast/ToastContext';
 
 export default function ThemeStudioModal({ open, onClose, currentTheme, onThemeChange }) {
   const toast = useToast();
   const [quickPair, setQuickPair] = useState(() => getQuickThemes());
+  const dialogRef = useDialog(open, onClose);
 
   useEffect(() => {
     if (open) {
       setQuickPair(getQuickThemes());
     }
   }, [open]);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') onClose?.();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open, onClose]);
 
   if (!open || typeof document === 'undefined') return null;
 
@@ -54,10 +47,13 @@ export default function ThemeStudioModal({ open, onClose, currentTheme, onThemeC
       role="presentation"
     >
       <div
+        ref={dialogRef}
         className="glass-panel"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
+        aria-labelledby="theme-studio-title"
+        tabIndex={-1}
         style={{
           maxWidth: 540,
           width: '100%',
@@ -73,7 +69,7 @@ export default function ThemeStudioModal({ open, onClose, currentTheme, onThemeC
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
             <Sparkles size={20} style={{ color: 'var(--accent-teal)' }} />
-            <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>
+            <h3 id="theme-studio-title" style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-teal)', margin: 0 }}>
               App UI Theme Studio
             </h3>
           </div>

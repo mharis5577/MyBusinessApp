@@ -2,13 +2,26 @@ import java.io.FileInputStream
 
 apply plugin: 'com.android.application'
 
+// Signing config comes from keystore.properties locally, or env vars in CI.
+// Neither the keystore nor its passwords belong in version control.
 def keystorePropertiesFile = rootProject.file('keystore.properties')
 def keystoreProperties = new Properties()
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
-def releaseStoreFile = keystoreProperties['storeFile'] ? rootProject.file(keystoreProperties['storeFile']) : null
-def hasReleaseKey = releaseStoreFile != null && releaseStoreFile.exists()
+
+def resolveSigning = { String key, String envName ->
+    keystoreProperties[key] ?: System.getenv(envName)
+}
+
+def storeFilePath = resolveSigning('storeFile', 'ANDROID_KEYSTORE_PATH') ?: 'keystore/elite-release.jks'
+def releaseStoreFile = rootProject.file(storeFilePath)
+def releaseStorePassword = resolveSigning('storePassword', 'ANDROID_KEYSTORE_PASSWORD')
+def releaseKeyAlias = resolveSigning('keyAlias', 'ANDROID_KEY_ALIAS')
+def releaseKeyPassword = resolveSigning('keyPassword', 'ANDROID_KEY_PASSWORD')
+
+def hasReleaseKey = releaseStoreFile.exists() &&
+    releaseStorePassword && releaseKeyAlias && releaseKeyPassword
 
 android {
     namespace = "pk.elitechocolate.pos.test"
@@ -29,18 +42,16 @@ android {
     signingConfigs {
         release {
             if (hasReleaseKey) {
-                keyAlias keystoreProperties['keyAlias']
-                keyPassword keystoreProperties['keyPassword']
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
                 storeFile releaseStoreFile
-                storePassword keystoreProperties['storePassword']
+                storePassword releaseStorePassword
             }
         }
     }
     buildTypes {
         debug {
-            if (hasReleaseKey) {
-                signingConfig signingConfigs.release
-            }
+            // Debug keeps the default debug key so debug APKs can never pose as a release build.
         }
         release {
             minifyEnabled false
@@ -48,6 +59,19 @@ android {
             if (hasReleaseKey) {
                 signingConfig signingConfigs.release
             }
+        }
+    }
+}
+
+// An unsigned release APK cannot update an installed app, so fail instead of shipping one.
+tasks.matching { it.name == 'assembleRelease' || it.name == 'bundleRelease' }.configureEach {
+    doFirst {
+        if (!hasReleaseKey) {
+            throw new GradleException(
+                "Release signing is not configured.\n" +
+                "Provide frontend/android/keystore.properties (storeFile, storePassword, keyAlias, keyPassword)\n" +
+                "or set ANDROID_KEYSTORE_PATH / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD."
+            )
         }
     }
 }

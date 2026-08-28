@@ -34,12 +34,16 @@ function assertShopBackup(payload) {
   if (!hasCore) {
     throw new Error('This file is not a CocoaDesk shop backup (missing bills/customers/products).');
   }
-  // Reject near-empty "settings-only" decoys that would wipe the shop
+  // Reject empty payloads outright — restoring one clears every store.
   const billCount = Array.isArray(payload.bills) ? payload.bills.length : 0;
   const customerCount = Array.isArray(payload.customers) ? payload.customers.length : 0;
   const productCount = Array.isArray(payload.products) ? payload.products.length : 0;
-  if (billCount + customerCount + productCount === 0 && !payload.exported_at) {
-    throw new Error('This backup looks empty. Pick a real CocoaDesk backup file.');
+  if (billCount + customerCount + productCount === 0) {
+    throw new Error('This backup has no bills, customers or products. Pick a real CocoaDesk backup file.');
+  }
+  const sample = (payload.bills || payload.customers || payload.products)[0];
+  if (!sample || typeof sample !== 'object' || Array.isArray(sample)) {
+    throw new Error('This backup file is damaged — its records are not readable.');
   }
   return payload;
 }
@@ -51,7 +55,9 @@ export function summarizeBackupPayload(payload) {
     customers: Array.isArray(data.customers) ? data.customers.length : 0,
     products: Array.isArray(data.products) ? data.products.length : 0,
     payments: Array.isArray(data.bill_payments) ? data.bill_payments.length : 0,
+    partners: Array.isArray(data.partner_settlements) ? data.partner_settlements.length : 0,
     exported_at: data.exported_at || '',
+    schema_version: Number(data.schema_version) || 1,
   };
 }
 

@@ -18,6 +18,7 @@ import { useToast } from '../toast/ToastContext';
 import { formatCurrency, pakistanToday } from '../utils/pakistan';
 import { openWhatsAppReminder, normalizeWhatsAppPhone } from '../utils/paymentReminder';
 import { playSuccessChime, playTapSound } from '../utils/audioEffects';
+import useDialog from '../utils/useDialog';
 
 export default function AutomationHub({
   open = false,
@@ -37,6 +38,7 @@ export default function AutomationHub({
   const [overdueQueue, setOverdueQueue] = useState([]);
   const [backupRunning, setBackupRunning] = useState(false);
   const [backupSuccessMsg, setBackupSuccessMsg] = useState('');
+  const dialogRef = useDialog(open, onClose);
 
   useEffect(() => {
     if (open) {
@@ -143,10 +145,15 @@ export default function AutomationHub({
   if (!open) return null;
 
   return createPortal(
-    <div className="client-modal-overlay auto-hub-overlay" onClick={onClose}>
+    <div className="client-modal-overlay auto-hub-overlay" onClick={onClose} role="presentation">
       <div
+        ref={dialogRef}
         className="client-modal-card auto-hub-modal-card"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="automation-hub-title"
+        tabIndex={-1}
       >
         {/* ── Modal Header ── */}
         <div className="auto-hub-header">
@@ -156,7 +163,7 @@ export default function AutomationHub({
                 <Zap size={18} color="#fff" />
               </div>
               <div>
-                <h3 style={{ fontSize: '1.05rem', fontWeight: 900, margin: 0, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
+                <h3 id="automation-hub-title" style={{ fontSize: '1.05rem', fontWeight: 900, margin: 0, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
                   Business Reports & Automation
                 </h3>
                 <p style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', margin: '0.1rem 0 0' }}>

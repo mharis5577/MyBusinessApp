@@ -18,6 +18,7 @@ export const DEFAULT_FIREBASE_CONFIG = {
 
 const CONFIG_STORAGE_KEY = 'elite_firebase_config_custom';
 const LAST_SYNC_INFO_KEY = 'elite_last_cloud_sync_info';
+const VAULT_PIN_KEY = 'elite_cloud_vault_pin';
 
 export function getStoredFirebaseConfig() {
   try {
@@ -52,6 +53,23 @@ export function getLastCloudSyncInfo() {
 export function saveLastCloudSyncInfo(info) {
   try {
     localStorage.setItem(LAST_SYNC_INFO_KEY, JSON.stringify(info));
+  } catch (_) {}
+}
+
+/** Vault PIN is remembered per device so auto-sync can run unattended. */
+export function getStoredVaultPin() {
+  try {
+    return localStorage.getItem(VAULT_PIN_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function saveStoredVaultPin(pin) {
+  try {
+    const clean = String(pin || '').trim();
+    if (clean) localStorage.setItem(VAULT_PIN_KEY, clean);
+    else localStorage.removeItem(VAULT_PIN_KEY);
   } catch (_) {}
 }
 
@@ -109,23 +127,15 @@ export async function getFirestoreDb(customConfig = null) {
 export async function hashPin(pin) {
   const str = String(pin || '').trim();
   if (!str) return '';
-  try {
-    if (typeof crypto !== 'undefined' && crypto?.subtle && typeof crypto.subtle.digest === 'function') {
-      const msgBuffer = new TextEncoder().encode(str);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-    }
-  } catch (_) {}
-
-  // Safe JS Fallback for legacy WebViews / HTTP contexts
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0;
+  if (!globalThis.crypto?.subtle?.digest) {
+    // The old non-crypto fallback was reversible and produced a different hash
+    // per context, which silently broke cross-device unlock.
+    throw new Error('Secure hashing is unavailable here. Open the app over HTTPS or use the installed APK.');
   }
-  return 'legacy_hash_' + Math.abs(hash).toString(16);
+  const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 /**
@@ -373,9 +383,39 @@ export async function triggerAutoCloudSyncIfNeeded({ vaultId, pin, deviceName = 
       lastSyncTime: new Date().toISOString(),
     };
     saveAutoSyncSettings(nextSettings);
+    saveAutoSyncFailure(null);
     return syncInfo;
   } catch (err) {
     console.warn('[Auto-Cloud Sync Background] Failed:', err.message);
+    saveAutoSyncFailure({ message: err?.message || 'Cloud backup failed', at: new Date().toISOString() });
     return false;
   }
+}
+
+const AUTO_SYNC_FAILURE_KEY = 'elite_auto_cloud_sync_failure';
+
+/** Last auto-sync failure, so a silently failing cloud backup becomes visible. */
+export function getAutoSyncFailure() {
+  try {
+    const raw = localStorage.getItem(AUTO_SYNC_FAILURE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveAutoSyncFailure(info) {
+  try {
+    if (info) localStorage.setItem(AUTO_SYNC_FAILURE_KEY, JSON.stringify(info));
+    else localStorage.removeItem(AUTO_SYNC_FAILURE_KEY);
+  } catch (_) {}
+}
+
+/** Days since the last successful cloud push, or null if it has never run. */
+export function daysSinceLastCloudSync() {
+  const { lastSyncTime } = getAutoSyncSettings();
+  if (!lastSyncTime) return null;
+  const ms = Date.now() - new Date(lastSyncTime).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return Math.floor(ms / 86400000);
 }

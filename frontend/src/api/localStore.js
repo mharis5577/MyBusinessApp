@@ -14,6 +14,9 @@ import { isDemoBill, isDemoCustomer } from '../utils/demoData';
 const DB_NAME = 'elite-chocolate-pos';
 const DB_VERSION = 6;
 
+// Bumped whenever the backup payload shape changes in a way restore must know about.
+const BACKUP_SCHEMA_VERSION = 2;
+
 function normalizePartyType(value) {
   return value === 'supplier' ? 'supplier' : 'customer';
 }
@@ -186,6 +189,42 @@ async function nextId(db, store) {
   return Math.max(...keys.map((k) => Number(k) || 0)) + 1;
 }
 
+/** Mirrors the idb `db` call shape so shared helpers work against a transaction unchanged. */
+function txScope(tx) {
+  const os = (name) => tx.objectStore(name);
+  return {
+    get: (store, key) => os(store).get(key),
+    getAll: (store) => os(store).getAll(),
+    getAllKeys: (store) => os(store).getAllKeys(),
+    getAllFromIndex: (store, index, key) => os(store).index(index).getAll(key),
+    put: (store, value) => os(store).put(value),
+    add: (store, value) => os(store).add(value),
+    delete: (store, key) => os(store).delete(key),
+  };
+}
+
+/**
+ * Runs `fn` inside one readwrite transaction so partial writes roll back.
+ * Only await IndexedDB work inside `fn` — any other await lets the tx auto-commit early.
+ */
+async function withTx(db, storeNames, fn) {
+  const tx = db.transaction(storeNames, 'readwrite');
+  try {
+    const result = await fn(txScope(tx), tx);
+    await tx.done;
+    return result;
+  } catch (err) {
+    // Claim tx.done before aborting, or the rejection surfaces as an unhandled one.
+    tx.done.catch(() => {});
+    try {
+      tx.abort();
+    } catch {
+      /* already aborted or committed */
+    }
+    throw err;
+  }
+}
+
 async function generateNextInvoiceNumber(bType = 'customer', yearOverride = null) {
   const db = await ensureSeeded();
   const year = yearOverride || Number(String(pakistanToday()).slice(0, 4)) || new Date().getFullYear();
@@ -233,6 +272,29 @@ function groupRowsByBillId(rows) {
     map.get(id).push(row);
   }
   return map;
+}
+
+/**
+ * Assign ids to restored rows. Synthetic ids start above every real one so an
+ * id-less row cannot claim an id that another row in the same batch owns.
+ */
+function withRestoredIds(rows, mapFn) {
+  const list = (rows || []).filter((row) => row && typeof row === 'object');
+  let nextId = list.reduce((max, row) => Math.max(max, Number(row.id) || 0), 0) + 1;
+  return list.map((row) => {
+    const rec = mapFn ? mapFn(row) : { ...row };
+    if (rec.id == null) rec.id = nextId++;
+    return rec;
+  });
+}
+
+/** The app PIN must never leave the device inside a backup or a cloud push. */
+function settingsWithoutSecrets(rows) {
+  return (rows || []).map((s) => {
+    if (!s) return s;
+    const { app_pin, ...rest } = s;
+    return rest;
+  });
 }
 
 function paymentsWithoutScreenshots(payments) {
@@ -299,6 +361,8 @@ async function attachBillRelations(db, bill, opts = {}) {
 async function restoreStockForQtys(db, bill, items, qtyByItemId, reason) {
   const bType = normalizeBillType(bill.bill_type);
   if (bType === 'help') return;
+  // Allocated once: inside a transaction nextId cannot see rows added in this same loop.
+  let adjId = await nextId(db, 'stock_adjustments');
   for (const it of items) {
     const qty = Number(qtyByItemId.get(Number(it.id)) || 0);
     if (!qty || !it.product_id) continue;
@@ -307,9 +371,8 @@ async function restoreStockForQtys(db, bill, items, qtyByItemId, reason) {
     const delta = bType === 'supplier' ? -qty : qty;
     const nextStock = Math.max(0, (Number(product.stock) || 0) + delta);
     await db.put('products', { ...product, stock: nextStock });
-    const adjId = await nextId(db, 'stock_adjustments');
     await db.put('stock_adjustments', {
-      id: adjId,
+      id: adjId++,
       product_id: Number(it.product_id),
       delta,
       reason,
@@ -362,6 +425,8 @@ function parsePath(url) {
   const parts = path.split('/').filter(Boolean); // ['api', ...]
   return { path, parts, search: u.searchParams };
 }
+
+export const __testables = { withTx, recalcBillTotals, enrichBill, withRestoredIds, settingsWithoutSecrets };
 
 /**
  * Handle a local API request. Returns { status, data }.
@@ -957,96 +1022,70 @@ async function handleLocalRequestInner(url, options = {}) {
         payee_payment_notes: body.payee_payment_notes || '',
         created_at: new Date().toISOString(),
       };
-      try {
-        await db.add('bills', bill);
-      } catch (err) {
-        // Concurrent create grabbed the same id — retry once with fresh ids
-        try {
-          bill.id = await allocateUniqueId(db, 'bills');
-          bill.invoice_number = await allocateUniqueInvoiceNumber(db, bType, '');
-          await db.add('bills', bill);
-        } catch (retryErr) {
-          return jsonErr(retryErr.message || 'Could not save bill — try again');
-        }
-      }
-
       const custName = String(body.customer_name).trim().toLowerCase();
-      const allCustomers = await db.getAll('customers');
-      const existingCust = allCustomers.find((c) => String(c.name || '').toLowerCase() === custName);
-      const partyType = bType === 'help'
-        ? normalizePartyType(existingCust?.party_type)
-        : partyTypeForBill(bType);
-      if (!existingCust) {
-        const cid = await allocateUniqueId(db, 'customers');
-        try {
-          await db.add('customers', {
-            id: cid,
-            name: String(body.customer_name).trim(),
-            email: body.customer_email || '',
-            phone: body.customer_phone || '',
-            address: body.customer_address || '',
-            tax_id: '',
-            party_type: partyType,
-            payee_bank_name: body.payee_bank_name || '',
-            payee_account_title: body.payee_account_title || '',
-            payee_account_number: body.payee_account_number || '',
-            payee_payment_notes: body.payee_payment_notes || '',
-            created_at: new Date().toISOString(),
-          });
-        } catch {
-          /* customer create race — non-fatal for bill */
-        }
-      } else {
-        await db.put('customers', {
-          ...existingCust,
-          party_type: partyType,
-          payee_bank_name: body.payee_bank_name || existingCust.payee_bank_name || '',
-          payee_account_title: body.payee_account_title || existingCust.payee_account_title || '',
-          payee_account_number: body.payee_account_number || existingCust.payee_account_number || '',
-          payee_payment_notes: body.payee_payment_notes || existingCust.payee_payment_notes || '',
+
+      try {
+        await withTx(db, ['bills', 'bill_items', 'customers', 'products'], async (tx) => {
+          await tx.add('bills', bill);
+
+          const allCustomers = await tx.getAll('customers');
+          const existingCust = allCustomers.find(
+            (c) => String(c.name || '').toLowerCase() === custName
+          );
+          const partyType =
+            bType === 'help' ? normalizePartyType(existingCust?.party_type) : partyTypeForBill(bType);
+          if (!existingCust) {
+            await tx.add('customers', {
+              id: await nextId(tx, 'customers'),
+              name: String(body.customer_name).trim(),
+              email: body.customer_email || '',
+              phone: body.customer_phone || '',
+              address: body.customer_address || '',
+              tax_id: '',
+              party_type: partyType,
+              payee_bank_name: body.payee_bank_name || '',
+              payee_account_title: body.payee_account_title || '',
+              payee_account_number: body.payee_account_number || '',
+              payee_payment_notes: body.payee_payment_notes || '',
+              created_at: new Date().toISOString(),
+            });
+          } else {
+            await tx.put('customers', {
+              ...existingCust,
+              party_type: partyType,
+              payee_bank_name: body.payee_bank_name || existingCust.payee_bank_name || '',
+              payee_account_title: body.payee_account_title || existingCust.payee_account_title || '',
+              payee_account_number:
+                body.payee_account_number || existingCust.payee_account_number || '',
+              payee_payment_notes: body.payee_payment_notes || existingCust.payee_payment_notes || '',
+            });
+          }
+
+          let itemId = await nextId(tx, 'bill_items');
+          for (const item of body.items) {
+            const qty = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
+            const price = Number(item.unit_price) || 0;
+            await tx.add('bill_items', {
+              id: itemId++,
+              bill_id: bill.id,
+              product_id: item.product_id || null,
+              description: String(item.description).trim(),
+              quantity: qty,
+              unit_price: price,
+              total: qty * price,
+            });
+
+            if (!item.product_id || bType === 'help') continue;
+            const product = await tx.get('products', Number(item.product_id));
+            if (!product) continue;
+            const current = Number(product.stock) || 0;
+            const nextStock =
+              bType === 'supplier' ? current + qty : Math.max(0, current - qty);
+            await tx.put('products', { ...product, stock: nextStock });
+          }
         });
-      }
-
-      for (const item of body.items) {
-        const qty = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
-        const price = Number(item.unit_price) || 0;
-        const itemId = await allocateUniqueId(db, 'bill_items');
-        try {
-          await db.add('bill_items', {
-            id: itemId,
-            bill_id: bill.id,
-            product_id: item.product_id || null,
-            description: String(item.description).trim(),
-            quantity: qty,
-            unit_price: price,
-            total: qty * price,
-          });
-        } catch {
-          const retryItemId = await allocateUniqueId(db, 'bill_items');
-          await db.add('bill_items', {
-            id: retryItemId,
-            bill_id: bill.id,
-            product_id: item.product_id || null,
-            description: String(item.description).trim(),
-            quantity: qty,
-            unit_price: price,
-            total: qty * price,
-          });
-        }
-
-        if (item.product_id && bType === 'customer') {
-          const product = await db.get('products', Number(item.product_id));
-          if (product) {
-            const nextStock = Math.max(0, (Number(product.stock) || 0) - qty);
-            await db.put('products', { ...product, stock: nextStock });
-          }
-        } else if (item.product_id && bType === 'supplier') {
-          const product = await db.get('products', Number(item.product_id));
-          if (product) {
-            const nextStock = (Number(product.stock) || 0) + qty;
-            await db.put('products', { ...product, stock: nextStock });
-          }
-        }
+      } catch (err) {
+        return jsonErr(err?.message || 'Could not save bill — try again');
       }
 
       return jsonOk(await attachBillRelations(db, bill), 201);
@@ -1099,16 +1138,16 @@ async function handleLocalRequestInner(url, options = {}) {
       ) {
         updated.status = 'paid';
       }
-      await db.put('bills', updated);
-
-      if (Array.isArray(body.items)) {
-        await deleteRowsForBill(db, 'bill_items', id);
+      await withTx(db, ['bills', 'bill_items'], async (tx) => {
+        await tx.put('bills', updated);
+        if (!Array.isArray(body.items)) return;
+        await deleteRowsForBill(tx, 'bill_items', id);
+        let itemId = await nextId(tx, 'bill_items');
         for (const item of body.items) {
           const qty = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
           const price = Number(item.unit_price) || 0;
-          const itemId = await nextId(db, 'bill_items');
-          await db.put('bill_items', {
-            id: itemId,
+          await tx.put('bill_items', {
+            id: itemId++,
             bill_id: id,
             product_id: item.product_id || null,
             description: String(item.description || '').trim(),
@@ -1117,7 +1156,7 @@ async function handleLocalRequestInner(url, options = {}) {
             total: qty * price,
           });
         }
-      }
+      });
       return jsonOk(await attachBillRelations(db, updated));
     }
 
@@ -1125,15 +1164,23 @@ async function handleLocalRequestInner(url, options = {}) {
       const id = Number(parts[2]);
       const bill = await db.get('bills', id);
       if (!bill) return jsonErr('Bill not found', 404);
-      const items = await rowsForBill(db, 'bill_items', id);
-      if (!isCancelled(bill)) {
-        const qtyByItemId = new Map(items.map((it) => [Number(it.id), remainingQty(it)]));
-        await restoreStockForQtys(db, bill, items, qtyByItemId, 'bill delete');
-      }
-      const payRows = await deleteRowsForBill(db, 'bill_payments', id);
+      const payRows = await withTx(
+        db,
+        ['bills', 'bill_items', 'bill_payments', 'products', 'stock_adjustments'],
+        async (tx) => {
+          const items = await rowsForBill(tx, 'bill_items', id);
+          if (!isCancelled(bill)) {
+            const qtyByItemId = new Map(items.map((it) => [Number(it.id), remainingQty(it)]));
+            await restoreStockForQtys(tx, bill, items, qtyByItemId, 'bill delete');
+          }
+          const removed = await deleteRowsForBill(tx, 'bill_payments', id);
+          await deleteRowsForBill(tx, 'bill_items', id);
+          await tx.delete('bills', id);
+          return removed;
+        }
+      );
+      // Proof files live outside IndexedDB, so clean them only once the tx committed.
       for (const p of payRows) await deletePaymentProofFile(p);
-      await deleteRowsForBill(db, 'bill_items', id);
-      await db.delete('bills', id);
       return jsonOk({ success: true, message: 'Bill deleted successfully' });
     }
 
@@ -1151,24 +1198,25 @@ async function handleLocalRequestInner(url, options = {}) {
       if (status === 'paid') {
         const already = Math.max(Number(bill.amount_paid) || 0, paidFromPayments);
         const gap = Math.max(0, Math.round((total - already) * 100) / 100);
-        if (gap > 0) {
-          const payId = await nextId(db, 'bill_payments');
-          await db.put('bill_payments', {
-            id: payId,
-            bill_id: id,
-            amount: gap,
-            method: bill.payment_method || 'Cash',
-            payment_date: pakistanToday(),
-            notes: 'Marked paid (full balance)',
-            screenshot_data: '',
-            created_at: new Date().toISOString(),
+        await withTx(db, ['bills', 'bill_payments'], async (tx) => {
+          if (gap > 0) {
+            await tx.put('bill_payments', {
+              id: await nextId(tx, 'bill_payments'),
+              bill_id: id,
+              amount: gap,
+              method: bill.payment_method || 'Cash',
+              payment_date: pakistanToday(),
+              notes: 'Marked paid (full balance)',
+              screenshot_data: '',
+              created_at: new Date().toISOString(),
+            });
+            paidFromPayments += gap;
+          }
+          await tx.put('bills', {
+            ...bill,
+            status: 'paid',
+            amount_paid: Math.max(total, paidFromPayments),
           });
-          paidFromPayments += gap;
-        }
-        await db.put('bills', {
-          ...bill,
-          status: 'paid',
-          amount_paid: Math.max(total, paidFromPayments),
         });
       } else {
         // Keep money received — never wipe amount_paid just because label changed
@@ -1187,9 +1235,6 @@ async function handleLocalRequestInner(url, options = {}) {
       const bill = await db.get('bills', id);
       if (!bill) return jsonErr('Bill not found', 404);
       if (isCancelled(bill)) return jsonErr('Bill is already cancelled');
-      const items = await rowsForBill(db, 'bill_items', id);
-      const qtyByItemId = new Map(items.map((it) => [Number(it.id), remainingQty(it)]));
-      await restoreStockForQtys(db, bill, items, qtyByItemId, 'bill cancel');
       const reason = String(body.reason || '').trim();
       const noteLine = `Cancelled ${pakistanToday()}${reason ? `: ${reason}` : ''}`;
       const updated = {
@@ -1199,7 +1244,12 @@ async function handleLocalRequestInner(url, options = {}) {
         cancel_reason: reason,
         notes: [bill.notes, noteLine].filter(Boolean).join('\n'),
       };
-      await db.put('bills', updated);
+      await withTx(db, ['bills', 'bill_items', 'products', 'stock_adjustments'], async (tx) => {
+        const items = await rowsForBill(tx, 'bill_items', id);
+        const qtyByItemId = new Map(items.map((it) => [Number(it.id), remainingQty(it)]));
+        await restoreStockForQtys(tx, bill, items, qtyByItemId, 'bill cancel');
+        await tx.put('bills', updated);
+      });
       return jsonOk(await attachBillRelations(db, updated));
     }
 
@@ -1221,16 +1271,6 @@ async function handleLocalRequestInner(url, options = {}) {
         qtyByItemId.set(Number(item.id), qty);
       }
       if (!qtyByItemId.size) return jsonErr('Enter at least one quantity to return');
-      await restoreStockForQtys(db, bill, items, qtyByItemId, 'bill return');
-      for (const it of items) {
-        const extra = qtyByItemId.get(Number(it.id)) || 0;
-        if (!extra) continue;
-        const returned_qty = (Number(it.returned_qty) || 0) + extra;
-        const next = { ...it, returned_qty, total: Math.round((Number(it.quantity) - returned_qty) * (Number(it.unit_price) || 0) * 100) / 100 };
-        await db.put('bill_items', next);
-      }
-      const freshItems = await rowsForBill(db, 'bill_items', id);
-      const totals = recalcBillTotals(bill, freshItems);
       const reason = String(body.reason || '').trim();
       const summary = [...qtyByItemId.entries()]
         .map(([itemId, qty]) => {
@@ -1239,20 +1279,42 @@ async function handleLocalRequestInner(url, options = {}) {
         })
         .join(', ');
       const noteLine = `Return ${pakistanToday()}: ${summary}${reason ? ` (${reason})` : ''}`;
-      let nextBill = {
-        ...bill,
-        ...totals,
-        notes: [bill.notes, noteLine].filter(Boolean).join('\n'),
-      };
-      if (allItemsReturned(freshItems)) {
-        nextBill = {
-          ...nextBill,
-          status: 'cancelled',
-          cancelled_at: new Date().toISOString(),
-          cancel_reason: reason || 'All items returned',
-        };
-      }
-      await db.put('bills', nextBill);
+      const nextBill = await withTx(
+        db,
+        ['bills', 'bill_items', 'products', 'stock_adjustments'],
+        async (tx) => {
+          const returnedItems = items.map((it) => {
+            const extra = qtyByItemId.get(Number(it.id)) || 0;
+            if (!extra) return it;
+            const returned_qty = (Number(it.returned_qty) || 0) + extra;
+            return {
+              ...it,
+              returned_qty,
+              total:
+                Math.round((Number(it.quantity) - returned_qty) * (Number(it.unit_price) || 0) * 100) / 100,
+            };
+          });
+          for (const it of returnedItems) {
+            if (qtyByItemId.get(Number(it.id))) await tx.put('bill_items', it);
+          }
+          await restoreStockForQtys(tx, bill, items, qtyByItemId, 'bill return');
+          let updatedBill = {
+            ...bill,
+            ...recalcBillTotals(bill, returnedItems),
+            notes: [bill.notes, noteLine].filter(Boolean).join('\n'),
+          };
+          if (allItemsReturned(returnedItems)) {
+            updatedBill = {
+              ...updatedBill,
+              status: 'cancelled',
+              cancelled_at: new Date().toISOString(),
+              cancel_reason: reason || 'All items returned',
+            };
+          }
+          await tx.put('bills', updatedBill);
+          return updatedBill;
+        }
+      );
       if (isCancelled(nextBill)) return jsonOk(await attachBillRelations(db, nextBill));
       return jsonOk(await refreshBillPaidStatus(db, id));
     }
@@ -1267,18 +1329,26 @@ async function handleLocalRequestInner(url, options = {}) {
       const due = Math.max(0, Math.round(((Number(bill.total_amount) || 0) - (Number(bill.amount_paid) || 0)) * 100) / 100);
       if (due <= 0) return jsonErr('Bill is fully paid — nothing left to collect');
       if (amount > due + 0.001) return jsonErr(`Amount exceeds balance due (${due})`);
-      const payId = await nextId(db, 'bill_payments');
-      await db.put('bill_payments', {
-        id: payId,
-        bill_id: id,
-        amount,
-        method: body.method || 'Cash',
-        payment_date: body.payment_date || pakistanToday(),
-        notes: body.notes || '',
-        screenshot_data: body.screenshot_data || '',
-        screenshot_path: body.screenshot_path || '',
-        screenshot_thumb: body.screenshot_thumb || '',
-        created_at: new Date().toISOString(),
+      await withTx(db, ['bills', 'bill_payments'], async (tx) => {
+        await tx.put('bill_payments', {
+          id: await nextId(tx, 'bill_payments'),
+          bill_id: id,
+          amount,
+          method: body.method || 'Cash',
+          payment_date: body.payment_date || pakistanToday(),
+          notes: body.notes || '',
+          screenshot_data: body.screenshot_data || '',
+          screenshot_path: body.screenshot_path || '',
+          screenshot_thumb: body.screenshot_thumb || '',
+          created_at: new Date().toISOString(),
+        });
+        const paid = Math.round(((Number(bill.amount_paid) || 0) + amount) * 100) / 100;
+        const total = Number(bill.total_amount) || 0;
+        await tx.put('bills', {
+          ...bill,
+          amount_paid: paid,
+          status: paid >= total && total > 0 ? 'paid' : bill.status,
+        });
       });
       return jsonOk(await refreshBillPaidStatus(db, id), 201);
     }
@@ -1397,21 +1467,24 @@ async function handleLocalRequestInner(url, options = {}) {
       (b) => isDemoBill(b) || demoNames.has(String(b.customer_name || '').trim().toLowerCase())
     );
     const demoBillIds = new Set(demoBills.map((b) => Number(b.id)));
-    const items = await db.getAll('bill_items');
-    const payments = await db.getAll('bill_payments');
-    for (const it of items) {
-      if (demoBillIds.has(Number(it.bill_id))) await db.delete('bill_items', it.id);
-    }
-    for (const p of payments) {
-      if (demoBillIds.has(Number(p.bill_id))) await db.delete('bill_payments', p.id);
-    }
-    for (const b of demoBills) await db.delete('bills', b.id);
-    const rates = await db.getAll('rates');
-    const demoCustIds = new Set(demoCustomers.map((c) => Number(c.id)));
-    for (const r of rates) {
-      if (demoCustIds.has(Number(r.customer_id))) await db.delete('rates', r.id);
-    }
-    for (const c of demoCustomers) await db.delete('customers', c.id);
+    await withTx(
+      db,
+      ['bills', 'bill_items', 'bill_payments', 'customers', 'rates'],
+      async (tx) => {
+        for (const it of await tx.getAll('bill_items')) {
+          if (demoBillIds.has(Number(it.bill_id))) await tx.delete('bill_items', it.id);
+        }
+        for (const p of await tx.getAll('bill_payments')) {
+          if (demoBillIds.has(Number(p.bill_id))) await tx.delete('bill_payments', p.id);
+        }
+        for (const b of demoBills) await tx.delete('bills', b.id);
+        const demoCustIds = new Set(demoCustomers.map((c) => Number(c.id)));
+        for (const r of await tx.getAll('rates')) {
+          if (demoCustIds.has(Number(r.customer_id))) await tx.delete('rates', r.id);
+        }
+        for (const c of demoCustomers) await tx.delete('customers', c.id);
+      }
+    );
     return jsonOk({
       success: true,
       removed_bills: demoBills.length,
@@ -1678,8 +1751,9 @@ async function handleLocalRequestInner(url, options = {}) {
   // BACKUP
   if (parts[1] === 'backup' && method === 'GET') {
     const payload = {
+      schema_version: BACKUP_SCHEMA_VERSION,
       exported_at: new Date().toISOString(),
-      settings: await db.getAll('settings'),
+      settings: settingsWithoutSecrets(await db.getAll('settings')),
       customers: await db.getAll('customers'),
       products: await db.getAll('products'),
       bills: await db.getAll('bills'),
@@ -1690,6 +1764,9 @@ async function handleLocalRequestInner(url, options = {}) {
       stock_adjustments: await db.getAll('stock_adjustments'),
       day_closings: await db.getAll('day_closings'),
       memos: await db.getAll('memos'),
+      partners: await db.getAll('partners'),
+      partner_settlements: await db.getAll('partner_settlements'),
+      partner_transactions: await db.getAll('partner_transactions'),
     };
     return jsonOk(payload);
   }
@@ -1719,6 +1796,13 @@ async function handleLocalRequestInner(url, options = {}) {
       'day_closings',
     ];
     if (Array.isArray(data.memos)) storeNames.push('memos');
+    // Partner stores were absent before schema 2; leave them alone for older backups.
+    const hasPartnerData = Array.isArray(data.partners);
+    if (hasPartnerData) {
+      storeNames.push('partners', 'partner_settlements', 'partner_transactions');
+    }
+
+    const currentSettings = (await db.get('settings', 1)) || DEFAULT_SETTINGS;
 
     try {
       const tx = db.transaction([...storeNames, 'settings'], 'readwrite');
@@ -1726,17 +1810,7 @@ async function handleLocalRequestInner(url, options = {}) {
 
       const putAll = async (store, rows, mapFn) => {
         const os = tx.objectStore(store);
-        let nextId = 1;
-        for (const row of rows || []) {
-          if (!row || typeof row !== 'object') continue;
-          const rec = mapFn ? mapFn(row) : { ...row };
-          if (rec.id == null) {
-            rec.id = nextId++;
-          } else {
-            nextId = Math.max(nextId, (Number(rec.id) || 0) + 1);
-          }
-          await os.put(rec);
-        }
+        for (const rec of withRestoredIds(rows, mapFn)) await os.put(rec);
       };
 
       await putAll('customers', data.customers, (c) => ({
@@ -1752,13 +1826,21 @@ async function handleLocalRequestInner(url, options = {}) {
       await putAll('stock_adjustments', data.stock_adjustments);
       await putAll('day_closings', data.day_closings);
       if (Array.isArray(data.memos)) await putAll('memos', data.memos);
+      if (hasPartnerData) {
+        await putAll('partners', data.partners);
+        await putAll('partner_settlements', data.partner_settlements);
+        await putAll('partner_transactions', data.partner_transactions);
+      }
 
-      if (data.settings?.[0]) {
-        const s = { ...DEFAULT_SETTINGS, ...data.settings[0], id: 1 };
-        const pay = serializePaymentMethods(getPaymentMethods(s), s.payment_instructions);
-        await tx.objectStore('settings').put({ ...s, ...pay, id: 1 });
-      } else if (data.settings && !Array.isArray(data.settings) && data.settings.company_name) {
-        const s = { ...DEFAULT_SETTINGS, ...data.settings, id: 1 };
+      const incomingSettings = Array.isArray(data.settings) ? data.settings[0] : data.settings;
+      if (incomingSettings && (Array.isArray(data.settings) || incomingSettings.company_name)) {
+        // Backups carry no app_pin, so keep the one already on this device.
+        const s = {
+          ...DEFAULT_SETTINGS,
+          ...incomingSettings,
+          app_pin: currentSettings.app_pin || '',
+          id: 1,
+        };
         const pay = serializePaymentMethods(getPaymentMethods(s), s.payment_instructions);
         await tx.objectStore('settings').put({ ...s, ...pay, id: 1 });
       }

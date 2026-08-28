@@ -7,7 +7,7 @@ import TypeSelect from './TypeSelect';
 import EmptyState from './EmptyState';
 import ConfirmDialog from './ConfirmDialog';
 import AppSelect from './AppSelect';
-import { isCancelled } from '../utils/billAdjust';
+import { isCancelled, recalcBillTotals } from '../utils/billAdjust';
 import { pakistanToday, formatCurrency, formatBillDateTime, addDaysToDateString } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
 import { useToast } from '../toast/ToastContext';
@@ -21,6 +21,7 @@ import {
   openSmsReminder,
 } from '../utils/paymentReminder';
 import { paymentSummaryText, billBalance } from '../utils/billPayments';
+import useDialog from '../utils/useDialog';
 import { loadFullBill } from '../utils/loadBill';
 import { INVOICE_TEMPLATES, saveInvoiceTemplate } from '../utils/invoiceTemplates';
 import {
@@ -305,8 +306,8 @@ export default function BillsDatabase({
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [cardMenu, setCardMenu] = useState(null);
-  const editFormRef = useRef(null);
-  const payFormRef = useRef(null);
+  const editFormRef = useDialog(Boolean(editingBill), () => setEditingBill(null));
+  const payFormRef = useDialog(Boolean(payBill), () => setPayBill(null));
 
   useEffect(() => {
     setSettings(settingsProp || {});
@@ -377,25 +378,11 @@ export default function BillsDatabase({
 
   useEffect(() => {
     if (!editingBill && !payBill) return undefined;
-    const close = () => {
-      setEditingBill(null);
-      setPayBill(null);
-    };
-    const onKey = (e) => {
-      if (e.key === 'Escape') close();
-    };
-    window.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
     const frame = requestAnimationFrame(() => {
       if (editFormRef.current) editFormRef.current.scrollTop = 0;
       if (payFormRef.current) payFormRef.current.scrollTop = 0;
     });
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
-    };
+    return () => cancelAnimationFrame(frame);
   }, [editingBill, payBill]);
 
   // Line Item Handlers in Edit Modal
@@ -419,12 +406,14 @@ export default function BillsDatabase({
     e.preventDefault();
     if (!editingBill) return;
 
-    const subtotal = editItems.reduce((sum, item) => sum + (parseFloat(item.quantity || 0) * parseFloat(item.unit_price || 0)), 0);
     const taxRate = parseFloat(editTaxRate) || 0;
     const discountRate = parseFloat(editDiscountRate) || 0;
-    const taxAmount = (subtotal * taxRate) / 100;
-    const discountAmount = (subtotal * discountRate) / 100;
-    const totalAmount = Math.max(0, subtotal + taxAmount - discountAmount);
+    const {
+      subtotal,
+      discount_amount: discountAmount,
+      tax_amount: taxAmount,
+      total_amount: totalAmount,
+    } = recalcBillTotals({ tax_rate: taxRate, discount_rate: discountRate }, editItems);
 
     try {
       const res = await apiFetch(`/api/bills/${editingBill.id}`, {
@@ -673,19 +662,10 @@ export default function BillsDatabase({
       let subtotal = Number(b.subtotal) || 0;
       let total = Number(b.total_amount) || 0;
       if (Array.isArray(b.items) && b.items.length) {
-        const fromItems = b.items.reduce((s, it) => {
-          const qty = Math.max(0, (Number(it.quantity) || 0) - (Number(it.returned_qty) || 0));
-          return s + qty * (Number(it.unit_price) || 0);
-        }, 0);
-        const taxRate = Number(b.tax_rate) || 0;
-        const discountRate = Number(b.discount_rate) || 0;
-        const discount = (fromItems * discountRate) / 100;
-        const after = Math.max(0, fromItems - discount);
-        const tax = (after * taxRate) / 100;
-        const itemsTotal = Math.round((after + tax) * 100) / 100;
-        if (itemsTotal > 0 && (total <= 0 || Math.abs(total - itemsTotal) > 0.02)) {
-          subtotal = Math.round(fromItems * 100) / 100;
-          total = itemsTotal;
+        const recomputed = recalcBillTotals(b, b.items);
+        if (recomputed.total_amount > 0 && (total <= 0 || Math.abs(total - recomputed.total_amount) > 0.02)) {
+          subtotal = recomputed.subtotal;
+          total = recomputed.total_amount;
         }
       }
       const paid = Number(b.amount_paid) || 0;
@@ -1567,6 +1547,7 @@ export default function BillsDatabase({
             role="dialog"
             aria-modal="true"
             aria-labelledby="edit-bill-title"
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
@@ -1726,11 +1707,13 @@ export default function BillsDatabase({
             className="glass-panel pay-modal"
             role="dialog"
             aria-modal="true"
+            aria-labelledby="bills-pay-title"
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
               <div>
-                <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>
+                <h3 id="bills-pay-title" style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>
                   {isHelpBill(payBill) ? 'Record repayment' : 'Record payment'}
                 </h3>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0' }}>

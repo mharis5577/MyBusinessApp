@@ -34,6 +34,7 @@ import { populateMockDatabase } from '../utils/mockDataGenerator';
 import { playSuccessChime, setSoundEnabled } from '../utils/audioEffects';
 import { compressImageToDataUrl } from '../utils/imageCompress';
 import { checkBiometricAvailable } from '../utils/appSecurity';
+import { hashPin, isHashedPin, pinIsSet } from '../utils/appPin';
 import { cancelDueReminders, requestDueReminderPermission, syncDueReminders, sendTestDueNotification } from '../utils/dueReminders';
 import { formatCurrency } from '../utils/pakistan';
 import { apiFetch } from '../api/client';
@@ -86,6 +87,8 @@ export default function SettingsManager({
     low_stock_threshold: 5,
   });
 
+  // Held separately because settings.app_pin holds a hash, never the typed PIN.
+  const [pinDraft, setPinDraft] = useState('');
   const [bioAvailable, setBioAvailable] = useState(false);
   const [savedMsg, setSavedMsg] = useState(false);
   const [resetMsg, setResetMsg] = useState('');
@@ -196,11 +199,19 @@ export default function SettingsManager({
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
+      let appPin = settings.app_pin || '';
+      if (pinDraft.trim()) {
+        appPin = await hashPin(pinDraft);
+      } else if (appPin && !isHashedPin(appPin)) {
+        // Upgrade a plaintext PIN left over from an older install.
+        appPin = await hashPin(appPin);
+      }
       const res = await apiFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...settings,
+          app_pin: appPin,
           payment_methods: settings.payment_methods || [],
           urdu_labels: settings.urdu_labels ? 1 : 0,
           show_developer_credit: settings.show_developer_credit === 0 || settings.show_developer_credit === false ? 0 : 1,
@@ -219,6 +230,7 @@ export default function SettingsManager({
           payment_methods: methods.length ? methods : [emptyPaymentMethod({ label: 'Primary' })],
         }));
         if (onSettingsUpdated) onSettingsUpdated(enriched);
+        setPinDraft('');
         setSavedMsg(true);
         toast.success('Settings saved');
         setTimeout(() => setSavedMsg(false), 3000);
@@ -909,8 +921,31 @@ export default function SettingsManager({
             {openSections.security && (
               <div className="settings-card-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                 <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Staff PIN Lock (leave blank for no lock)</label>
-                  <input className="form-input" type="password" inputMode="numeric" placeholder="e.g. 1234" value={settings.app_pin || ''} onChange={(e) => handleChange('app_pin', e.target.value)} />
+                  <label className="form-label">
+                    Staff PIN Lock {pinIsSet(settings) ? '(leave blank to keep current PIN)' : '(leave blank for no lock)'}
+                  </label>
+                  <input
+                    className="form-input"
+                    type="password"
+                    inputMode="numeric"
+                    placeholder={pinIsSet(settings) ? '••••  PIN is set' : 'e.g. 1234'}
+                    value={pinDraft}
+                    onChange={(e) => setPinDraft(e.target.value)}
+                  />
+                  {pinIsSet(settings) && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ marginTop: '0.5rem' }}
+                      onClick={() => {
+                        setPinDraft('');
+                        handleChange('app_pin', '');
+                        toast.info('PIN lock will be removed when you save.');
+                      }}
+                    >
+                      Remove PIN
+                    </button>
+                  )}
                 </div>
 
                 {/* Fingerprint Toggle */}
@@ -931,7 +966,7 @@ export default function SettingsManager({
                       if (e.target.checked && !bioAvailable) {
                         toast.info('Fingerprint is not available on this device yet. Rebuild the APK after installing the biometric plugin.');
                       }
-                      if (e.target.checked && !(settings.app_pin && String(settings.app_pin).trim())) {
+                      if (e.target.checked && !pinIsSet(settings) && !pinDraft.trim()) {
                         toast.info('Tip: also set a Staff PIN as a backup unlock method.');
                       }
                       handleChange('biometric_lock', e.target.checked ? 1 : 0);

@@ -17,6 +17,8 @@ const db = new sqlite3.Database(dbPath, (err) => {
     console.error('Error opening database:', err.message);
   } else {
     console.log('Connected to SQLite database at:', dbPath);
+    // Off by default in SQLite, which left every ON DELETE CASCADE inert.
+    db.run('PRAGMA foreign_keys = ON');
     initTables();
   }
 });
@@ -379,6 +381,33 @@ export function dbRun(query, params = []) {
       else resolve({ lastID: this.lastID, changes: this.changes });
     });
   });
+}
+
+let txChain = Promise.resolve();
+
+/**
+ * Runs `fn` in one transaction so partial writes roll back.
+ * Calls are queued because sqlite3 shares a single connection and
+ * BEGIN is process-wide, so concurrent transactions would interleave.
+ */
+export function withTransaction(fn) {
+  const run = txChain.then(async () => {
+    await dbRun('BEGIN IMMEDIATE');
+    try {
+      const result = await fn();
+      await dbRun('COMMIT');
+      return result;
+    } catch (err) {
+      try {
+        await dbRun('ROLLBACK');
+      } catch {
+        /* nothing to roll back */
+      }
+      throw err;
+    }
+  });
+  txChain = run.catch(() => {});
+  return run;
 }
 
 export default db;

@@ -11,6 +11,7 @@ import {
   prefsForTarget,
   resolveBillExportOptions,
 } from '../utils/billSendPrefs';
+import useDialog from '../utils/useDialog';
 
 /**
  * Desktop + mobile send sheet: target layout, format, size, quality.
@@ -30,17 +31,13 @@ export default function SendBillSheet({
   onTargetPreview,
 }) {
   const [prefs, setPrefs] = useState(() => loadBillSendPrefs());
+  const dialogRef = useDialog(open, onClose, { closeOnEscape: !busy });
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open) return;
     const loaded = loadBillSendPrefs();
     const activeTarget = preferredTarget || loaded.target || 'desktop';
     setPrefs({ ...loaded, target: activeTarget });
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prev;
-    };
   }, [open, preferredTarget]);
 
   if (!open || typeof document === 'undefined') return null;
@@ -63,11 +60,13 @@ export default function SendBillSheet({
   return createPortal(
     <div className="more-menu-overlay send-bill-overlay" onClick={() => !working && onClose?.()} role="presentation">
       <div
+        ref={dialogRef}
         className="more-menu-sheet glass-panel send-bill-sheet"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="send-bill-title"
+        tabIndex={-1}
       >
         <div className="send-bill-grab" aria-hidden />
         <div className="send-bill-head">
